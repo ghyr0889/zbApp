@@ -1,11 +1,11 @@
 ﻿from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
 from typing import Optional
 from database import get_db
 import models
 import traceback
 import uuid
+from schemas import UserCreate, ProjectCreate, WorkPackageCreate
 
 router = APIRouter(prefix="/api/v1/admin", tags=["Admin Management"])
 
@@ -38,13 +38,6 @@ def ensure_fixed_work_categories(db: Session):
     db.commit()
 
 
-class UserCreate(BaseModel):
-    id: str
-    username: str
-    password: str
-    role: str
-
-
 @router.get("/users")
 def get_all_users(db: Session = Depends(get_db)):
     users = db.query(models.User).all()
@@ -75,11 +68,18 @@ def create_user(user_in: UserCreate, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=500, detail=f"数据库写入异常:{str(e)}")
 
+@router.delete("/users/{user_id}")
+def delete_user(user_id:str, db:Session = Depends(get_db)):
+    user_to_delete = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user_to_delete:
+        raise HTTPException(status_code=400,detail="数据库中没有这个人")
 
-class ProjectCreate(BaseModel):
-    name: str
-    owner_id: Optional[str] = None
+    db.delete(user_to_delete)
+    db.commit(user_to_delete)
 
+    return {
+        "code": 200, "message": "删除用户成功"
+    }
 
 @router.post("/projects")
 def create_or_update_project(project_in: ProjectCreate, db: Session = Depends(get_db)):
@@ -117,19 +117,6 @@ def get_all_projects(db: Session = Depends(get_db)):
             "owner_name": owner_name
         })
     return {"code": 200, "data": res}
-
-
-class WorkPackageCreate(BaseModel):
-    original_name: Optional[str] = None
-    name: str
-    score: float
-    deadline: str = ""
-    node_requirement: Optional[str] = None
-    project_name: str
-    category_name: str
-    assignee_id: Optional[str] = None
-    owner_id: Optional[str] = None
-    assigner_id: Optional[str] = None
 
 
 def sync_work_package_assignment(db: Session, work_package_name: str, assignee_id: str, assigner_id: Optional[str]):
@@ -225,11 +212,6 @@ def create_or_update_work_package(pkg_in: WorkPackageCreate, db: Session = Depen
     db.commit()
     return {"code": 200, "message": message}
 
-
-# class TaskAssignCreate(BaseModel):
-#     assigner_id: str
-#     assignee_id: str
-#     work_package_name: str
 
 @router.get("/work-packages-overview")
 def get_work_packages_overview(db: Session = Depends(get_db)):

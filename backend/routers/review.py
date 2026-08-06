@@ -1,20 +1,13 @@
-from typing import Optional
-
+#负责人审核
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from database import get_db
 import models
+from database import get_db
+from schemas import ReviewDecision
 
 
 router = APIRouter(prefix="/api/v1/review", tags=["Owner Review"])
-
-
-class ReviewDecision(BaseModel):
-    reviewer_id: str
-    approved: bool
-    remark: Optional[str] = ""
 
 
 def ensure_project_owner(db: Session, reviewer_id: str, work_log: models.WorkLog):
@@ -27,7 +20,7 @@ def ensure_project_owner(db: Session, reviewer_id: str, work_log: models.WorkLog
     if not project or project.owner_id != str(reviewer_id):
         raise HTTPException(status_code=403, detail="只能审核自己负责项目下的工作包申请")
 
-
+#项目负责人能审核的待审日志
 @router.get("/reviews/pending")
 def get_pending_reviews(user_id: str = Query(...), db: Session = Depends(get_db)):
     reviewer = db.query(models.User).filter(models.User.id == str(user_id)).first()
@@ -60,7 +53,6 @@ def get_pending_reviews(user_id: str = Query(...), db: Session = Depends(get_db)
             "work_package_name": log.work_package_name,
             "deadline": work_package.deadline if work_package else "-",
             "node_requirement": work_package.deadline if work_package else "-",
-            "content": log.content,
             "score_earned": log.score_earned,
             "created_at": log.created_at.strftime("%Y-%m-%d %H:%M") if log.created_at else "-",
             "status": log.status
@@ -68,7 +60,7 @@ def get_pending_reviews(user_id: str = Query(...), db: Session = Depends(get_db)
 
     return {"code": 200, "data": data}
 
-
+#对某条日志做审核
 @router.post("/{log_id}")
 def review_log(log_id: str, decision: ReviewDecision, db: Session = Depends(get_db)):
     work_log = db.query(models.WorkLog).filter(models.WorkLog.id == str(log_id)).first()
@@ -82,6 +74,11 @@ def review_log(log_id: str, decision: ReviewDecision, db: Session = Depends(get_
     work_log.reviewer_id = str(decision.reviewer_id)
     work_log.review_comment = decision.remark or ("审核通过" if decision.approved else "")
     if decision.approved:
+        package = db.query(models.WorkPackage).filter(
+            models.WorkPackage.name == work_log.work_package_name
+        ).first()
+        base_score = package.score if package else work_log.score_earned
+        work_log.score_earned = base_score * decision.weight
         work_log.status = "APPROVED"
     else:
         work_log.status = "REJECTED"

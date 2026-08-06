@@ -59,7 +59,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getPendingLogsApi, reviewLogApi } from '../api'
+import { getPendingLogsApi, reviewLogApi, approveReviewApi } from '../api'
 
 const currentOwner = ref(null)
 const pendingList = ref([])
@@ -98,18 +98,28 @@ const fetchPendingLogs = async () => {
 
 // 审核通过
 const handlePass = (row) => {
-  ElMessageBox.confirm(`确认审核通过员工 [${row.applicant_name}] 提交的 [${row.work_package_name}] 吗？`, '通过确认', {
-    type: 'success'
-  }).then(async () => {
+  ElMessageBox.prompt(
+    '请输入本次审核的权重系数（例如：1.0 表示不加权，1.2 表示增加 20% 积分，0.8 表示扣减 20% 积分）：', '确认通过审核',
+    {
+      confirmButtonText: '确定通过',
+      cancelButtonText: '取消',
+      inputValue: '1.0', // 默认文本框里填好 1.0
+      inputPattern: /^\d+(\.\d+)?$/, // 正则校验：只能输入数字或小数
+      inputErrorMessage: '权重必须是有效的数字（如 1.0, 1.5, 0.8）'
+    }).then(async ({value}) => {
     try {
+      const weight = parseFloat(value)
       const ownerId = currentOwner.value?.id
       await reviewLogApi(row.id, {
+        decision: "pass", // 注意：如果后端这里需要布尔值，请改成 true 
         reviewer_id: String(ownerId),
-        approved: true,
-        remark: '审核通过'
-      })
-      ElMessage.success('审核通过！')
-      fetchPendingLogs()
+        approved: true, // 如果后端不再需要 approved，可以删除这行
+        remark: '审核通过',
+        weight: weight
+    })
+
+    ElMessage.success('审核通过！')
+    fetchPendingLogs()
     } catch (err) {
       ElMessage.error(err.response?.data?.detail || '操作失败')
     }

@@ -77,7 +77,6 @@ class WorkLog(Base):
     id = Column(String(50), primary_key=True, index=True)
     user_id = Column(String(50), ForeignKey("users.id"), nullable=False)
     work_package_name = Column(String(100), ForeignKey("work_packages.name"), nullable=False)
-    content = Column(Text, nullable=False) # 工作完成情况
     score_earned = Column(Float, default=0.0) # 通过后获得分值
     status = Column(String(20), default="PENDING")  # PENDING / APPROVED / REJECTED
     reviewer_id = Column(String(50), ForeignKey("users.id"), nullable=True)

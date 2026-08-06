@@ -10,7 +10,7 @@ export const loginApi = (data) => api.post('/auth/login', data)
 export const getMyAssignedWorkPackagesApi = (userId) => api.get(`/work-logs/my-assigned-work-packages/${userId}`)
 export const createLogApi = (data) => api.post('/work-logs', data)
 export const getMyLogsApi = (userId) => api.get(`/work-logs/my/${userId}`)
-export const getPendingLogsApi = (ownerId) => api.get(`/review/reviews/pending/${ownerId}`)
+export const getPendingLogsApi = (ownerId) => api.get(`/review/reviews/pending?user_id=${ownerId}`)
 
 export const getScoreBoardApi = (userId, period) => api.get(`/work-logs/score-board/${userId}?period=${period}`)
 export const getPublicScoreBoardApi = (period) => api.get(`/work-logs/public-score-board?period=${period}`)
@@ -29,4 +29,11 @@ export const initiateTransferApi = (data) => api.post('/transfers/initiate', dat
 export const getIncomingTransfersApi = (userId) => api.get(`/transfers/my-incoming?user_id=${userId}`)
 export const processTransferApi = (transferId, action) => api.post(`/transfers/process?transfer_id=${transferId}&action=${action}`)
 export const reviewLogApi = (logId,data) => api.post(`/review/${logId}`, data)
+
+// 审核通过接口 (带上 weight 参数)
+export const approveReviewApi = (logId, weight) => {
+  return api.post(`/reviews/${logId}/approve`, { weight: weight })
+}
+
+export const deleteUserApi = (userId) => api.delete(`/users/${userId}`)
 export default api

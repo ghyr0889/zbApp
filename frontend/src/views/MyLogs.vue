@@ -1,60 +1,57 @@
 ﻿<!-- xiangmu/frontend/src/views/MyLogs.vue -->
+<!-- src/views/MyLogs.vue -->
 <template>
   <div class="my-logs-container">
     <!-- 顶部页面切换标签 -->
     <el-tabs v-model="activeTab" type="border-card" class="custom-tabs">
       <!-- ================= 页面一：工作填报区 ================= -->
-      <el-tab-pane label="📝 任务处理与日志填报" name="filling">
-        <el-row :gutter="20">
+      <el-tab-pane label="📝 任务处理" name="filling">
           
-          <!-- 左侧：我的工作包 -->
-          <el-col :span="14">
-            <el-card shadow="hover" class="assigned-card">
-              <template #header>
-                <div class="card-header">
-                  <span>📌 我的工作包（按节点排序）</span>
-                  <el-button type="text" @click="fetchMyAssignedTasks">🔄 刷新任务</el-button>
-                </div>
-              </template>
+          <!-- 左侧：我的工作 -->
+          <el-card shadow="hover" class="assigned-card">
+            <template #header>
+              <div class="card-header">
+                <span>📌 我的工作（按节点排序）</span>
+                <el-button type="text" @click="fetchMyAssignedTasks">🔄 刷新任务</el-button>
+              </div>
+            </template>
 
-              <el-table 
-                v-if="assignedTasks.length > 0"
-                :data="sortedMyAssignments" 
-                border 
-                stripe 
-                style="width: 100%"
-                height="500"
-              >
-                <el-table-column prop="project_name" label="项目" width="100" />
-                <el-table-column prop="work_package_name" label="工作包" />
-                <el-table-column prop="score" label="分值" width="80" align="center">
-                  <template #default="{ row }">
-                    <span class="score-text">🏆 {{ row.score }}</span>
-                  </template>
-                </el-table-column>
-                <el-table-column label="节点要求" width="160">
-                  <template #default="{ row }">
-                    <el-tag type="danger" effect="plain" v-if="row.deadline">
-                      ⏰ {{ row.deadline }}
-                    </el-tag>
-                    <span v-else class="tip-text">无</span>
-                  </template>
-                </el-table-column>
-                <el-table-column label="操作" width="160" align="center" fixed="right">
-                  <template #default="{ row }">
-                    <el-button type="success" size="small" @click="selectAssignedTask(row)">
-                      📝 填报此项
-                    </el-button>
-                    <el-button type="warning" size="small" plain @click="openTransferDialog(row)">📤 转办</el-button>
-                  </template>
-                </el-table-column>
-              </el-table>
-              
-              <el-empty v-else description="暂无分配的任务，您可以在右侧手动选择" :image-size="70" />
-            </el-card>
-          </el-col>
+            <el-table 
+              v-if="assignedTasks.length > 0"
+              :data="sortedMyAssignments" 
+              border  
+              style="width: 100%"
+              height="600"
+            >
+              <el-table-column prop="project_name" label="项目" width="100" />
+              <el-table-column prop="work_package_name" label="工作包" />
+              <el-table-column prop="score" label="基础分值" width="80" align="center">
+                <template #default="{ row }">
+                  <span class="score-text">🏆 {{ row.score }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="节点要求" width="160">
+                <template #default="{ row }">
+                  <el-tag type="danger" effect="plain" v-if="row.deadline">
+                    ⏰ {{ row.deadline }}
+                  </el-tag>
+                  <span v-else class="tip-text">无</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="160" align="center" fixed="right">
+                <template #default="{ row }">
+                  <el-button type="success" size="small" @click="selectAssignedTask(row)">
+                    📝 提交审核
+                  </el-button>
+                  <el-button type="warning" size="small" plain @click="openTransferDialog(row)">📤 转办</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            
+            <el-empty v-else description="暂无任务" :image-size="70" />
+          </el-card>
 
-          <!-- 右侧：填报工作日志申请 -->
+          <!-- 右侧：填报工作日志申请
           <el-col :span="10">
             <el-card shadow="hover">
               <template #header>
@@ -114,8 +111,7 @@
                 </el-button>
               </el-form>
             </el-card>
-          </el-col>
-        </el-row>
+          </el-col> -->
       </el-tab-pane>
 
       <!-- ================= 页面二：审核记录区 ================= -->
@@ -172,45 +168,6 @@
         </el-card>
       </el-tab-pane>
 
-      <!-- ================= 页面三：所有工作包大厅 ================= -->
-      <el-tab-pane label="📚 所有工作包大厅" name="all_work_packages">
-        <el-card shadow="hover">
-          <template #header>
-            <div class="card-header">
-              <span>📚 全局工作包总览 (可查阅所有项目和任务配置)</span>
-              <el-button type="primary" plain @click="fetchAllWorkPackages">🔄 刷新库</el-button>
-            </div>
-          </template>
-
-          <el-table :data="allWorkPackages" stripe border style="width: 100%" v-loading="loadingAllWorkPackages" height="600">
-            <el-table-column prop="project_name" label="所属项目" width="120" />
-            <el-table-column prop="category_name" label="工作类型" width="150" />
-            <el-table-column prop="name" label="工作包名称" min-width="180" show-overflow-tooltip />
-            <el-table-column prop="assignee_name" label="负责员工" width="150" align="center">
-              <template #default="{ row }">
-                <span v-if="row.assignee_id" style="color: #67c23a; font-weight: bold;">
-                  {{ row.assignee_name || row.assignee_id }}（{{ row.assignee_id }}）
-                </span>
-                <span v-else class="tip-text">未指定</span>
-              </template>
-            </el-table-column>
-            <el-table-column prop="score" label="预设分值" width="100" align="center">
-              <template #default="{ row }">
-                <span style="color: #67c23a; font-weight: bold;">🏆 {{ row.score }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="节点要求" width="200">
-              <template #default="{ row }">
-                <el-tag type="info" effect="plain" v-if="row.deadline">
-                  ⏰ {{ row.deadline }}
-                </el-tag>
-                <span v-else class="tip-text">无节点要求</span>
-              </template>
-            </el-table-column>
-          </el-table>
-        </el-card>
-      </el-tab-pane>
-
           <!-- 转办选择接收人弹窗 -->
       <el-dialog v-model="transferDialogVisible" title="任务移交申请" width="400px">
         <el-form label-position="top">
@@ -235,7 +192,7 @@
 
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { 
   getCascadeOptionsApi, 
   createLogApi, 
@@ -263,28 +220,27 @@ const scoreBoardData = reactive({
   details: []
 })
 
-const selectedWorkPackageInfo = reactive({
-  score: null,
-  deadline: ''
-})
+// const selectedWorkPackageInfo = reactive({
+//   score: null,
+//   deadline: ''
+// })
 
-const form = reactive({
-  work_package_name: '',
-  content: ''
-})
+// const form = reactive({
+//   work_package_name: '',
+//   content: ''
+// })
 
 onMounted(() => {
   const userInfoStr = localStorage.getItem('user_info')
   if (userInfoStr) {
     currentUser.value = JSON.parse(userInfoStr)
   }
-  fetchCascadeOptions()
+  //fetchCascadeOptions()
   if (currentUser.value && currentUser.value.id) {
     fetchMyAssignedTasks()
     fetchMyLogs()
     fetchScoreBoard()
     fetchIncomingTransfers()
-    fetchAllWorkPackages()
   }
 })
 
@@ -297,30 +253,62 @@ const fetchMyAssignedTasks = async () => {
   }
 }
 
+// 一键提交核心逻辑
 const selectAssignedTask = (task) => {
-  selectedPath.value = [task.project_name, task.category_name, task.work_package_name]
-  form.work_package_name = task.work_package_name
-  selectedWorkPackageInfo.score = task.score
-  selectedWorkPackageInfo.deadline = task.deadline
-  ElMessage.success(`已切换至：${task.work_package_name}`)
-}
-
-const fetchCascadeOptions = async () => {
-  const userInfoStr = localStorage.getItem('user_info')
-  const userInfo = userInfoStr ? JSON.parse(userInfoStr) : null
-  
-  if (!userInfo || !userInfo.id) return
-
-  try {
-    // 带上当前登录员工的 ID 请求可填报选项
-    const res = await getCascadeOptionsApi(userInfo.id)
-    if (res && res.data && res.data.code === 200) {
-      cascadeOptions.value = res.data.data || []
+  // 1. 弹出防误触确认框
+  ElMessageBox.confirm(
+    `确定要将工作包【${task.work_package_name}】提交审核吗？`,
+    '一键提交确认',
+    {
+      confirmButtonText: '确认',
+      cancelButtonText: '取消',
+      type: 'success',
     }
-  } catch (err) {
-    console.error('获取工作包级联选项失败:', err)
-  }
+  ).then(async () => {
+    // 2. 用户点击确认后，直接调用接口提
+    submitting.value = true
+    try {
+      const res = await createLogApi({
+        user_id: String(currentUser.value.id),
+        work_package_name: String(task.work_package_name),
+        score_earned: task.score || 0
+      })
+
+      if (res && res.data && res.data.code === 200) {
+        ElMessage.success('工作已成功提交审核！')
+        // 3. 提交成功后，刷新表格数据
+        fetchMyLogs()
+        fetchMyAssignedTasks()
+      } else {
+        ElMessage.error(res?.data?.message || '提交失败')
+      }
+    } catch (err) {
+      console.error('一键提交失败:', err)
+      ElMessage.error('提交失败，请检查网络！')
+    } finally {
+      submitting.value = false
+    }
+  }).catch(() => {
+    // 用户点击取消，不做任何操作
+  })
 }
+
+// const fetchCascadeOptions = async () => {
+//   const userInfoStr = localStorage.getItem('user_info')
+//   const userInfo = userInfoStr ? JSON.parse(userInfoStr) : null
+  
+//   if (!userInfo || !userInfo.id) return
+
+//   try {
+//     // 带上当前登录员工的 ID 请求可填报选项
+//     const res = await getCascadeOptionsApi(userInfo.id)
+//     if (res && res.data && res.data.code === 200) {
+//       cascadeOptions.value = res.data.data || []
+//     }
+//   } catch (err) {
+//     console.error('获取工作包级联选项失败:', err)
+//   }
+// }
 
 const handleCascadeChange = (val) => {
   if (!val || val.length < 3) {
@@ -365,45 +353,45 @@ const fetchMyLogs = async () => {
   }
 }
 
-const handleSubmit = async () => {
-  if (!form.work_package_name) return ElMessage.warning('请选择关联的工作包！')
-  if (!form.content.trim()) return ElMessage.warning('请填写具体工作内容！')
+// const handleSubmit = async () => {
+//   if (!form.work_package_name) return ElMessage.warning('请选择关联的工作包！')
+//   if (!form.content.trim()) return ElMessage.warning('请填写具体工作内容！')
 
-  submitting.value = true
-  try {
-    // 🔑 修正 1：必须用 const res 接收接口返回值！
-    const res = await createLogApi({
-      user_id: String(currentUser.value.id),
-      work_package_name: String(form.work_package_name),
-      content: form.content.trim(),
-      score_earned: form.score_earned || 0  // 🔑 修正 2：把选中的积分分值传给后端
-    })
+//   submitting.value = true
+//   try {
+//     // 🔑 修正 1：必须用 const res 接收接口返回值！
+//     const res = await createLogApi({
+//       user_id: String(currentUser.value.id),
+//       work_package_name: String(form.work_package_name),
+//       content: form.content.trim(),
+//       score_earned: form.score_earned || 0  // 🔑 修正 2：把选中的积分分值传给后端
+//     })
 
-    // 现在 res 变量存在了，判断逻辑可以正常运行
-    if (res && res.data && res.data.code === 200) {
-      ElMessage.success('工作日志已成功提交！')
+//     // 现在 res 变量存在了，判断逻辑可以正常运行
+//     if (res && res.data && res.data.code === 200) {
+//       ElMessage.success('工作日志已成功提交！')
       
-      // 清空表单
-      form.content = ''
-      form.work_package_name = ''
-      selectedPath.value = []
-      selectedWorkPackageInfo.score = null
-      selectedWorkPackageInfo.deadline = ''
+//       // 清空表单
+//       form.content = ''
+//       form.work_package_name = ''
+//       selectedPath.value = []
+//       selectedWorkPackageInfo.score = null
+//       selectedWorkPackageInfo.deadline = ''
 
-      // 重新拉取日志列表 & 指派列表 & 级联选择器（已填报的任务会自动消失）
-      if (typeof fetchMyLogs === 'function') fetchMyLogs()
-      if (typeof fetchMyAssignedTasks === 'function') fetchMyAssignedTasks()
-      if (typeof fetchCascadeOptions === 'function') fetchCascadeOptions()
-    } else {
-      ElMessage.error(res?.data?.message || '提交失败')
-    }
-  } catch (err) {
-    console.error('提交日志失败:', err)
-    ElMessage.error('提交失败，请检查网络或后端服务！')
-  } finally {
-    submitting.value = false
-  }
-}
+//       // 重新拉取日志列表 & 指派列表 & 级联选择器（已填报的任务会自动消失）
+//       if (typeof fetchMyLogs === 'function') fetchMyLogs()
+//       if (typeof fetchMyAssignedTasks === 'function') fetchMyAssignedTasks()
+//       if (typeof fetchCascadeOptions === 'function') fetchCascadeOptions()
+//     } else {
+//       ElMessage.error(res?.data?.message || '提交失败')
+//     }
+//   } catch (err) {
+//     console.error('提交日志失败:', err)
+//     ElMessage.error('提交失败，请检查网络或后端服务！')
+//   } finally {
+//     submitting.value = false
+//   }
+// }
 
 /// 1. 更强大的日期提取工具（兼容 2026-08-05, 2026-8-5, 2026/08/15, 2026年8月15日 等各种格式）
 const parseDateForSort = (dateStr) => {

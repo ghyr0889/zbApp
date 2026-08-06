@@ -14,14 +14,14 @@ if os.path.exists("work_stat.db"):
 Base.metadata.create_all(bind=engine)
 db = SessionLocal()
 
-# 1. 把所有存为 LEADER 或 leader 的旧角色，全部更正为 OWNER
-updated_count = db.query(models.User).filter(
-    models.User.role.in_(["LEADER", "leader", "owner"])
-).update({models.User.role: "OWNER"}, synchronize_session=False)
+# # 1. 把所有存为 LEADER 或 leader 的旧角色，全部更正为 OWNER
+# updated_count = db.query(models.User).filter(
+#     models.User.role.in_(["LEADER", "leader", "owner"])
+# ).update({models.User.role: "OWNER"}, synchronize_session=False)
 
-db.commit()
-print(f"✅ 成功修复 {updated_count} 条项目负责人角色数据！")
-db.close()
+# db.commit()
+# print(f"✅ 成功修复 {updated_count} 条项目负责人角色数据！")
+# db.close()
 
 try:
     # 1. 创建账号 (0123:项目负责人, 1234:员工)

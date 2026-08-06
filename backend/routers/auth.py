@@ -1,15 +1,11 @@
 # xiangmu/backend/routers/auth.py
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
 from database import get_db
 import models
+from schemas import LoginRequest
 
 router = APIRouter(prefix="/api/v1/auth", tags=["认证"])
-
-class LoginRequest(BaseModel):
-    user_id: str
-    password: str
 
 @router.post("/login")
 def login(data: LoginRequest, db: Session = Depends(get_db)):

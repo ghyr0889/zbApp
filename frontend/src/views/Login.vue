@@ -50,6 +50,7 @@ import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { loginApi } from '../api'
+import axios from 'axios'
 
 const router = useRouter()
 const loading = ref(false)
@@ -76,18 +77,21 @@ const handleLogin = async () => {
     if (res.data.code === 200) {
       ElMessage.success('登录成功')
       // 将登录成功的用户凭证保存到本地
-      localStorage.setItem('user_info', JSON.stringify(res.data.data))
-
+      const token = res.data.data
+      localStorage.setItem('user_info', JSON.stringify(token))
+      localStorage.setItem('token',token)
+      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
+      router.push('/my-logs')
       // 根据角色进行路径路由跳转
-      if (res.data.data.role === 'OWNER') {
-        router.push('/review')
-      } 
-      else if (res.data.data.role === 'ADMIN'){
-        router.push('/admin')
-      }
-      else if (res.data.data.role === 'EMPLOYEE'){
-        router.push('/my-logs')
-      }
+      // if (res.data.data.role === 'OWNER') {
+      //   router.push('/review')
+      // } 
+      // else if (res.data.data.role === 'ADMIN'){
+      //   router.push('/admin')
+      // }
+      // else if (res.data.data.role === 'EMPLOYEE'){
+      //   router.push('/my-logs')
+      // }
     }
   } catch (error) {
     console.error('登录异常:', error)

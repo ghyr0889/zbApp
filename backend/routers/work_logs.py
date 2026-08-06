@@ -1,35 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
 from datetime import datetime
 from database import get_db
 import models
 import traceback
 import uuid
-from typing import Optional
 import re
+from schemas import LogCreate
 
 router = APIRouter(prefix="/api/v1/work-logs", tags=["工作日志与积分"])
-
-class WorkLogCreate(BaseModel):
-    user_id: str
-    work_package_name: str
-    content: str
-    score_earned: float = 0.0
-
-
-class TaskAssignCreate(BaseModel):
-    assigner_id: str
-    assignee_id: str
-    work_package_name: str
-
-
-class ReviewAction(BaseModel):
-    log_id: str
-    reviewer_id: str
-    status: str
-    review_comment: str = ""
-
 
 def parse_node_date(node_str):
     if not node_str:
@@ -70,69 +49,94 @@ def work_package_detail(item):
         "approved_at": item.created_at.strftime("%Y-%m-%d %H:%M") if item.created_at else "-"
     }
 
+#工作包完成状态判断函数
+def Judge_workpackage_Status(work_package_name: str, db: Session) -> bool:
+    approved_log = db.query(models.WorkLog).filter(
+        models.WorkLog.work_package_name == work_package_name,
+        models.WorkLog.status == "APPROVED"
+    ).first()
 
-@router.get("/cascade-options")
-def get_cascade_options(user_id: str = Query(...), db: Session = Depends(get_db)):
-    try:
-        user = db.query(models.User).filter(models.User.id == str(user_id)).first()
+    if approved_log:
+        return True
+    return False
 
-        assigned_work_package_names = set()
-        if not user or user.role in ["ADMIN", "OWNER", "LEADER"]:
-            all_pkgs = db.query(models.WorkPackage).all()
-            assigned_work_package_names = {p.name for p in all_pkgs}
-        else:
-            assignments = db.query(models.TaskAssignment).filter(
-                models.TaskAssignment.assignee_id == str(user_id)
-            ).all()
-            assigned_work_package_names = {a.work_package_name for a in assignments if a.work_package_name}
+#项目完成状态判断函数
+def Judge_project_Status(project_name: str, db: Session) -> bool:
+    work_packages = db.query(models.WorkPackage).filter(
+        models.WorkPackage.project_name == project_name
+    ).all()
+    if not work_packages:
+        return False
 
-        submitted_logs = db.query(models.WorkLog).filter(
-            models.WorkLog.user_id == str(user_id)
-        ).all()
-        submitted_names = {log.work_package_name for log in submitted_logs}
+    for pkg in work_packages:
+        is_pkg_completed = Judge_workpackage_Status(pkg.name, db)
+        if not is_pkg_completed:
+            return False
+    return True
 
-        projects = db.query(models.Project).all()
-        categories = db.query(models.WorkCategory).all()
+#可填报工作包
+# @router.get("/cascade-options")
+# def get_cascade_options(user_id: str = Query(...), db: Session = Depends(get_db)):
+#     try:
+#         user = db.query(models.User).filter(models.User.id == str(user_id)).first()
 
-        tree = []
-        for project in projects:
-            project_node = {"value": project.name, "label": project.name, "children": []}
+#         assigned_work_package_names = set()
+#         if not user or user.role in ["ADMIN", "OWNER", "LEADER"]:
+#             all_pkgs = db.query(models.WorkPackage).all()
+#             assigned_work_package_names = {p.name for p in all_pkgs}
+#         else:
+#             assignments = db.query(models.TaskAssignment).filter(
+#                 models.TaskAssignment.assignee_id == str(user_id)
+#             ).all()
+#             assigned_work_package_names = {a.work_package_name for a in assignments if a.work_package_name}
 
-            for cat in categories:
-                cat_node = {"value": cat.name, "label": cat.name, "children": []}
+#         submitted_logs = db.query(models.WorkLog).filter(
+#             models.WorkLog.user_id == str(user_id)
+#         ).all()
+#         submitted_names = {log.work_package_name for log in submitted_logs}
 
-                pkgs = db.query(models.WorkPackage).filter(
-                    models.WorkPackage.project_name == project.name,
-                    models.WorkPackage.category_name == cat.name
-                ).all()
+#         projects = db.query(models.Project).all()
+#         categories = db.query(models.WorkCategory).all()
 
-                pkgs_sorted = sorted(pkgs, key=lambda p: parse_node_date(p.deadline))
+#         tree = []
+#         for project in projects:
+#             project_node = {"value": project.name, "label": project.name, "children": []}
 
-                for pkg in pkgs_sorted:
-                    if pkg.name not in assigned_work_package_names or pkg.name in submitted_names:
-                        continue
+#             for cat in categories:
+#                 cat_node = {"value": cat.name, "label": cat.name, "children": []}
 
-                    req_text = pkg.deadline or "无节点要求"
-                    cat_node["children"].append({
-                        "value": pkg.name,
-                        "label": f"⏰ [{req_text}] {pkg.name} (+{pkg.score}分)",
-                        "score": pkg.score,
-                        "deadline": req_text
-                    })
+#                 pkgs = db.query(models.WorkPackage).filter(
+#                     models.WorkPackage.project_name == project.name,
+#                     models.WorkPackage.category_name == cat.name
+#                 ).all()
 
-                if cat_node["children"]:
-                    project_node["children"].append(cat_node)
+#                 pkgs_sorted = sorted(pkgs, key=lambda p: parse_node_date(p.deadline))
 
-            if project_node["children"]:
-                tree.append(project_node)
+#                 for pkg in pkgs_sorted:
+#                     if pkg.name not in assigned_work_package_names or pkg.name in submitted_names:
+#                         continue
 
-        return {"code": 200, "data": tree}
+#                     req_text = pkg.deadline or "无节点要求"
+#                     cat_node["children"].append({
+#                         "value": pkg.name,
+#                         "label": f"⏰ [{req_text}] {pkg.name} (+{pkg.score}分)",
+#                         "score": pkg.score,
+#                         "deadline": req_text
+#                     })
 
-    except Exception as e:
-        print("❌ cascade-options 排序与解析报错:", e)
-        return {"code": 200, "data": []}
+#                 if cat_node["children"]:
+#                     project_node["children"].append(cat_node)
 
+#             if project_node["children"]:
+#                 tree.append(project_node)
 
+#         return {"code": 200, "data": tree}
+
+#     except Exception as e:
+#         print("❌ cascade-options 排序与解析报错:", e)
+#         return {"code": 200, "data": []}
+
+#我的工作包
 @router.get("/my-assigned-work-packages/{user_id}")
 def get_my_assigned_work_packages(user_id: str, db: Session = Depends(get_db)):
     submitted_packages = db.query(models.WorkLog.work_package_name).filter(
@@ -166,14 +170,7 @@ def get_my_assigned_work_packages(user_id: str, db: Session = Depends(get_db)):
 
     return {"code": 200, "data": res}
 
-
-class LogCreate(BaseModel):
-    user_id: str
-    work_package_name: str
-    content: str
-    score_earned: Optional[float] = 0.0
-
-
+#提交审核
 @router.post("")
 def create_log(log_in: LogCreate, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.id == log_in.user_id).first()
@@ -190,11 +187,6 @@ def create_log(log_in: LogCreate, db: Session = Depends(get_db)):
                 detail=f"权限不足，工作包[{log_in.work_package_name}]未分配给你，无法提交日志"
             )
 
-    if not user:
-        user = models.User(id=log_in.user_id, username="测试员工", password="123", role="EMPLOYEE")
-        db.add(user)
-        db.commit()
-
     pkg = db.query(models.WorkPackage).filter(
         models.WorkPackage.name == log_in.work_package_name
     ).first()
@@ -209,7 +201,6 @@ def create_log(log_in: LogCreate, db: Session = Depends(get_db)):
             id=str(uuid.uuid4()),
             user_id=log_in.user_id,
             work_package_name=log_in.work_package_name,
-            content=log_in.content,
             score_earned=earned_score,
             status="PENDING"
         )
@@ -228,48 +219,7 @@ def create_log(log_in: LogCreate, db: Session = Depends(get_db)):
         "data": {"id": new_log.id}
     }
 
-
-@router.get("/pending/{owner_identifier}")
-def get_pending_logs(owner_identifier: str, db: Session = Depends(get_db)):
-    owner_user = db.query(models.User).filter(
-        (models.User.id == owner_identifier) | (models.User.username == owner_identifier)
-    ).first()
-
-    if not owner_user or str(owner_user.role).upper() not in ["OWNER", "LEADER"]:
-        return {"code": 200, "data": []}
-
-    logs = db.query(models.WorkLog).join(
-        models.WorkPackage,
-        models.WorkLog.work_package_name == models.WorkPackage.name
-    ).join(
-        models.Project,
-        models.WorkPackage.project_name == models.Project.name
-    ).filter(
-        models.WorkLog.status == "PENDING",
-        models.Project.owner_id == owner_user.id
-    ).order_by(models.WorkLog.created_at.desc()).all()
-
-    res = []
-    for log in logs:
-        work_package = log.work_package
-        res.append({
-            "id": log.id,
-            "applicant_name": log.user.username if log.user else log.user_id,
-            "user_id": log.user_id,
-            "work_package_name": log.work_package_name,
-            "project_name": work_package.project.name if (work_package and work_package.project) else "-",
-            "project_owner_id": work_package.project.owner_id if (work_package and work_package.project) else "-",
-            "category_name": work_package.category.name if (work_package and work_package.category) else "-",
-            "deadline": work_package.deadline if work_package else "-",
-            "content": log.content,
-            "score_earned": log.score_earned,
-            "created_at": log.created_at.strftime("%Y-%m-%d %H:%M") if log.created_at else "-",
-            "status": log.status
-        })
-
-    return {"code": 200, "data": res}
-
-
+#查看自己提交过的日志、审核状态、反馈意见
 @router.get("/my/{user_id}")
 def get_my_logs(user_id: str, db: Session = Depends(get_db)):
     logs = db.query(models.WorkLog).filter(models.WorkLog.user_id == user_id).all()
@@ -282,7 +232,6 @@ def get_my_logs(user_id: str, db: Session = Depends(get_db)):
             "category_name": work_package.category.name if (work_package and work_package.category) else "-",
             "work_package_name": log.work_package_name,
             "deadline": work_package.deadline if work_package else "-",
-            "content": log.content,
             "score_earned": log.score_earned,
             "status": log.status,
             "review_comment": log.review_comment or "-",
@@ -290,7 +239,7 @@ def get_my_logs(user_id: str, db: Session = Depends(get_db)):
         })
     return {"code": 200, "data": res}
 
-
+#公开工作包大厅数据
 @router.get("/public-work-packages")
 def get_public_work_packages(db: Session = Depends(get_db)):
     packages = db.query(models.WorkPackage).all()
@@ -315,9 +264,10 @@ def get_public_work_packages(db: Session = Depends(get_db)):
             }
             for assignee_id in assignee_ids
         ]
+        pkg_completed = Judge_workpackage_Status(pkg.name, db)
+        project_completed = Judge_project_Status(pkg.project_name, db)
         res.append({
             "name": pkg.name,
-            "work_package_name": pkg.name,
             "score": pkg.score,
             "deadline": pkg.deadline,
             "project_name": pkg.project_name,
@@ -326,12 +276,14 @@ def get_public_work_packages(db: Session = Depends(get_db)):
             "assignee_id": primary_assignee_id,
             "assignee_name": primary_assignee.username if primary_assignee else "",
             "assigned_employees": assigned_employees,
-            "owner_name": owner.username if owner else "未指定负责人"
+            "owner_name": owner.username if owner else "未指定负责人",
+            "pkg_completed": pkg_completed,
+            "project_completed": project_completed
         })
 
     return {"code": 200, "data": res}
 
-
+#某个人的分值统计
 @router.get("/score-board/{user_id}")
 def get_score_board(user_id: str, period: str = "all", db: Session = Depends(get_db)):
     query = db.query(models.WorkLog).filter(
@@ -354,7 +306,7 @@ def get_score_board(user_id: str, period: str = "all", db: Session = Depends(get
         }
     }
 
-
+#积分看板
 @router.get("/public-score-board")
 def get_public_score_board(period: str = "all", db: Session = Depends(get_db)):
     period = str(period or "all").lower()

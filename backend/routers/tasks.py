@@ -1,21 +1,13 @@
+#任务转办
 from datetime import datetime
-
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
 from sqlalchemy.orm import Session
-
 import models
 from database import get_db
+from schemas import TransferCreate
 
 
 router = APIRouter(prefix="/api/v1/transfers", tags=["Task Transfers"])
-
-
-class TransferCreate(BaseModel):
-    task_id: str
-    task_name: str
-    from_user_id: str
-    to_user_id: str
 
 
 def user_label(user):
@@ -23,7 +15,7 @@ def user_label(user):
         return "-"
     return user.username or user.id
 
-
+#发起转办申请
 @router.post("/initiate")
 def initiate_transfer(payload: TransferCreate, db: Session = Depends(get_db)):
     if payload.from_user_id == payload.to_user_id:
@@ -64,7 +56,7 @@ def initiate_transfer(payload: TransferCreate, db: Session = Depends(get_db)):
 
     return {"code": 200, "message": "转办申请已发送", "data": {"id": transfer.id}}
 
-
+#给我的转办申请
 @router.get("/my-incoming")
 def get_incoming_transfers(user_id: str = Query(...), db: Session = Depends(get_db)):
     transfers = db.query(models.TaskTransfer).filter(
@@ -93,7 +85,7 @@ def get_incoming_transfers(user_id: str = Query(...), db: Session = Depends(get_
 
     return {"code": 200, "data": data}
 
-
+#处理转办申请
 @router.post("/process")
 def process_transfer(
     transfer_id: int = Query(...),

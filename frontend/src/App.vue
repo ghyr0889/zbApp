@@ -12,6 +12,7 @@
         :ellipsis="false" 
       >
         <el-menu-item index="/my-logs">📝 员工填报</el-menu-item>
+        <el-menu-item index="/work-packages">📚 工作包大厅</el-menu-item>
         <el-menu-item index="/score-board">📊 积分统计看板</el-menu-item>
         <el-menu-item v-if="isOwner" index="/review">👑 审批工作台</el-menu-item>
         <el-menu-item v-if="isAdmin" index="/admin">⚙️ 管理后台</el-menu-item>
@@ -55,9 +56,71 @@
 import { ElMessage } from 'element-plus'
 import { ref, computed, watchEffect } from 'vue'
 import { useRouter } from 'vue-router'
+import { getWorkPackagesOverviewApi } from './api/index'
 
 const router = useRouter()
 const userInfo = ref(null)
+
+// 封装发送桌面通知的独立方法 (使用普通函数 function 声明，防止报错)
+function triggerDesktopNotification(title, body) {
+  if (!("Notification" in window)) {
+    console.warn("当前浏览器不支持桌面通知")
+    return
+  }
+  if (Notification.permission === "granted") {
+    new Notification(title, { body: body })
+  } else if (Notification.permission !== "denied") {
+    Notification.requestPermission().then(permission => {
+      if (permission === "granted") {
+        new Notification(title, { body: body })
+      }
+    })
+  }
+}
+
+// 检查期限函数 (必须放在 watchEffect 之前)
+const checkDeadlines = async () => {
+  try {
+    const res = await getWorkPackagesOverviewApi()
+    if (res.data && res.data.code === 200) {
+      const allPackages = res.data.data || []
+      
+      const myPackages = allPackages.filter(p => 
+        String(p.owner_id) === String(userInfo.value.id) && p.deadline
+      )
+
+      const today = new Date()
+      today.setHours(0, 0, 0, 0) 
+
+      let notificationMessages = []
+
+      myPackages.forEach(pkg => {
+        const dStr = pkg.deadline.replace(/\./g, '/') 
+        const deadlineDate = new Date(dStr)
+        
+        if (isNaN(deadlineDate)) return 
+
+        deadlineDate.setHours(0, 0, 0, 0)
+        
+        const diffTime = deadlineDate - today
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+
+        if (diffDays === 3 || diffDays === 1 || diffDays === 0) {
+          const dayStr = diffDays === 0 ? '今天' : `${diffDays}天后`
+          notificationMessages.push(`📦 工作包 [${pkg.name}] 将于 ${dayStr} (${pkg.deadline}) 到期！`)
+        }
+      })
+
+      if (notificationMessages.length > 0) {
+        triggerDesktopNotification('⏰ 节点到期提醒', notificationMessages.join('\n\n'))
+      }
+
+      sessionStorage.setItem('deadline_notified', 'true')
+    }
+  } catch (err) {
+    console.error('检查节点期限失败', err)
+  }
+}
 
 // 动态获取并解析本地存储的用户信息
 watchEffect(() => {
@@ -65,6 +128,12 @@ watchEffect(() => {
   if (infoStr) {
     try {
       userInfo.value = JSON.parse(infoStr)
+      
+      // 登录成功，且当前会话没弹过窗，再去检查期限
+      if (userInfo.value && !sessionStorage.getItem('deadline_notified')) {
+        checkDeadlines()
+      }
+      
     } catch (e) {
       userInfo.value = null
     }
@@ -73,14 +142,10 @@ watchEffect(() => {
   }
 })
 
-// 角色权限判断
+// 角色与权限计算
 const isAdmin = computed(() => userInfo.value?.role === 'ADMIN')
-const isOwner = computed(() => {
-  const role = String(userInfo.value?.role || '').toUpperCase()
-  return role === 'OWNER' || role === 'LEADER'
-})
+const isOwner = computed(() => userInfo.value?.role === 'OWNER')
 
-// 计算属性：翻译角色名称
 const roleDisplayName = computed(() => {
   if (!userInfo.value) return ''
   const role = String(userInfo.value.role).toUpperCase()
@@ -89,7 +154,6 @@ const roleDisplayName = computed(() => {
   return '普通员工'
 })
 
-// 计算属性：角色标签颜色
 const roleTagType = computed(() => {
   if (!userInfo.value) return 'info'
   const role = String(userInfo.value.role).toUpperCase()
@@ -98,18 +162,16 @@ const roleTagType = computed(() => {
   return 'info'
 })
 
-// 统一处理下拉菜单指令
+//  退出登录相关操作
 const handleUserCommand = (command) => {
   if (command === 'logout') {
     logout()
   }
 }
 
-// 退出登录逻辑
 const logout = () => {
   localStorage.removeItem('user_info')
   userInfo.value = null
-
   ElMessage.success('已安全退出登录')
   router.push('/login')
 }

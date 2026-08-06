@@ -8,11 +8,13 @@ import MyLogs from '../views/MyLogs.vue'
 import Review from '../views/Review.vue'
 import ScoreBoard from '../views/ScoreBoard.vue'
 import AdminPanel from '../views/AdminPanel.vue'
+import WorkPackageHall from '../views/WorkPackageHall.vue'
 
 const routes = [
   { path: '/', redirect: '/login' },
   { path: '/login', name: 'Login', component: Login },
   { path: '/my-logs', name: 'MyLogs', component: MyLogs },
+  { path: '/work-packages', name: 'WorkPackageHall', component: WorkPackageHall },
   { path: '/review', name: 'ReviewLogs', component: Review, meta: { requiresOwner: true } },
   { path: '/score-board', name: 'ScoreBoard', component: ScoreBoard },
   { path: '/admin', name: 'AdminPanel', component: AdminPanel, meta: { requiresAdmin: true}}

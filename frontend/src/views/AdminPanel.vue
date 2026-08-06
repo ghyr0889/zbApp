@@ -60,9 +60,25 @@
                       </el-tag>
                     </template>
                   </el-table-column>
+                  <el-table-column label="操作" width="120" align="center">
+                    <template #default="{ row }">
+                      <el-popconfirm
+                        title = "确定删除该员工？"
+                        confirm-button-text = "确定删除"
+                        cancel-button-text = "取消"
+                        confirm-button-type = "danger"
+                        @confirm="deleteUser(row)"
+                      >
+                      <template #reference>
+                        <el-button type="danger" size="small" plain>删除</el-button>
+                      </template>
+                      </el-popconfirm>
+                    </template>
+                  </el-table-column>
                 </el-table>
               </el-card>
             </el-col>
+
           </el-row>
         </el-tab-pane>
 
@@ -216,7 +232,8 @@ import {
   getWorkPackagesOverviewApi,
   createUserApi, 
   createProjectApi, 
-  createWorkPackageApi
+  createWorkPackageApi,
+  deleteUserApi
 } from '../api'
 
 const activeTab = ref('users')
@@ -276,6 +293,22 @@ const handleCreateUser = async () => {
   }
 }
 
+//删除人员
+const deleteUser = async(row) => {
+    try {
+      const res = await deleteUserApi(row.id)
+      
+      if (res.data && res.data.code === 200) {
+        ElMessage.success(`已成功删除员工 ${row.name}`)
+        // 3. 删除成功后，重新拉取最新的人员列表刷新页面
+        fetchAllData()
+      }
+    } catch (err) {
+      console.error('删除员工失败', err)
+      ElMessage.error(err.response?.data?.detail || '删除失败，可能该员工有关联数据未清理')
+    }
+}
+
 // 2. 配置项目与负责人
 const fetchProjects = async () => {
   try {
@@ -312,7 +345,7 @@ const fetchEmployees = async () => {
 }
 
 // ======================== 生命周期 ========================
-// 🔑 修复 3：将两个 onMounted 合并为一个，并删除了不存在的 fetchAircrafts 和 fetchPackages
+// 将两个 onMounted 合并为一个，并删除了不存在的 fetchAircrafts 和 fetchPackages
 onMounted(() => {
   fetchAllData()
   fetchProjects()
