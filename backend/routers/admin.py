@@ -46,9 +46,9 @@ def create_user(user_in: UserCreate, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=500, detail=f"数据库写入异常:{str(e)}")
 
-@router.delete("/users/{user_id}")
-def delete_user(user_id:str, db:Session = Depends(get_db)):
-    user_to_delete = db.query(models.User).filter(models.User.id == user_id).first()
+@router.delete("/users/{userId}")
+def delete_user(userId: str, db: Session = Depends(get_db)):
+    user_to_delete = db.query(models.User).filter(models.User.id == userId).first()
     if not user_to_delete:
         raise HTTPException(status_code=400,detail="数据库中没有这个人")
 
@@ -147,7 +147,7 @@ def create_or_update_work_package(pkg_in: WorkPackageCreate, db: Session = Depen
             name=pkg_in.name,
             score=pkg_in.score,
             deadline=deadline,
-            project_name=pkg_in.project_name,
+            project_id=pkg_in.project_id,
             category_name=pkg_in.category_name
         )
         db.add(pkg)

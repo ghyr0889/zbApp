@@ -351,6 +351,7 @@ const confirmTransfer = async () => {
   if (!selectedTargetUser.value) return ElMessage.warning('请选择接收人')
   try {
     const res = await initiateTransferApi({
+      work_package_id: currentTransferTask.value.work_package_id,
       task_id: currentTransferTask.value.task_id,
       task_name: currentTransferTask.value.work_package_name,
       from_user_id: String(currentUser.value.id),

@@ -129,6 +129,7 @@ def get_projects_for_current_user(user_id: str, db: Session = Depends(get_db)):
             })
 
         data.append({
+            "project_id": project.id,
             "project_name": project.name,
             "work_packages": package_data
         })

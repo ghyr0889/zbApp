@@ -34,7 +34,12 @@
           登录
         </el-button>
       </el-form>
-
+      <div class="test-account-box">
+        <p class="tip-title">测试账号</p>
+        <p>管理员：<code>0001 / 123456</code></p>
+        <p>负责人：<code>0123 / 123456</code></p>
+        <p>员工：<code>1234 / 123456</code></p>
+      </div>
     </el-card>
   </div>
 </template>
