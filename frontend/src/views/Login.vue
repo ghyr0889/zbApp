@@ -35,12 +35,6 @@
         </el-button>
       </el-form>
 
-      <!-- 底部测试账号提示 -->
-      <div class="test-account-box">
-        <p class="tip-title">💡 测试账号提示：</p >
-        <p>• 主管账号：ID <code>0123</code> | 密码：<code>123456</code></p >
-        <p>• 员工账号：ID <code>1234</code> | 密码：<code>123456</code></p >
-      </div>
     </el-card>
   </div>
 </template>
@@ -51,9 +45,11 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { loginApi } from '../api'
 import axios from 'axios'
+import { useUserStore } from '../stores/user'
 
 const router = useRouter()
 const loading = ref(false)
+const userStore = useUserStore()
 
 // 统一表单数据结构，统一使用 user_id
 const form = reactive({
@@ -77,21 +73,10 @@ const handleLogin = async () => {
     if (res.data.code === 200) {
       ElMessage.success('登录成功')
       // 将登录成功的用户凭证保存到本地
-      const token = res.data.data
-      localStorage.setItem('user_info', JSON.stringify(token))
-      localStorage.setItem('token',token)
-      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
+      const user = res.data.data
+      userStore.setUser(user)
+      axios.defaults.headers.common['Authorization'] = `Bearer ${user.id}`
       router.push('/my-logs')
-      // 根据角色进行路径路由跳转
-      // if (res.data.data.role === 'OWNER') {
-      //   router.push('/review')
-      // } 
-      // else if (res.data.data.role === 'ADMIN'){
-      //   router.push('/admin')
-      // }
-      // else if (res.data.data.role === 'EMPLOYEE'){
-      //   router.push('/my-logs')
-      // }
     }
   } catch (error) {
     console.error('登录异常:', error)

@@ -44,9 +44,9 @@
                 <el-table-column prop="project_name" label="所属项目" width="130" />
                 <el-table-column prop="category_name" label="工作类型" width="130" />
                 <el-table-column prop="work_package_name" label="工作包名称" min-width="220" show-overflow-tooltip />
-                <el-table-column prop="score_earned" label="获得分值" width="110" align="center">
+                <el-table-column prop="base_score" label="获得分值" width="110" align="center">
                   <template #default="scope">
-                    <el-tag type="success">+{{ scope.row.score_earned }} 分</el-tag>
+                    <el-tag type="success">+{{ scope.row.base_score }} 分</el-tag>
                   </template>
                 </el-table-column>
                 <el-table-column prop="approved_at" label="审核通过时间" width="170" align="center" />

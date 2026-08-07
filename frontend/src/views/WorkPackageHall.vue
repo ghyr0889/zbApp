@@ -150,8 +150,8 @@ const tableRowClassName = ({ row }) => {
 const groupedProjects = computed(() => {
   const map = {} //临时字典map
   allWorkPackages.value.forEach(pkg => {
-    if (!map[pkg.project_name]) {
-      map[pkg.project_name] = {
+    if (!map[pkg.project_id]) {
+      map[pkg.project_id] = {
         project_name: pkg.project_name,
         // 如果扁平数据中自带项目负责人的名字，这里会自动提取。需确保后端返回了这个字段
         owner_name: pkg.owner_name, 
@@ -161,7 +161,7 @@ const groupedProjects = computed(() => {
       }
     }
     // 将工作包塞入对应的项目中
-    map[pkg.project_name].work_packages.push(pkg)
+    map[pkg.project_id].work_packages.push(pkg)
   })
   return Object.values(map) // 将对象转回数组供表格渲染
 })

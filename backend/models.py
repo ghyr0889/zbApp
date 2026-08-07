@@ -1,5 +1,5 @@
 ﻿# xiangmu/backend/models.py
-from sqlalchemy import Column, String, Float, Text, ForeignKey, DateTime, Integer
+from sqlalchemy import Column, String, Float, Text, ForeignKey, DateTime, Integer, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from database import Base
@@ -27,7 +27,8 @@ class User(Base):
 class Project(Base):
     __tablename__ = "projects"#项目表
 
-    name = Column(String(100), primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    name = Column(String(100), index=True, nullable=False)
     owner_id = Column(String(50), ForeignKey("users.id"), nullable=True)
 
     owner = relationship("User", foreign_keys=[owner_id])
@@ -44,12 +45,16 @@ class WorkCategory(Base):
 
 class WorkPackage(Base):
     __tablename__ = "work_packages" # 工作包表
+    __table_args__ = (
+        UniqueConstraint("project_id", "name", name="uq_work_packages_project_id_name"),
+    )
 
-    name = Column(String(100), primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    name = Column(String(100), index=True, nullable=False)
     score = Column(Float, default=1.0)
     deadline = Column(Text, nullable=False)
 
-    project_name = Column(String(100), ForeignKey("projects.name"), nullable=False)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     category_name = Column(String(100), ForeignKey("work_categories.name"), nullable=False)
 
     project = relationship("Project", back_populates="work_packages")
@@ -62,7 +67,7 @@ class TaskAssignment(Base):
     id = Column(String(50), primary_key=True, index=True) 
     assignee_id = Column(String(50), ForeignKey("users.id"), nullable=False) # 分配者id
     assigner_id = Column(String(50), ForeignKey("users.id"), nullable=False) # 被分配者id
-    work_package_name = Column(String(100), ForeignKey("work_packages.name"), nullable=False)
+    work_package_id = Column(Integer, ForeignKey("work_packages.id"), nullable=False)
     assigned_at = Column(DateTime, default=datetime.now)
     status = Column(String(20), default="IN_PROGRESS")# 状态
 
@@ -76,8 +81,8 @@ class WorkLog(Base):
 
     id = Column(String(50), primary_key=True, index=True)
     user_id = Column(String(50), ForeignKey("users.id"), nullable=False)
-    work_package_name = Column(String(100), ForeignKey("work_packages.name"), nullable=False)
-    score_earned = Column(Float, default=0.0) # 通过后获得分值
+    work_package_id = Column(Integer, ForeignKey("work_packages.id"), nullable=False)
+    base_score = Column(Float, default=0.0) # 基础分值
     status = Column(String(20), default="PENDING")  # PENDING / APPROVED / REJECTED
     reviewer_id = Column(String(50), ForeignKey("users.id"), nullable=True)
     review_comment = Column(Text, nullable=True) # 驳回/审核意见
@@ -92,8 +97,12 @@ class TaskTransfer(Base):
     __tablename__ = "task_transfers"#工作转办表
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    task_assignment_id = Column(String(50), nullable=False, comment="任务分配记录 ID")
+    work_package_id = Column(Integer, ForeignKey("work_packages.id"), nullable=False)
     task_name = Column(String(100), nullable=False, comment="任务名称")
     from_user_id = Column(String(50), nullable=False, comment="发起人(原负责人)")
     to_user_id = Column(String(50), nullable=False, comment="接收人(新负责人)")
     status = Column(String(20), default="PENDING", comment="状态: PENDING/ACCEPTED/REJECTED")
     created_at = Column(DateTime, default=datetime.now)
+
+    work_package = relationship("WorkPackage")

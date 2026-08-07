@@ -14,14 +14,6 @@ if os.path.exists("work_stat.db"):
 Base.metadata.create_all(bind=engine)
 db = SessionLocal()
 
-# # 1. 把所有存为 LEADER 或 leader 的旧角色，全部更正为 OWNER
-# updated_count = db.query(models.User).filter(
-#     models.User.role.in_(["LEADER", "leader", "owner"])
-# ).update({models.User.role: "OWNER"}, synchronize_session=False)
-
-# db.commit()
-# print(f"✅ 成功修复 {updated_count} 条项目负责人角色数据！")
-# db.close()
 
 try:
     # 1. 创建账号 (0123:项目负责人, 1234:员工)
@@ -32,8 +24,8 @@ try:
     db.commit()
 
     # 2. 项目 (绑定项目负责人 0123)
-    ac1 = models.Project(name="无人机1", owner_id="0123")
-    ac2 = models.Project(name="无人机2", owner_id="0123")
+    ac1 = models.Project(id=1, name="项目1", owner_id="0123")
+    ac2 = models.Project(id=2, name="项目2", owner_id="0123")
     db.add_all([ac1, ac2])
     db.commit()
 
@@ -44,36 +36,39 @@ try:
 
     # 4. 工作包（含分值和完成节点要求）
     pkg1 = models.WorkPackage(
-        name="跑道 FOD 视觉识别算子",
+        id=1,
+        name="工作1",
         score=5.0,
         deadline="2026.7.29",
-        project_name="无人机1",
+        project_id=1,
         category_name="类型1"
     )
     pkg2 = models.WorkPackage(
-        name="无人机1云台机载嵌入式适配",
+        id=2,
+        name="工作2",
         score=6.0,
         deadline="2028.9.20",
-        project_name="无人机1",
+        project_id=1,
         category_name="类型2"
     )
 
     # 示例：无人机2 的工作包
     pkg3 = models.WorkPackage(
-        name="无人机2自组网避障模块",
+        id=3,
+        name="工作1",
         score=8.0,
         deadline="2028.5.8",
-        project_name="无人机2",
+        project_id=2,
         category_name="类型1"
     )
     pkg4 = models.WorkPackage(
-        name="无人机2地面站控制软件",
+        id=4,
+        name="工作2",
         score=7.0,
         deadline="2026.4.9",
-        project_name="无人机2",
+        project_id=2,
         category_name="类型3"
     )
-
     db.add_all([pkg1, pkg2, pkg3, pkg4])
     db.commit()
 

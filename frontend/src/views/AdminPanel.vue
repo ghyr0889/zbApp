@@ -82,7 +82,7 @@
           </el-row>
         </el-tab-pane>
 
-          <!-- ================= ✈️ 项目管理 (行内编辑版) ================= -->
+          <!-- =================  项目管理 ================= -->
         <el-tab-pane label="✈️ 项目管理">
           <div style="margin-bottom: 15px;">
             <el-button type="primary" icon="Plus" @click="handleAddProjectRow">
@@ -121,7 +121,7 @@
             </el-table>
         </el-tab-pane>
 
-        <!-- ================= 📦 工作包管理 (行内编辑版) ================= -->
+        <!-- ================= 工作包管理 ================= -->
         <el-tab-pane label="📦 工作包管理">
           <div style="margin-bottom: 15px;">
             <el-button type="primary" icon="Plus" @click="handleAddWorkPackageRow">
@@ -132,8 +132,8 @@
           <el-table :data="workPackageList" border stripe style="width: 100%" height="600">
             <el-table-column label="所属项目" width="140">
               <template #default="{ row }">
-                <el-select v-if="row.isEdit" v-model="row.project_name" size="small" placeholder="选项目">
-                  <el-option v-for="ac in projectList" :key="ac.name" :label="ac.name" :value="ac.name" />
+                <el-select v-if="row.isEdit" v-model="row.project_id" size="small" placeholder="选项目">
+                  <el-option v-for="ac in projectList" :key="ac.id" :label="ac.name" :value="ac.id" />
                 </el-select>
                 <span v-else>{{ row.project_name }}</span>
               </template>
@@ -176,23 +176,10 @@
 
             <el-table-column label="负责员工" width="170">
               <template #default="{ row }">
-                <el-select
-                  v-if="row.isEdit"
-                  v-model="row.assignee_id"
-                  size="small"
-                  placeholder="请选择员工"
-                  filterable
-                  default-first-option
-                  style="width: 100%"
-                >
-                  <el-option
-                    v-for="employee in employeeOptions"
-                    :key="employee.id"
-                    :label="employee.label"
-                    :value="employee.id"
-                  />
-                </el-select>
-                <span v-else>{{ row.assignee_name || row.assignee_id || '未指定' }}</span>
+                <el-tag v-if="row.assignee_id" effect="plain">
+                  {{ row.assignee_name || row.assignee_id }}({{ row.assignee_id }})
+                </el-tag>
+                <span v-else>-</span>
             </template>
           </el-table-column>
 
@@ -313,7 +300,7 @@ const deleteUser = async(row) => {
 const fetchProjects = async () => {
   try {
     const res = await getAllProjectsApi()
-    // 🔑 核心：从后端获取数据后，给每一行都主动加上 isEdit: false 属性
+    // 核心：从后端获取数据后，给每一行都主动加上 isEdit: false 属性
     projectList.value = (res.data.data || []).map(item => ({
       ...item,
       isEdit: false 
@@ -344,8 +331,6 @@ const fetchEmployees = async () => {
   }
 }
 
-// ======================== 生命周期 ========================
-// 将两个 onMounted 合并为一个，并删除了不存在的 fetchAircrafts 和 fetchPackages
 onMounted(() => {
   fetchAllData()
   fetchProjects()
@@ -393,13 +378,13 @@ const handleSaveProject = async (row) => {
   }
 }
 
-// 3. 创建工作包
+// 获取工作包
 const fetchWorkPackages = async () => {
   try {
     const res = await getWorkPackagesOverviewApi()
     // 同样注入 isEdit 状态
     workPackageList.value = (res.data.data || []).map(item => ({
-      original_name: item.name, //  核心：记录下它最初的名字，作为编辑时的凭证
+      id: item.id,
       name: item.name,
       project_name: item.project_name,
       category_name: item.category_name,
@@ -416,7 +401,7 @@ const fetchWorkPackages = async () => {
 
 const handleAddWorkPackageRow = () => {
   workPackageList.value.unshift({
-    original_name: null,
+    id: null,
     project_name: '',
     category_name: '类型1',
     name: '',
@@ -429,7 +414,7 @@ const handleAddWorkPackageRow = () => {
 }
 
 const handleCancelWorkPackage = (row, index) => {
-  if (!row.original_name) {
+  if (!row.id) {
     workPackageList.value.splice(index, 1)
   } else {
     row.isEdit = false
@@ -441,19 +426,14 @@ const handleSaveWorkPackage = async (row) => {
   if (!row.project_name || !row.category_name || !row.name) {
     return ElMessage.warning('项目、工作类型和工作包名称均为必填项！')
   }
-  if (!row.assignee_id) {
-    return ElMessage.warning('请选择负责员工！')
-  }
   try {
     const payload = ({
-      original_name: row.original_name,
-      project_name: row.project_name,
+      work_package_id: row.id,
+      project_id: row.project_id,
       category_name: row.category_name,
       name: row.name,
       score: row.score,
-      deadline: row.node_requirement || row.deadline || '',
-      assignee_id: String(row.assignee_id),
-      assigner_id: currentUser.value?.id ? String(currentUser.value.id) : String(row.assignee_id)
+      deadline: row.node_requirement || row.deadline || ''
     })
 
     const res = await createWorkPackageApi(payload)

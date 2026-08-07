@@ -20,10 +20,9 @@
         <el-table-column prop="category_name" label="工作类型" width="120" />
         <el-table-column prop="work_package_name" label="工作包名称" show-overflow-tooltip />
         <el-table-column prop="node_requirement" label="节点要求" show-overflow-tooltip />
-        <el-table-column prop="content" label="员工完成进展描述" show-overflow-tooltip />
-        <el-table-column prop="score_earned" label="申请分值" width="90" align="center">
+        <el-table-column prop="base_score" label="基础分值" width="90" align="center">
           <template #default="scope">
-            <el-tag type="success">+{{ scope.row.score_earned }} 分</el-tag>
+            <el-tag type="success">+{{ scope.row.base_score }} 分</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="created_at" label="提交时间" width="150" align="center" />

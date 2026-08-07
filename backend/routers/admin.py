@@ -16,28 +16,6 @@ CATEGORY_MIGRATION_MAP = {
     "测试验证": "类型4",
 }
 
-
-def ensure_fixed_work_categories(db: Session):
-    for old_name, new_name in CATEGORY_MIGRATION_MAP.items():
-        db.query(models.WorkPackage).filter(
-            models.WorkPackage.category_name == old_name
-        ).update({models.WorkPackage.category_name: new_name}, synchronize_session=False)
-
-    db.query(models.WorkPackage).filter(
-        ~models.WorkPackage.category_name.in_(models.FIXED_WORK_CATEGORIES)
-    ).update({models.WorkPackage.category_name: "类型1"}, synchronize_session=False)
-
-    existing = {item.name for item in db.query(models.WorkCategory).all()}
-    for category_name in models.FIXED_WORK_CATEGORIES:
-        if category_name not in existing:
-            db.add(models.WorkCategory(name=category_name))
-    if not set(models.FIXED_WORK_CATEGORIES).issuperset(existing):
-        db.query(models.WorkCategory).filter(
-            ~models.WorkCategory.name.in_(models.FIXED_WORK_CATEGORIES)
-        ).delete(synchronize_session=False)
-    db.commit()
-
-
 @router.get("/users")
 def get_all_users(db: Session = Depends(get_db)):
     users = db.query(models.User).all()
@@ -87,12 +65,22 @@ def create_or_update_project(project_in: ProjectCreate, db: Session = Depends(ge
     if not project_name:
         raise HTTPException(status_code=400, detail="项目名称不能为空！")
 
-    project = db.query(models.Project).filter(models.Project.name == project_name).first()
-    if project:
+    if project_in.id:
+        project = db.query(models.Project).filter(models.Project.id == project_in.id).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="项目不存在")
+
+        project.name = project_name
         project.owner_id = project_in.owner_id or None
     else:
-        project = models.Project(name=project_name, owner_id=project_in.owner_id or None)
+        project = models.Project(
+            name=project_name,
+            owner_id=project_in.owner_id or None
+        )
         db.add(project)
+
+    db.commit()
+    db.refresh(project)
 
     try:
         db.commit()
@@ -112,6 +100,7 @@ def get_all_projects(db: Session = Depends(get_db)):
     for project in projects:
         owner_name = project.owner.username if project.owner else "未指定负责人"
         res.append({
+            "id": project.id,
             "name": project.name,
             "owner_id": project.owner_id or "-",
             "owner_name": owner_name
@@ -119,134 +108,84 @@ def get_all_projects(db: Session = Depends(get_db)):
     return {"code": 200, "data": res}
 
 
-def sync_work_package_assignment(db: Session, work_package_name: str, assignee_id: str, assigner_id: Optional[str]):
-    assignee = db.query(models.User).filter(models.User.id == assignee_id).first()
-    if not assignee:
-        raise HTTPException(status_code=404, detail="指定员工不存在")
-
-    actual_assigner_id = assigner_id or assignee_id
-    assigner = db.query(models.User).filter(models.User.id == actual_assigner_id).first()
-    if not assigner:
-        actual_assigner_id = assignee_id
-
-    assignments = db.query(models.TaskAssignment).filter(
-        models.TaskAssignment.work_package_name == work_package_name
-    ).all()
-
-    if assignments:
-        primary_assignment = assignments[0]
-        primary_assignment.assignee_id = assignee_id
-        primary_assignment.assigner_id = actual_assigner_id
-        primary_assignment.status = "IN_PROGRESS"
-
-        for duplicate_assignment in assignments[1:]:
-            db.delete(duplicate_assignment)
-    else:
-        db.add(models.TaskAssignment(
-            id=str(uuid.uuid4())[:8],
-            assigner_id=actual_assigner_id,
-            assignee_id=assignee_id,
-            work_package_name=work_package_name,
-            status="IN_PROGRESS"
-        ))
-
-
 @router.post("/work-packages")
 def create_or_update_work_package(pkg_in: WorkPackageCreate, db: Session = Depends(get_db)):
-    ensure_fixed_work_categories(db)
     if pkg_in.category_name not in models.FIXED_WORK_CATEGORIES:
         raise HTTPException(status_code=400, detail="工作类型只能选择：类型1、类型2、类型3、类型4")
-    assignee_id = pkg_in.assignee_id or pkg_in.owner_id
-    if not assignee_id:
-        raise HTTPException(status_code=400, detail="必须指定工作包负责员工")
 
-    if pkg_in.original_name:
-        pkg = db.query(models.WorkPackage).filter(models.WorkPackage.name == pkg_in.original_name).first()
+    deadline = pkg_in.deadline or ""
+
+    if pkg_in.work_package_id:
+        pkg = db.query(models.WorkPackage).filter(models.WorkPackage.id == pkg_in.work_package_id).first()
         if not pkg:
             raise HTTPException(status_code=404, detail="未找到要修改的工作包")
 
-    # 如果连名字都改了，要确保新名字没有和别人的冲突
-        if pkg_in.name != pkg_in.original_name:
-            conflict = db.query(models.WorkPackage).filter(models.WorkPackage.name == pkg_in.name).first()
-            if conflict:
-                raise HTTPException(status_code=400, detail="修改后的工作包名称已存在，请换一个名称！")
-            # 更改主键名称
-            pkg.name = pkg_in.name
-            db.query(models.TaskAssignment).filter(
-                models.TaskAssignment.work_package_name == pkg_in.original_name
-            ).update({models.TaskAssignment.work_package_name: pkg_in.name}, synchronize_session=False)
-            db.query(models.WorkLog).filter(
-                models.WorkLog.work_package_name == pkg_in.original_name
-            ).update({models.WorkLog.work_package_name: pkg_in.name}, synchronize_session=False)
-            db.query(models.TaskTransfer).filter(
-                models.TaskTransfer.task_name == pkg_in.original_name
-            ).update({models.TaskTransfer.task_name: pkg_in.name}, synchronize_session=False)
-            
-        # 更新其他字段
+        conflict = db.query(models.WorkPackage).filter(
+            models.WorkPackage.id != pkg.id,
+            models.WorkPackage.project_id == pkg_in.project_id,
+            models.WorkPackage.name == pkg_in.name
+        ).first()
+        if conflict:
+            raise HTTPException(status_code=400, detail="同一项目下工作包名称已存在，请换一个名称！")
+
+        pkg.name = pkg_in.name
         pkg.score = pkg_in.score
-        pkg.deadline = pkg_in.deadline or pkg_in.node_requirement or ""
+        pkg.deadline = deadline
         pkg.project_name = pkg_in.project_name
         pkg.category_name = pkg_in.category_name
-        sync_work_package_assignment(db, pkg_in.name, assignee_id, pkg_in.assigner_id)
-            
         message = "工作包更新成功"
-        
+
     else:
-        # ============ 不存在 original_name，说明是【新增全新数据】 ============
-        conflict = db.query(models.WorkPackage).filter(models.WorkPackage.name == pkg_in.name).first()
+        conflict = db.query(models.WorkPackage).filter(
+            models.WorkPackage.project_id == pkg_in.project_id,
+            models.WorkPackage.name == pkg_in.name
+        ).first()
         if conflict:
-            raise HTTPException(status_code=400, detail="工作包名称已存在！")
-            
+            raise HTTPException(status_code=400, detail="同一项目下工作包名称已存在！")
+
         pkg = models.WorkPackage(
             name=pkg_in.name,
             score=pkg_in.score,
-            deadline=pkg_in.deadline or pkg_in.node_requirement or "",
+            deadline=deadline,
             project_name=pkg_in.project_name,
             category_name=pkg_in.category_name
         )
         db.add(pkg)
-        db.flush()
-        sync_work_package_assignment(db, pkg_in.name, assignee_id, pkg_in.assigner_id)
         message = "工作包创建成功"
 
     db.commit()
-    return {"code": 200, "message": message}
+    db.refresh(pkg)
+    return {"code": 200, "message": message, "data": {"id": pkg.id}}
 
 
 @router.get("/work-packages-overview")
 def get_work_packages_overview(db: Session = Depends(get_db)):
     try:
-        ensure_fixed_work_categories(db)
         packages = db.query(models.WorkPackage).all()
         res = []
 
         for pkg in packages:
-            assignments = db.query(models.TaskAssignment).filter(
-                models.TaskAssignment.work_package_name == pkg.name
-            ).all()
+            assignment = db.query(models.TaskAssignment).filter(
+                models.TaskAssignment.work_package_id == pkg.id
+            ).first()
 
-            assignee_ids = [assign.assignee_id for assign in assignments if assign.assignee_id]
-            assigned_employees = []
-            assigned_employee_ids = []
-            users_by_id = []
-            if assignee_ids:
-                users = db.query(models.User).filter(models.User.id.in_(assignee_ids)).all()
-                users_by_id = {u.id: u for u in users}
-                assigned_employee_ids = assignee_ids
-                assigned_employees = [u.username for u in users]
-            primary_assignee_id = assigned_employee_ids[0] if assigned_employee_ids else ""
-            primary_assignee = users_by_id.get(primary_assignee_id) if primary_assignee_id and assignee_ids else None
+            primary_assignee_id = assignment.assignee_id if assignment else ""
+            primary_assignee = None
+            if primary_assignee_id:
+                primary_assignee = db.query(models.User).filter(models.User.id == primary_assignee_id).first()
 
             res.append({
+                "id": pkg.id,
                 "name": pkg.name,
-                "project_name": pkg.project_name or "-",
+                "project_id": pkg.project_id,
+                "project_name": pkg.project.name or "-",
                 "category_name": pkg.category_name or "-",
                 "score": pkg.score,
                 "deadline": pkg.deadline or "-",
                 "assignee_id": primary_assignee_id,
                 "assignee_name": primary_assignee.username if primary_assignee else "",
-                "assigned_employee_ids": assigned_employee_ids,
-                "assigned_employees": assigned_employees
+                "assigned_employee_ids": [primary_assignee_id] if primary_assignee_id else [],
+                "assigned_employees": [primary_assignee.username if primary_assignee else primary_assignee_id] if primary_assignee_id else []
             })
 
         return {"code": 200, "data": res}

@@ -17,17 +17,18 @@ class UserCreate(BaseModel):
 
 
 class ProjectCreate(BaseModel):
+    id: Optional[int] = None
     name: str = Field(..., description="项目名称")
     owner_id: Optional[str] = Field(None, description="项目负责人 ID")
 
 
 class WorkPackageCreate(BaseModel):
-    original_name: Optional[str] = Field(None, description="修改时的原工作包名称")
+    work_package_id: Optional[int] = Field(None, description="工作包 ID，新增时为空，修改时传入")
     name: str = Field(..., description="工作包名称")
     score: float = Field(..., description="基础积分")
     deadline: str = Field("", description="节点要求")
-    node_requirement: Optional[str] = Field(None, description="旧字段兼容")
-    project_name: str = Field(..., description="所属项目名称")
+    project_id: Optional[int] = Field(None, description="所属项目ID")
+    project_name: Optional[str] = Field(..., description="所属项目名称")
     category_name: str = Field(..., description="工作类型")
     assignee_id: Optional[str] = Field(None, description="负责员工 ID")
     owner_id: Optional[str] = Field(None, description="旧字段兼容")
@@ -37,30 +38,28 @@ class WorkPackageCreate(BaseModel):
 class TaskAssignCreate(BaseModel):
     assigner_id: str = Field(..., description="指派人 ID")
     assignee_id: str = Field(..., description="被指派员工 ID")
-    work_package_name: str = Field(..., description="工作包名称")
+    work_package_id: int = Field(..., description="工作包 ID")
 
 
 class TransferCreate(BaseModel):
     task_id: str = Field(..., description="任务分配记录 ID")
-    task_name: str = Field(..., description="工作包名称")
+    work_package_id: int = Field(..., description="工作包 ID")
     from_user_id: str = Field(..., description="发起人 ID")
     to_user_id: str = Field(..., description="接收人 ID")
 
 
 class LogCreate(BaseModel):
     user_id: str = Field(..., description="提交员工 ID")
-    work_package_name: str = Field(..., description="工作包名称")
-    score_earned: Optional[float] = Field(0.0, description="申请分值")
+    work_package_id: int = Field(..., description="工作包 ID")
+    base_score: Optional[float] = Field(0.0, description="基础分值")
 
 
 class WorkLogCreate(BaseModel):
     user_id: str = Field(..., description="提交员工 ID")
     project_name: str = Field(..., description="所属项目")
-    work_package_name: str = Field(..., description="选中的工作包名称")
+    work_package_id: int = Field(..., description="选中的工作包 ID")
     log_date: str = Field(..., example="2026-07-27", description="工作日期")
     duration_hours: float = Field(..., gt=0, description="耗时（必须大于0）")
-    content: str = Field(..., min_length=5, description="工作详细描述")
-    applied_score: Optional[float] = Field(None, description="申请分值，选填")
 
 
 class ReviewAction(BaseModel):
@@ -88,6 +87,8 @@ class WorkLogResponse(BaseModel):
 
 class DeleteUser(BaseModel):
     id: str
+
+
 
     class Config:
         from_attributes = True

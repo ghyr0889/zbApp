@@ -50,68 +50,6 @@
             
             <el-empty v-else description="暂无任务" :image-size="70" />
           </el-card>
-
-          <!-- 右侧：填报工作日志申请
-          <el-col :span="10">
-            <el-card shadow="hover">
-              <template #header>
-                <div class="card-header">
-                  <span>📝 填报工作日志申请</span>
-                </div>
-              </template>
-
-              <el-form :model="form" label-position="top">
-                <el-form-item label="选择项目 / 工作类型 / 工作包" required>
-                  <el-cascader
-                    v-model="selectedPath"
-                    :options="cascadeOptions"
-                    placeholder="请选择或从左侧任务列表一键导入"
-                    style="width: 100%"
-                    @change="handleCascadeChange"
-                    clearable
-                  />
-                </el-form-item>
-
-                <el-form-item label="对应工作包分值">
-                  <el-tag type="success" size="large" v-if="selectedWorkPackageInfo.score !== null">
-                    🏆 {{ selectedWorkPackageInfo.score }} 分
-                  </el-tag>
-                  <span v-else class="tip-text">选择工作包后自动显示</span>
-                </el-form-item>
-
-                <el-form-item label="节点完成要求">
-                  <el-alert
-                    v-if="selectedWorkPackageInfo.deadline"
-                    :title="selectedWorkPackageInfo.deadline"
-                    type="info"
-                    :closable="false"
-                    show-icon
-                  />
-                  <span v-else class="tip-text">选择工作包后自动显示节点要求</span>
-                </el-form-item>
-
-                <el-form-item label="具体工作完成情况" required>
-                  <el-input
-                    v-model="form.content"
-                    type="textarea"
-                    :rows="5"
-                    placeholder="参照节点要求，填写完成的具体工作进展..."
-                  />
-                </el-form-item>
-
-                <el-button
-                  type="primary"
-                  style="width: 100%"
-                  size="large"
-                  :loading="submitting"
-                  :disabled="!form.work_package_name"
-                  @click="handleSubmit"
-                >
-                  🚀 提交审核给所属项目负责人
-                </el-button>
-              </el-form>
-            </el-card>
-          </el-col> -->
       </el-tab-pane>
 
       <!-- ================= 页面二：审核记录区 ================= -->
@@ -127,9 +65,9 @@
           <el-table :data="logList" stripe style="width: 100%" v-loading="loadingLogs" height="600">
             <el-table-column prop="project_name" label="项目" width="120" />
             <el-table-column prop="work_package_name" label="工作包" show-overflow-tooltip />
-            <el-table-column prop="score_earned" label="分值" width="90" align="center">
+            <el-table-column prop="base_score" label="分值" width="90" align="center">
               <template #default="{ row }">
-                <span class="score-text">+{{ row.score_earned }}</span>
+                <span class="score-text">+{{ row.base_score }}</span>
               </template>
             </el-table-column>
             <el-table-column prop="status" label="状态" width="120" align="center">
@@ -220,22 +158,11 @@ const scoreBoardData = reactive({
   details: []
 })
 
-// const selectedWorkPackageInfo = reactive({
-//   score: null,
-//   deadline: ''
-// })
-
-// const form = reactive({
-//   work_package_name: '',
-//   content: ''
-// })
-
 onMounted(() => {
   const userInfoStr = localStorage.getItem('user_info')
   if (userInfoStr) {
     currentUser.value = JSON.parse(userInfoStr)
   }
-  //fetchCascadeOptions()
   if (currentUser.value && currentUser.value.id) {
     fetchMyAssignedTasks()
     fetchMyLogs()
@@ -255,7 +182,7 @@ const fetchMyAssignedTasks = async () => {
 
 // 一键提交核心逻辑
 const selectAssignedTask = (task) => {
-  // 1. 弹出防误触确认框
+  // 弹出防误触确认框
   ElMessageBox.confirm(
     `确定要将工作包【${task.work_package_name}】提交审核吗？`,
     '一键提交确认',
@@ -265,25 +192,25 @@ const selectAssignedTask = (task) => {
       type: 'success',
     }
   ).then(async () => {
-    // 2. 用户点击确认后，直接调用接口提
+    //用户点击确认后，直接调用接口提
     submitting.value = true
     try {
       const res = await createLogApi({
         user_id: String(currentUser.value.id),
-        work_package_name: String(task.work_package_name),
-        score_earned: task.score || 0
+        work_package_id: String(task.work_package_id),
+        base_score: task.score || 0
       })
 
       if (res && res.data && res.data.code === 200) {
         ElMessage.success('工作已成功提交审核！')
-        // 3. 提交成功后，刷新表格数据
+        // 提交成功后，刷新表格数据
         fetchMyLogs()
         fetchMyAssignedTasks()
       } else {
         ElMessage.error(res?.data?.message || '提交失败')
       }
     } catch (err) {
-      console.error('一键提交失败:', err)
+      console.error('提交失败:', err)
       ElMessage.error('提交失败，请检查网络！')
     } finally {
       submitting.value = false
@@ -292,23 +219,6 @@ const selectAssignedTask = (task) => {
     // 用户点击取消，不做任何操作
   })
 }
-
-// const fetchCascadeOptions = async () => {
-//   const userInfoStr = localStorage.getItem('user_info')
-//   const userInfo = userInfoStr ? JSON.parse(userInfoStr) : null
-  
-//   if (!userInfo || !userInfo.id) return
-
-//   try {
-//     // 带上当前登录员工的 ID 请求可填报选项
-//     const res = await getCascadeOptionsApi(userInfo.id)
-//     if (res && res.data && res.data.code === 200) {
-//       cascadeOptions.value = res.data.data || []
-//     }
-//   } catch (err) {
-//     console.error('获取工作包级联选项失败:', err)
-//   }
-// }
 
 const handleCascadeChange = (val) => {
   if (!val || val.length < 3) {
@@ -353,47 +263,7 @@ const fetchMyLogs = async () => {
   }
 }
 
-// const handleSubmit = async () => {
-//   if (!form.work_package_name) return ElMessage.warning('请选择关联的工作包！')
-//   if (!form.content.trim()) return ElMessage.warning('请填写具体工作内容！')
-
-//   submitting.value = true
-//   try {
-//     // 🔑 修正 1：必须用 const res 接收接口返回值！
-//     const res = await createLogApi({
-//       user_id: String(currentUser.value.id),
-//       work_package_name: String(form.work_package_name),
-//       content: form.content.trim(),
-//       score_earned: form.score_earned || 0  // 🔑 修正 2：把选中的积分分值传给后端
-//     })
-
-//     // 现在 res 变量存在了，判断逻辑可以正常运行
-//     if (res && res.data && res.data.code === 200) {
-//       ElMessage.success('工作日志已成功提交！')
-      
-//       // 清空表单
-//       form.content = ''
-//       form.work_package_name = ''
-//       selectedPath.value = []
-//       selectedWorkPackageInfo.score = null
-//       selectedWorkPackageInfo.deadline = ''
-
-//       // 重新拉取日志列表 & 指派列表 & 级联选择器（已填报的任务会自动消失）
-//       if (typeof fetchMyLogs === 'function') fetchMyLogs()
-//       if (typeof fetchMyAssignedTasks === 'function') fetchMyAssignedTasks()
-//       if (typeof fetchCascadeOptions === 'function') fetchCascadeOptions()
-//     } else {
-//       ElMessage.error(res?.data?.message || '提交失败')
-//     }
-//   } catch (err) {
-//     console.error('提交日志失败:', err)
-//     ElMessage.error('提交失败，请检查网络或后端服务！')
-//   } finally {
-//     submitting.value = false
-//   }
-// }
-
-/// 1. 更强大的日期提取工具（兼容 2026-08-05, 2026-8-5, 2026/08/15, 2026年8月15日 等各种格式）
+/// 更强大的日期提取工具（兼容 2026-08-05, 2026-8-5, 2026/08/15, 2026年8月15日 等各种格式）
 const parseDateForSort = (dateStr) => {
   if (!dateStr) return Infinity // 如果没写时间，给一个无限大的值，排到最后面
   
@@ -409,7 +279,7 @@ const parseDateForSort = (dateStr) => {
   return Infinity // 如果提取不到任何日期数字，排到最后
 }
 
-// 2. 核心排序：使用真实数学减法
+//  核心排序：使用真实数学减法
 const sortedMyAssignments = computed(() => {
   if (!assignedTasks.value || !Array.isArray(assignedTasks.value)) {
     return []
@@ -432,7 +302,7 @@ const loadingAllWorkPackages = ref(false)
 const fetchAllWorkPackages = async () => {
   loadingAllWorkPackages.value = true
   try {
-    // 🔑 使用公开接口拉取数据
+    // 使用公开接口拉取数据
     const res = await getPublicWorkPackagesApi()
     if (res.data && res.data.code === 200) {
       allWorkPackages.value = res.data.data || []

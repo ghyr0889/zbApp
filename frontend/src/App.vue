@@ -16,6 +16,7 @@
         <el-menu-item index="/score-board">📊 积分统计看板</el-menu-item>
         <el-menu-item v-if="isOwner" index="/review">👑 审批工作台</el-menu-item>
         <el-menu-item v-if="isAdmin" index="/admin">⚙️ 管理后台</el-menu-item>
+        <el-menu-item v-if="isOwner" index="/my-projects">我的项目</el-menu-item>
       </el-menu>
 
       <!-- 右侧：永远常显的个人信息与下拉退出 -->
@@ -54,12 +55,14 @@
 
 <script setup>
 import { ElMessage } from 'element-plus'
-import { ref, computed, watchEffect } from 'vue'
+import { computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { getWorkPackagesOverviewApi } from './api/index'
+import { useUserStore } from './stores/user'
 
 const router = useRouter()
-const userInfo = ref(null)
+const userStore = useUserStore()
+const userInfo = computed(() => userStore.userInfo)
 
 // 封装发送桌面通知的独立方法 (使用普通函数 function 声明，防止报错)
 function triggerDesktopNotification(title, body) {
@@ -122,29 +125,19 @@ const checkDeadlines = async () => {
   }
 }
 
-// 动态获取并解析本地存储的用户信息
-watchEffect(() => {
-  const infoStr = localStorage.getItem('user_info')
-  if (infoStr) {
-    try {
-      userInfo.value = JSON.parse(infoStr)
-      
-      // 登录成功，且当前会话没弹过窗，再去检查期限
-      if (userInfo.value && !sessionStorage.getItem('deadline_notified')) {
-        checkDeadlines()
-      }
-      
-    } catch (e) {
-      userInfo.value = null
+watch(
+  () => userStore.userInfo,
+  (currentUser) => {
+    if (currentUser && !sessionStorage.getItem('deadline_notified')) {
+      checkDeadlines()
     }
-  } else {
-    userInfo.value = null
-  }
-})
+  },
+  { immediate: true }
+)
 
 // 角色与权限计算
-const isAdmin = computed(() => userInfo.value?.role === 'ADMIN')
-const isOwner = computed(() => userInfo.value?.role === 'OWNER')
+const isAdmin = computed(() => userStore.isAdmin)
+const isOwner = computed(() => userStore.isOwner)
 
 const roleDisplayName = computed(() => {
   if (!userInfo.value) return ''
@@ -170,8 +163,7 @@ const handleUserCommand = (command) => {
 }
 
 const logout = () => {
-  localStorage.removeItem('user_info')
-  userInfo.value = null
+  userStore.clearUser()
   ElMessage.success('已安全退出登录')
   router.push('/login')
 }

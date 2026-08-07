@@ -23,7 +23,6 @@ export const getAllProjectsApi = () => api.get('/admin/projects')
 export const createProjectApi = (data) => api.post('/admin/projects', data)
 export const getWorkPackagesOverviewApi = () => api.get('/admin/work-packages-overview')
 export const createWorkPackageApi = (data) => api.post('/admin/work-packages', data)
-export const assignTaskApi = (data) => api.post('/admin/assign-task', data)
 
 export const initiateTransferApi = (data) => api.post('/transfers/initiate', data)
 export const getIncomingTransfersApi = (userId) => api.get(`/transfers/my-incoming?user_id=${userId}`)
@@ -34,6 +33,9 @@ export const reviewLogApi = (logId,data) => api.post(`/review/${logId}`, data)
 export const approveReviewApi = (logId, weight) => {
   return api.post(`/reviews/${logId}/approve`, { weight: weight })
 }
+
+export const getMyProjectsApi = (userId) => api.get(`/review/projects/my/${userId}`)
+export const taskAssignmentApi = (data) => api.post('/review/projects/assign', data)
 
 export const deleteUserApi = (userId) => api.delete(`/users/${userId}`)
 export default api
