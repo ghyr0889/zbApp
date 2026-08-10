@@ -5,7 +5,7 @@
       <template #header>
         <div class="page-header">
           <div>
-            <h2>公开积分统计看板</h2>
+            <h2>积分查看</h2>
             <p>所有人员已审核通过的工作包积分明细</p>
           </div>
           <el-radio-group v-model="currentPeriod" size="small" @change="fetchPublicScoreBoard">
@@ -202,5 +202,4 @@ onMounted(() => {
   }
 }
 </style>
-
 

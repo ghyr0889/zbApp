@@ -38,4 +38,16 @@ export const getMyProjectsApi = (userId) => api.get(`/review/projects/my/${userI
 export const taskAssignmentApi = (data) => api.post('/review/projects/assign', data)
 
 export const deleteUserApi = (userId) => api.delete(`/users/${userId}`)
+
+  // 调用员工登录（涵盖普通员工和项目负责人）
+export const userLoginApi = (data) => api.post('/auth/user-login', data)
+
+  // 调用管理员登录
+export const adminLoginApi = (data) => api.post('/auth/admin-login', data) 
+
+// 工作项管理（工作包 → 工作项）
+export const getWorkItemsApi = (workPackageId) => api.get(`/work-logs/work-packages/${workPackageId}/work-items`)
+export const createWorkItemApi = (data) => api.post(`/work-logs/work-packages/${data.work_package_id}/work-items`, data)
+export const deleteWorkItemApi = (workItemId) => api.delete(`/work-logs/work-items/${workItemId}`)
+
 export default api

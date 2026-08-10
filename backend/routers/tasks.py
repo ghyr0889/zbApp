@@ -1,5 +1,4 @@
-from datetime import datetime
-
+# xiangmu/backend/routers/tasks.py
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -16,6 +15,7 @@ def user_label(user):
     return user.username or user.id
 
 
+# ---------------------------------------------------------------- 发起转办
 @router.post("/initiate")
 def initiate_transfer(payload: TransferCreate, db: Session = Depends(get_db)):
     if payload.from_user_id == payload.to_user_id:
@@ -28,17 +28,13 @@ def initiate_transfer(payload: TransferCreate, db: Session = Depends(get_db)):
     if not to_user:
         raise HTTPException(status_code=404, detail="接收人不存在")
 
-    assignment = db.query(models.TaskAssignment).filter(
-        models.TaskAssignment.id == payload.task_id,
-        models.TaskAssignment.assignee_id == payload.from_user_id,
-        models.TaskAssignment.work_package_id == payload.work_package_id
+    pkg = db.query(models.WorkPackage).filter(
+        models.WorkPackage.id == payload.work_package_id
     ).first()
-    if not assignment:
-        raise HTTPException(status_code=403, detail="只能转办当前由自己负责的工作包")
-
-    pkg = assignment.work_package
     if not pkg:
         raise HTTPException(status_code=404, detail="工作包不存在")
+    if pkg.owner_id != payload.from_user_id:
+        raise HTTPException(status_code=403, detail="只能转办当前由自己负责的工作包")
 
     duplicate = db.query(models.TaskTransfer).filter(
         models.TaskTransfer.work_package_id == payload.work_package_id,
@@ -49,8 +45,8 @@ def initiate_transfer(payload: TransferCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="该工作包已有待处理的转办申请")
 
     transfer = models.TaskTransfer(
-        task_assignment_id=assignment.id,
-        work_package_id=payload.work_package_id,
+        task_assignment_id=payload.task_id or pkg.id,
+        work_package_id=pkg.id,
         task_name=pkg.name,
         from_user_id=payload.from_user_id,
         to_user_id=payload.to_user_id,
@@ -59,22 +55,26 @@ def initiate_transfer(payload: TransferCreate, db: Session = Depends(get_db)):
     db.add(transfer)
     db.commit()
     db.refresh(transfer)
-
     return {"code": 200, "message": "转办申请已发送", "data": {"id": transfer.id}}
 
 
+# ---------------------------------------------------------------- 我的收件箱
 @router.get("/my-incoming")
 def get_incoming_transfers(user_id: str = Query(...), db: Session = Depends(get_db)):
-    transfers = db.query(models.TaskTransfer).filter(
-        models.TaskTransfer.to_user_id == user_id,
-        models.TaskTransfer.status == "PENDING"
-    ).order_by(models.TaskTransfer.created_at.desc()).all()
+    transfers = (
+        db.query(models.TaskTransfer)
+        .filter(
+            models.TaskTransfer.to_user_id == user_id,
+            models.TaskTransfer.status == "PENDING"
+        )
+        .order_by(models.TaskTransfer.created_at.desc())
+        .all()
+    )
 
     from_user_ids = {item.from_user_id for item in transfers}
-    users = []
+    users_by_id = {}
     if from_user_ids:
-        users = db.query(models.User).filter(models.User.id.in_(from_user_ids)).all()
-    users_by_id = {item.id: item for item in users}
+        users_by_id = {u.id: u for u in db.query(models.User).filter(models.User.id.in_(from_user_ids)).all()}
 
     data = []
     for item in transfers:
@@ -86,17 +86,18 @@ def get_incoming_transfers(user_id: str = Query(...), db: Session = Depends(get_
             "work_package_id": item.work_package_id,
             "task_name": pkg.name if pkg else item.task_name,
             "project_id": pkg.project_id if pkg else None,
-            "project_name": pkg.project_name if pkg else "-",
+            "project_name": pkg.project.name if (pkg and pkg.project) else "-",
             "from_user_id": item.from_user_id,
             "from_username": user_label(from_user),
             "to_user_id": item.to_user_id,
             "status": item.status,
-            "created_at": item.created_at.strftime("%Y-%m-%d %H:%M") if item.created_at else "-"
+            "created_at": item.created_at.strftime("%Y-%m-%d %H:%M") if item.created_at else "-",
         })
 
     return {"code": 200, "data": data}
 
 
+# ---------------------------------------------------------------- 处理转办
 @router.post("/process")
 def process_transfer(
     transfer_id: int = Query(...),
@@ -107,7 +108,9 @@ def process_transfer(
     if action not in ["ACCEPT", "REJECT"]:
         raise HTTPException(status_code=400, detail="操作只能是 ACCEPT 或 REJECT")
 
-    transfer = db.query(models.TaskTransfer).filter(models.TaskTransfer.id == transfer_id).first()
+    transfer = db.query(models.TaskTransfer).filter(
+        models.TaskTransfer.id == transfer_id
+    ).first()
     if not transfer:
         raise HTTPException(status_code=404, detail="未找到该转办申请")
     if transfer.status != "PENDING":
@@ -118,23 +121,20 @@ def process_transfer(
         db.commit()
         return {"code": 200, "message": "已拒绝该转办申请"}
 
-    assignment = db.query(models.TaskAssignment).filter(
-        models.TaskAssignment.id == transfer.task_assignment_id,
-        models.TaskAssignment.work_package_id == transfer.work_package_id,
-        models.TaskAssignment.assignee_id == transfer.from_user_id
+    pkg = db.query(models.WorkPackage).filter(
+        models.WorkPackage.id == transfer.work_package_id
     ).first()
-    if not assignment:
-        raise HTTPException(status_code=400, detail="原负责人当前已不负责该工作包，无法接受")
+    if not pkg:
+        raise HTTPException(status_code=400, detail="工作包不存在，无法接受")
 
-    assignment.assignee_id = transfer.to_user_id
-    assignment.assigner_id = transfer.from_user_id
-    assignment.assigned_at = datetime.now()
+    # 变更工作包负责人
+    pkg.owner_id = transfer.to_user_id
     transfer.status = "ACCEPTED"
 
+    # 该工作包其它待处理转办一并作废
     db.query(models.TaskTransfer).filter(
         models.TaskTransfer.id != transfer.id,
         models.TaskTransfer.work_package_id == transfer.work_package_id,
-        models.TaskTransfer.from_user_id == transfer.from_user_id,
         models.TaskTransfer.status == "PENDING"
     ).update({models.TaskTransfer.status: "REJECTED"}, synchronize_session=False)
 

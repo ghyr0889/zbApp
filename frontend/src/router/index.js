@@ -3,24 +3,21 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '../stores/user'
 
-// 确保这 4 个文件在 src/views/ 目录下都真实存在
 import Login from '../views/Login.vue'
-import MyLogs from '../views/MyLogs.vue'
 import Review from '../views/Review.vue'
 import ScoreBoard from '../views/ScoreBoard.vue'
-import AdminPanel from '../views/AdminPanel.vue'
-import WorkPackageHall from '../views/WorkPackageHall.vue'
-import MyProjects from '../views/MyProjects.vue'
+import ProjectOverview from '../views/ProjectOverview.vue'
+import PersonalInfo from '../views/PersonalInfo.vue'
+import WorkItemList from '../views/WorkItemList.vue'
 
 const routes = [
-  { path: '/', redirect: '/login' },
+  { path: '/', redirect: '/project-overview' },
   { path: '/login', name: 'Login', component: Login },
-  { path: '/my-logs', name: 'MyLogs', component: MyLogs },
-  { path: '/work-packages', name: 'WorkPackageHall', component: WorkPackageHall },
+  { path: '/project-overview', name: 'ProjectOverview', component: ProjectOverview },
   { path: '/review', name: 'ReviewLogs', component: Review, meta: { requiresOwner: true } },
   { path: '/score-board', name: 'ScoreBoard', component: ScoreBoard },
-  { path: '/admin', name: 'AdminPanel', component: AdminPanel, meta: { requiresAdmin: true}},
-  { path: '/my-projects', name: 'MyProjects', component: MyProjects, meta: { requiresOwner: true } }
+  { path: '/personal-info', name: 'PersonalInfo', component: PersonalInfo },
+  { path: '/work-package/:id/work-items', name: 'WorkItemList', component: WorkItemList }
 ]
 
 const router = createRouter({
@@ -38,20 +35,20 @@ router.beforeEach((to, from, next) => {
     return next('/login')
   }
 
-  //  如果访问的是需要管理员权限的页面 (/admin)
+  //  如果访问的是需要管理员权限的页面
   if (to.meta.requiresAdmin) {
     if (userStore.isAdmin) {
       next() // 允许进入
     } else {
-      ElMessage.error('权限不足！仅管理员可以访问管理后台。')
-      next('/my-logs') // 拦截并重定向到员工填报页
+      ElMessage.error('权限不足！仅管理员可以访问该页面。')
+      next('/project-overview')
     }
   } else if (to.meta.requiresOwner) {
     if (userStore.isOwner) {
       next()
     } else {
-      ElMessage.error('权限不足！仅项目负责人可以访问审批工作台。')
-      next('/my-logs')
+      ElMessage.error('权限不足！仅项目负责人可以访问审批查阅。')
+      next('/project-overview')
     }
   } else {
     next()

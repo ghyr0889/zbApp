@@ -4,7 +4,7 @@
     <el-card shadow="hover">
       <template #header>
         <div class="card-header">
-          <span>👑 项目负责人审批工作台（待审核请求列表）</span>
+          <span>👑 审批查阅（待审核请求列表）</span>
           <div>
             <span class="user-badge" v-if="currentOwner">当前负责人: {{ currentOwner.username || currentOwner.id }} (ID: {{ currentOwner.id }})</span>
             <el-button type="primary" size="small" @click="fetchPendingLogs">🔄 刷新待办列表</el-button>
