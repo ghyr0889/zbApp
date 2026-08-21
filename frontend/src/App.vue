@@ -5,7 +5,7 @@
       
       <!-- 品牌标识区 -->
       <div class="brand-logo">
-        <span class="logo-text">项目管理系统</span>
+        <span class="logo-text">综保工作管理系统</span>
       </div>
 
       <!-- 左侧：功能菜单 -->
@@ -33,6 +33,10 @@
           <i class="el-icon-user"></i>
           <span>个人信息</span>
         </el-menu-item>
+        <el-menu-item index="/admin-panel" v-if="isAdmin">
+          <i class="el-icon-setting"></i>
+          <span>后台管理</span>
+        </el-menu-item>
       </el-menu>
     </div>
 
@@ -58,7 +62,7 @@
         <template #dropdown>
           <el-dropdown-menu>
             <el-dropdown-item command="logout" class="logout-item">
-              🚪 退出登录
+              退出登录
             </el-dropdown-item>
           </el-dropdown-menu>
         </template>
@@ -86,13 +90,14 @@ const userStore = useUserStore()
 const userInfo = computed(() => userStore.userInfo)
 
 const isAdmin = computed(() => userStore.isAdmin)
-const isOwner = computed(() => userStore.isOwner)
+const isLEADER = computed(() => userStore.isLEADER)
 
 const roleDisplayName = computed(() => {
   if (!userInfo.value) return ''
   const role = String(userInfo.value.role).toUpperCase()
   if (role === 'ADMIN') return '管理员'
-  if (role === 'OWNER' || role === 'LEADER') return '项目负责人'
+  if (role === 'LEADER') return '领导（部门主管、项目负责人）'
+  if (role === 'DEPARTMENT') return '科室'
   return '普通员工'
 })
 
@@ -100,7 +105,8 @@ const roleTagType = computed(() => {
   if (!userInfo.value) return 'info'
   const role = String(userInfo.value.role).toUpperCase()
   if (role === 'ADMIN') return 'danger'
-  if (role === 'OWNER' || role === 'LEADER') return 'warning'
+  if (role === 'LEADER') return 'warning'
+  if (role === 'DEPARTMENT') return 'success'
   return 'info'
 })
 

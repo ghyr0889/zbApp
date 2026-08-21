@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 import models
 from database import get_db
-from schemas import LoginRequest
+from schemas import LoginRequest, ChangePasswordRequest
 
 router = APIRouter(prefix="/api/v1/auth", tags=["认证"])
 
@@ -27,7 +27,8 @@ def authenticate(data: LoginRequest, db: Session, allowed_roles=None):
         "data": {
             "id": current_user.id,
             "username": current_user.username,
-            "role": current_user.role
+            "role": current_user.role,
+            "job_grade": current_user.job_grade
         }
     }
 
@@ -39,9 +40,27 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
 
 @router.post("/user-login")
 def user_login(data: LoginRequest, db: Session = Depends(get_db)):
-    return authenticate(data, db, allowed_roles=["EMPLOYEE", "OWNER", "LEADER"])
+    return authenticate(data, db, allowed_roles=["EMPLOYEE", "LEADER", "DEPARTMENT"])
 
 
 @router.post("/admin-login")
 def admin_login(data: LoginRequest, db: Session = Depends(get_db)):
     return authenticate(data, db, allowed_roles=["ADMIN"])
+
+
+@router.put("/password")
+def change_password(data: ChangePasswordRequest, db: Session = Depends(get_db)):
+    """修改自己的登录密码：校验旧密码后更新，所有角色通用。"""
+    user = db.query(models.User).filter(models.User.id == data.user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    if user.password != data.old_password:
+        raise HTTPException(status_code=400, detail="旧密码不正确")
+    new_pwd = str(data.new_password or "")
+    if len(new_pwd) < 6:
+        raise HTTPException(status_code=400, detail="新密码长度不能少于6位")
+    if new_pwd == data.old_password:
+        raise HTTPException(status_code=400, detail="新密码不能与旧密码相同")
+    user.password = new_pwd
+    db.commit()
+    return {"code": 200, "message": "密码修改成功"}

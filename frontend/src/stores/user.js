@@ -24,8 +24,11 @@ export const useUserStore = defineStore('user', {
     isAdmin() {
       return this.role === 'ADMIN'
     },
-    isOwner() {
-      return this.role === 'OWNER' || this.role === 'LEADER'
+    isLEADER() {
+      return this.role === 'LEADER'
+    },
+    isDEPARTMENT() {
+      return this.role === 'DEPARTMENT'
     }
   },
   actions: {

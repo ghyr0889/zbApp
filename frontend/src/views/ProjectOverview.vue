@@ -3,9 +3,6 @@
     <el-card class="box-card" shadow="never">
       <template #header>
         <div class="card-header">
-          <div class="header-title">
-            <span>项目总览</span>
-          </div>
           <div class="header-actions">
             <el-input
               v-model="searchKeyword"
@@ -28,174 +25,318 @@
         </div>
       </template>
 
-      <!-- 外层主表格：显示项目信息 -->
-      <el-table
-        ref="projectTableRef"
-        :data="tableData"
-        style="width: 100%"
-        v-loading="loadingAllWorkPackages"
-        height="calc(100vh - 220px)"
-        empty-text="暂无项目数据"
-        row-key="project_id"
-        :row-class-name="tableRowClassName"
-        :header-cell-style="{ background: '#f8fafc', color: '#334155', fontWeight: 'bold' }"
-      >
-        <!-- 内层嵌套表格：显示工作包信息 -->
-        <el-table-column type="expand">
-          <template #default="{ row: projectRow }">
-            <div class="nested-table-container">
-              <el-table
-                :data="projectRow.work_packages"
-                border
-                size="small"
-                style="width: 100%"
-                :row-class-name="tableRowClassName"
-                :header-cell-style="{ background: '#f1f5f9', color: '#475569' }"
-                @row-dblclick="handleOpenWorkItems"
-              >
-                <el-table-column prop="id" label="编号" width="140" align="center">
-                  <template #default="{ row: pkg }">
-                    <el-input v-if="pkg.isEdit && pkg.isNew" v-model="pkg.id" size="small" placeholder="留空自动生成" />
-                    <span v-else class="code-text">{{ pkg.id }}</span>
-                  </template>
-                </el-table-column>
-                
-                <el-table-column prop="category_name" label="类别" width="140" align="center">
-                  <template #default="{ row: pkg }">
-                    <el-select v-if="pkg.isEdit" v-model="pkg.category_name" size="small">
-                      <el-option v-for="cat in categoryOptions" :key="cat" :label="cat" :value="cat" />
-                    </el-select>
-                    <el-tag v-else size="small" type="info">{{ pkg.category_name }}</el-tag>
-                  </template>
-                </el-table-column>
-                
-                <el-table-column prop="next_step_work" label="下阶段工作" min-width="180">
-                  <template #default="{ row: pkg }">
-                    <el-input v-if="pkg.isEdit" type="textarea" autosize v-model="pkg.next_step_work" size="small" placeholder="描述工作内容" />
-                    <template v-else>
-                      <span class="muted-text" v-if="!pkg.next_step_work">暂无设定</span>
-                      <span v-else>{{ pkg.next_step_work }}</span>
-                    </template>
-                  </template>
-                </el-table-column>
-                
-                <el-table-column prop="objective" label="目标" min-width="180">
-                  <template #default="{ row: pkg }">
-                    <el-input v-if="pkg.isEdit" type="textarea" autosize v-model="pkg.objective" size="small" placeholder="设定工作目标" />
-                    <template v-else>
-                      <span class="muted-text" v-if="!pkg.objective">暂无设定</span>
-                      <span v-else>{{ pkg.objective }}</span>
-                    </template>
-                  </template>
-                </el-table-column>
+      <el-tabs v-model="activeTab">
+        <el-tab-pane label="所有项目" name="all">
+          <!-- 外层主表格：显示项目信息 -->
+          <el-table
+            ref="projectTableRef"
+            :data="tableData"
+            style="width: 100%"
+            v-loading="loadingAllWorkPackages"
+            height="calc(100vh - 220px)"
+            empty-text="暂无项目数据"
+            row-key="project_id"
+            :row-class-name="tableRowClassName"
+            :header-cell-style="{ background: '#f8fafc', color: '#334155', fontWeight: 'bold' }"
+          >
+            <!-- 内层嵌套表格：显示工作包信息 -->
+            <el-table-column type="expand">
+              <template #default="{ row: projectRow }">
+                <div class="nested-table-container">
+                  <el-table
+                    :data="projectRow.work_packages"
+                    border
+                    size="small"
+                    style="width: 100%"
+                    :row-class-name="tableRowClassName"
+                    :header-cell-style="{ background: '#f1f5f9', color: '#475569' }"
+                    @row-dblclick="handleOpenWorkItems"
+                  >
+                    <el-table-column prop="id" label="工作包编号" width="140" align="center">
+                      <template #default="{ row: pkg }">
+                        <el-input v-if="pkg.isEdit && pkg.isNew" v-model="pkg.id" size="small" placeholder="留空自动生成" />
+                        <span v-else class="code-text">{{ pkg.id }}</span>
+                      </template>
+                    </el-table-column>
+                    
+                    <el-table-column prop="category_name" label="类别" width="140" align="center">
+                      <template #default="{ row: pkg }">
+                        <el-select v-if="pkg.isEdit" v-model="pkg.category_name" size="small">
+                          <el-option v-for="cat in categoryOptions" :key="cat" :label="cat" :value="cat" />
+                        </el-select>
+                        <el-tag v-else size="small" type="info">{{ pkg.category_name }}</el-tag>
+                      </template>
+                    </el-table-column>
+                    
+                    <el-table-column prop="next_step_work" label="下阶段工作" min-width="180">
+                      <template #default="{ row: pkg }">
+                        <el-input v-if="pkg.isEdit" type="textarea" autosize v-model="pkg.next_step_work" size="small" placeholder="描述工作内容" />
+                        <template v-else>
+                          <span class="muted-text" v-if="!pkg.next_step_work">暂无设定</span>
+                          <span v-else>{{ pkg.next_step_work }}</span>
+                        </template>
+                      </template>
+                    </el-table-column>
+                    
+                    <el-table-column prop="objective" label="目标" min-width="180">
+                      <template #default="{ row: pkg }">
+                        <el-input v-if="pkg.isEdit" type="textarea" autosize v-model="pkg.objective" size="small" placeholder="设定工作目标" />
+                        <template v-else>
+                          <span class="muted-text" v-if="!pkg.objective">暂无设定</span>
+                          <span v-else>{{ pkg.objective }}</span>
+                        </template>
+                      </template>
+                    </el-table-column>
 
-                <el-table-column label="责任人" min-width="150">
-                  <template #default="{ row: pkg }">
-                    <span v-if="pkg.owner_name || pkg.assignee_id" class="employee-text">
-                      <i class="el-icon-user"></i> {{ pkg.owner_name || pkg.assignee_name || pkg.assignee_id }}
-                    </span>
-                    <span v-else class="tip-text">暂未指定</span>
+                    <el-table-column label="责任人" min-width="170">
+                      <template #default="{ row: pkg }">
+                        <el-select v-if="pkg.isEdit" v-model="pkg.owner_id" clearable filterable placeholder="选择责任人" size="small" style="width: 100%">
+                          <el-option v-for="user in userOptions" :key="user.id" :label="`${user.username}（${user.id}）`" :value="user.id" />
+                        </el-select>
+                        <span v-else-if="pkg.package_owner_name || pkg.package_owner_id" class="employee-text">
+                          <i class="el-icon-user"></i> {{ pkg.package_owner_name }}({{ pkg.package_owner_id }})
+                        </span>
+                        <span v-else class="tip-text">暂未指定</span>
+                      </template>
+                    </el-table-column>
+
+                    <el-table-column label="进度" width="160" align="center">
+                      <template #default="{ row: pkg }">
+                        <el-progress :percentage="pkg.package_progress || 0" :stroke-width="10" />
+                      </template>
+                    </el-table-column>
+
+                    <el-table-column v-if="isAdmin || isLeader || isDepartment" label="操作" width="140" align="center" fixed="right">
+                      <template #default="{ row: pkg, $index }">
+                        <template v-if="canManageProject(projectRow)">
+                          <template v-if="pkg.isEdit">
+                            <el-button type="success" link size="small" @click="handleSaveWorkPackage(pkg, projectRow)">保存</el-button>
+                            <el-button type="info" link size="small" @click="cancelWpEdit(pkg, projectRow, $index)">取消</el-button>
+                          </template>
+                          <template v-else>
+                            <el-button type="primary" link size="small" @click="pkg.isEdit = true">编辑</el-button>
+                          </template>
+                        </template>
+                      </template>
+                    </el-table-column>
+                  </el-table>
+                </div>
+              </template>
+            </el-table-column>
+
+            <!-- 主表格列配置 -->
+            <el-table-column prop="project_code" label="项目编号" min-width="140">
+              <template #default="{ row }">
+                <el-input v-if="row.isEdit" v-model="row.project_code" size="small" placeholder="请输入项目编号" />
+                <span v-else class="project-code">{{ row.project_code }}</span>
+              </template>
+            </el-table-column>
+
+            <el-table-column prop="project_name" label="项目名称" min-width="140">
+              <template #default="{ row }">
+                <el-input v-if="row.isEdit" v-model="row.project_name" size="small" placeholder="请输入项目名称" />
+                <span v-else class="project-title">{{ row.project_name }}</span>
+              </template>
+            </el-table-column>
+
+            <el-table-column prop="category" label="项目类别" width="140" align="center">
+              <template #default="{ row }">
+                <el-input v-if="row.isEdit" v-model="row.category" size="small" placeholder="如:研发" />
+                <template v-else>
+                  <el-tag v-if="row.category" type="info" effect="plain">{{ row.category }}</el-tag>
+                  <span v-else class="tip-text">-</span>
+                </template>
+              </template>
+            </el-table-column>
+            
+            <el-table-column label="项目级别" width="120" align="center">
+              <template #default="{ row }">
+                <el-select v-if="row.isEdit" v-model="row.level" size="small">
+                  <el-option label="A 级" value="A" />
+                  <el-option label="B 级" value="B" />
+                  <el-option label="C 级" value="C" />
+                  <el-option label="D 级" value="D" />
+                </el-select>
+                <template v-else>
+                  <el-tag v-if="row.level" :type="row.level === 'A' ? 'danger' : (row.level === 'B' ? 'warning' : 'primary')" effect="light" round>
+                    {{ row.level }} 级
+                  </el-tag>
+                  <span v-else class="tip-text">-</span>
+                </template>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="负责人" width="160">
+              <template #default="{ row }">
+                <el-select v-if="row.isEdit" v-model="row.owner_id" clearable filterable placeholder="选择负责人" size="small" style="width: 100%">
+                  <el-option v-for="user in userOptions" :key="user.id" :label="`${user.username}（${user.id}）`" :value="user.id" />
+                </el-select>
+                <template v-else>
+                  <span class="owner-text" v-if="row.owner_name || row.owner_id">
+                    {{ row.owner_name ? `${row.owner_name}（${row.owner_id}）` : row.owner_id }}
+                  </span>
+                  <span v-else class="tip-text">暂未指定</span>
+                </template>
+              </template>
+            </el-table-column>
+
+
+            <el-table-column label="进度" width="170" align="center">
+              <template #default="{ row }">
+                <el-progress :percentage="row.progress || 0" :stroke-width="12" />
+              </template>
+            </el-table-column>
+
+            <el-table-column v-if="isAdmin" label="操作" width="200" align="center" fixed="right">
+              <template #default="{ row, $index }">
+                <template v-if="canManageProject(row)">
+                  <template v-if="row.isEdit">
+                    <el-button type="success" link size="small" @click="handleSaveProject(row)">保存</el-button>
+                    <el-button type="info" link size="small" @click="cancelProjectEdit(row, $index)">取消</el-button>
                   </template>
-                </el-table-column>
-
-                <el-table-column v-if="isAdmin" label="操作" width="140" align="center" fixed="right">
-                  <template #default="{ row: pkg, $index }">
-                    <template v-if="pkg.isEdit">
-                      <el-button type="success" link size="small" @click="handleSaveWorkPackage(pkg, projectRow)">保存</el-button>
-                      <el-button type="info" link size="small" @click="cancelWpEdit(pkg, projectRow, $index)">取消</el-button>
-                    </template>
-                    <template v-else>
-                      <el-button type="primary" link size="small" @click="pkg.isEdit = true">编辑</el-button>
-                    </template>
+                  <template v-else>
+                    <el-button type="primary" link size="small" @click="row.isEdit = true">编辑</el-button>
+                    <el-button type="warning" link size="small" @click="handleAddWorkPackage(row)">+ 工作包</el-button>
                   </template>
-                </el-table-column>
-              </el-table>
-            </div>
-          </template>
-        </el-table-column>
+                </template>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-tab-pane>
 
-        <!-- 主表格列配置 -->
-        <el-table-column prop="project_name" label="项目名称" min-width="200">
-          <template #default="{ row }">
-            <el-input v-if="row.isEdit" v-model="row.project_name" size="small" placeholder="请输入项目名称" />
-            <span v-else class="project-title">{{ row.project_name }}</span>
-          </template>
-        </el-table-column>
+        <el-tab-pane label="我的工作" name="mine">
+          <!-- 外层主表格，展示工作包 -->
+          <el-table
+            :data="myWorkPackages"
+            style="width: 100%"
+            height="calc(100vh - 260px)"
+            empty-text="您暂未负责任何工作包"
+            row-key="id"
+            :row-class-name="tableRowClassName"
+            :header-cell-style="{ background: '#f8fafc', color: '#334155', fontWeight: 'bold' }"
+            @expand-change="handleMyWorkExpand"
+          >
+            <!-- 展开列：展示该工作包下的工作项详细信息 -->
+            <el-table-column type="expand">
+              <template #default="{ row: pkg }">
+                <div class="nested-table-container">
+                  <el-table
+                    :data="myItemsMap[pkg.id] || []"
+                    border
+                    size="small"
+                    style="width: 100%"
+                    :row-class-name="tableRowClassName"
+                    :header-cell-style="{ background: '#f1f5f9', color: '#475569' }"
+                  >
+                    <el-table-column prop="name" label="工作项名称" min-width="150" />
+                    <el-table-column prop="standard" label="完成标准" min-width="180">
+                      <template #default="{ row: item }">
+                        <span>{{ item.standard || '-' }}</span>
+                      </template>
+                    </el-table-column>
+                    <el-table-column prop="difficulty" label="难度" width="80" align="center">
+                      <template #default="{ row: item }">
+                        <el-tag v-if="item.difficulty" size="small">{{ item.difficulty }}</el-tag>
+                        <span v-else>-</span>
+                      </template>
+                    </el-table-column>
+                    <el-table-column prop="importance" label="重要度" width="80" align="center">
+                      <template #default="{ row: item }">
+                        <span>{{ item.importance || '-' }}</span>
+                      </template>
+                    </el-table-column>
+                    <el-table-column prop="innovation" label="创新度" width="80" align="center">
+                      <template #default="{ row: item }">
+                        <span>{{ item.innovation || '-' }}</span>
+                      </template>
+                    </el-table-column>
+                    <el-table-column prop="category" label="类别" width="100" align="center">
+                      <template #default="{ row: item }">
+                        <span>{{ item.category || '-' }}</span>
+                      </template>
+                    </el-table-column>
+                    <el-table-column prop="deadline" label="截止时间" width="120" align="center">
+                      <template #default="{ row: item }">
+                        <el-tag v-if="item.deadline" type="danger" effect="plain">{{ item.deadline }}</el-tag>
+                        <span v-else>-</span>
+                      </template>
+                    </el-table-column>
+                    <el-table-column prop="score" label="分值" width="80" align="center">
+                      <template #default="{ row: item }">
+                        <span class="score-text">{{ item.score ?? 0 }}</span>
+                      </template>
+                    </el-table-column>
+                    <el-table-column prop="month_score" label="本月分值" width="90" align="center">
+                      <template #default="{ row: item }">
+                        <span class="score-text">{{ item.month_score ?? 0 }}</span>
+                      </template>
+                    </el-table-column>
+                  </el-table>
+                  <div v-if="!(myItemsMap[pkg.id] || []).length" class="tip-text" style="padding: 8px 4px;">该工作包暂无工作项</div>
+                </div>
+              </template>
+            </el-table-column>
 
-        <el-table-column prop="category" label="项目类别" width="140" align="center">
-          <template #default="{ row }">
-            <el-input v-if="row.isEdit" v-model="row.category" size="small" placeholder="如:研发" />
-            <template v-else>
-              <el-tag v-if="row.category" type="info" effect="plain">{{ row.category }}</el-tag>
-              <span v-else class="tip-text">-</span>
-            </template>
-          </template>
-        </el-table-column>
-        
-        <el-table-column label="项目级别" width="120" align="center">
-          <template #default="{ row }">
-            <el-select v-if="row.isEdit" v-model="row.level" size="small">
-              <el-option label="A 级" value="A" />
-              <el-option label="B 级" value="B" />
-              <el-option label="C 级" value="C" />
-              <el-option label="D 级" value="D" />
+            <el-table-column prop="project_code" label="所属项目" min-width="120" show-overflow-tooltip />
+            <el-table-column prop="id" label="工作包编号" width="140" align="center">
+              <template #default="{ row: pkg }">
+                <span class="code-text">{{ pkg.id }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="项目负责人" width="120" align="center">
+              <template #default="{ row: pkg }">
+                <span v-if="pkg.project_owner_name" class="owner-text">{{ pkg.project_owner_name }}</span>
+                <span v-else class="tip-text">暂未指定</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="category_name" label="工作包类别" width="120" align="center">
+              <template #default="{ row: pkg }">
+                <el-tag v-if="pkg.category_name" size="small" type="info">{{ pkg.category_name }}</el-tag>
+                <span v-else class="tip-text">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="200" align="center" >
+              <template #default="{ row: pkg }">
+                <el-button type="warning" link size="small" @click="handleTransferWorkPackage(pkg)">转办</el-button>
+              </template>
+            </el-table-column>               
+          </el-table>
+        </el-tab-pane>
+      </el-tabs>
+      <el-dialog v-model="transferDialogVisible" title="发起工作转办" width="460px" draggable>
+        <el-form label-width="70px">
+          <el-form-item label="工作包">
+            <el-tag>{{ transferPkg?.id }}</el-tag>
+            <span style="margin-left:8px">{{ transferPkg?.project_name }}</span>
+          </el-form-item>
+          <el-form-item label="接收人" required>
+            <el-select v-model="transferTargetId" filterable placeholder="选择接收人" style="width:100%">
+              <el-option v-for="u in transferTargets" :key="u.id"
+                :label="`${u.username}（${u.id}）`" :value="u.id" />
             </el-select>
-            <template v-else>
-              <el-tag v-if="row.level" :type="row.level === 'A' ? 'danger' : (row.level === 'B' ? 'warning' : 'primary')" effect="light" round>
-                {{ row.level }} 级
-              </el-tag>
-              <span v-else class="tip-text">-</span>
-            </template>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="负责人" width="160">
-          <template #default="{ row }">
-            <el-select v-if="row.isEdit" v-model="row.owner_id" clearable filterable placeholder="选择负责人" size="small" style="width: 100%">
-              <el-option v-for="user in userOptions" :key="user.id" :label="`${user.username}（${user.id}）`" :value="user.id" />
-            </el-select>
-            <template v-else>
-              <span class="owner-text" v-if="row.owner_name || row.owner_id">
-                {{ row.owner_name ? `${row.owner_name}（${row.owner_id}）` : row.owner_id }}
-              </span>
-              <span v-else class="tip-text">暂未指定</span>
-            </template>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="进度" width="120" align="center">
-          <template #default="{ row }">
-            <span v-if="row.project_completed" class="status-dot success">已完结</span>
-            <span v-else class="status-dot primary">进行中</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column v-if="isAdmin" label="操作" width="200" align="center" fixed="right">
-          <template #default="{ row, $index }">
-            <template v-if="row.isEdit">
-              <el-button type="success" link size="small" @click="handleSaveProject(row)">保存</el-button>
-              <el-button type="info" link size="small" @click="cancelProjectEdit(row, $index)">取消</el-button>
-            </template>
-            <template v-else>
-              <el-button type="primary" link size="small" @click="row.isEdit = true">编辑</el-button>
-              <el-button type="warning" link size="small" @click="handleAddWorkPackage(row)">+ 工作包</el-button>
-            </template>
-          </template>
-        </el-table-column>
-      </el-table>
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="transferDialogVisible = false">取消</el-button>
+          <el-button type="warning" :loading="transferring" @click="confirmTransfer">发送转办</el-button>
+        </template>
+      </el-dialog>
     </el-card>
+
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   createProjectApi,
   createWorkPackageApi,
   getAllProjectsApi,
   getAllUsersApi,
-  getPublicWorkPackagesApi
+  getPublicWorkPackagesApi,
+  getWorkItemsApi,
+  initiateTransferApi
 } from '../api'
 import { useUserStore } from '../stores/user'
 import { useRouter } from 'vue-router'
@@ -203,6 +344,19 @@ import { useRouter } from 'vue-router'
 const userStore = useUserStore()
 const router = useRouter()
 const isAdmin = computed(() => userStore.isAdmin)
+const isLeader = computed(() => userStore.isLEADER)
+const isDepartment = computed(() => userStore.isDEPARTMENT)
+const currentUserId = computed(() => String(userStore.userInfo?.id || ''))
+const activeTab = ref('all')   // 默认显示“所有项目”
+
+// 是否有权管理某个项目：系统管理员 / 领导 / 该项目负责人
+const canManageProject = (projectRow) => {
+  if (isAdmin.value || isLeader.value || isDepartment.value) return true
+  return String(projectRow?.owner_id || '') === currentUserId.value
+}
+
+// 表格行样式（原“完成状态”样式已移除，返回空即可）
+const tableRowClassName = () => ''
 
 const projectTableRef = ref(null) // 用于触发表格展开
 const allWorkPackages = ref([])
@@ -214,9 +368,17 @@ const projectOptions = ref([])
 const userOptions = ref([])
 const categoryOptions = ['类型1', '类型2', '类型3', '类型4']
 
+//工作包转交状态
+const transferDialogVisible = ref(false) // 弹窗开关
+const transferPkg = ref(null)            // 当前要转办的工作包
+const transferTargetId = ref('')         // 选中的接收人
+const transferTargets = ref([])          // 可选的接收人（排除自己）
+const transferring = ref(false)          // 提交中 loading
+
+
 // 获取配置项
 const fetchAdminOptions = async () => {
-  if (!isAdmin.value) return
+  if (!isAdmin.value && !isLeader.value) return
   try {
     const [projectsRes, usersRes] = await Promise.all([
       getAllProjectsApi(),
@@ -245,9 +407,27 @@ const fetchAllWorkPackages = async () => {
   }
 }
 
-const tableRowClassName = ({ row }) => {
-  if (row.pkg_completed || row.project_completed) return 'completed-row'
-  return ''
+// 我的工作：当前用户负责的工作包（直接从已拉取的全量数据中过滤，无需额外请求）
+const myWorkPackages = computed(() => {
+  const uid = currentUserId.value
+  if (!uid) return []
+  return allWorkPackages.value.filter(pkg => String(pkg.package_owner_id || '') === uid)
+})
+
+// 展开时按需加载该工作包下的工作项（缓存，避免重复请求）
+const myItemsMap = reactive({})
+const handleMyWorkExpand = async (row, expandedRows) => {
+  const expanded = expandedRows.some(r => r.id === row.id)
+  if (!expanded || myItemsMap[row.id]) return
+  try {
+    const res = await getWorkItemsApi(row.id)
+    if (res.data?.code === 200) {
+      myItemsMap[row.id] = res.data.data.work_items || []
+    }
+  } catch (err) {
+    console.error('获取工作项失败:', err)
+    ElMessage.error(err.response?.data?.detail || '获取工作项失败')
+  }
 }
 
 // 双击工作包行 → 跳转到该工作包的工作项管理页面
@@ -272,22 +452,27 @@ const groupedProjects = computed(() => {
       map[projectKey] = {
         project_id: projectKey,
         project_name: pkg.project_name,
+        project_code:pkg.project_code,
         category: pkg.project_category || pkg.category,
         level: pkg.project_level || pkg.level,
         owner_name: pkg.project_owner_name || pkg.owner_name,
         owner_id: pkg.project_owner_id || pkg.owner_id,
-        project_completed: pkg.project_completed || false,
+        progress: pkg.project_progress || 0,
         work_packages: [],
         isEdit: false,
         isNew: false
       }
     }
-    map[projectKey].work_packages.push({
-      ...pkg,
-      next_step_work: pkg.next_step_work,
-      isEdit: false,
-      isNew: false
-    })
+    // 只有真正的工作包才加入子表（空项目占位记录不加入，避免显示空行）
+    if (pkg.id) {
+      map[projectKey].work_packages.push({
+        ...pkg,
+        next_step_work: pkg.next_step_work,
+        owner_id: pkg.package_owner_id || '',
+        isEdit: false,
+        isNew: false
+      })
+    }
   })
   return Object.values(map)
 })
@@ -311,15 +496,15 @@ watch(filterProjects, (newVal) => {
 
 /* =============== 行内编辑相关方法 =============== */
 
-// 1. 新增与操作项目 (主表)
+// 新增与操作项目 (主表)
 const handleAddProject = () => {
   tableData.value.unshift({
     project_id: '',
+    project_code:'',
     project_name: '',
     category: '',
     level: 'C',
     owner_id: '',
-    project_completed: false,
     work_packages: [],
     isEdit: true,
     isNew: true
@@ -334,6 +519,7 @@ const handleSaveProject = async (row) => {
   try {
     const res = await createProjectApi({
       id: row.isNew ? null : row.project_id,
+      code: row.project_code,
       name: row.project_name.trim(),
       category: row.category,
       level: row.level,
@@ -366,7 +552,7 @@ const cancelProjectEdit = (row, index) => {
   }
 }
 
-// 2. 新增与操作工作包 (子表)
+// 新增与操作工作包 (子表)
 const handleAddWorkPackage = (projectRow) => {
   // 展开当前项目行
   if (projectTableRef.value) {
@@ -380,6 +566,7 @@ const handleAddWorkPackage = (projectRow) => {
     category_name: '类型1',
     next_step_work: '',
     objective: '',
+    owner_id: '',
     isEdit: true,
     isNew: true
   })
@@ -397,7 +584,8 @@ const handleSaveWorkPackage = async (pkg, parentProject) => {
       project_name: parentProject.project_name,
       category_name: pkg.category_name,
       next_step_work: pkg.next_step_work.trim(),
-      objective: pkg.objective ? pkg.objective.trim() : ''
+      objective: pkg.objective ? pkg.objective.trim() : '',
+      owner_id: pkg.owner_id || null
     })
     if (res.data?.code === 200) {
       ElMessage.success('工作包保存成功')
@@ -425,6 +613,40 @@ const cancelWpEdit = (pkg, parentProject, index) => {
       }
     }
     pkg.isEdit = false
+  }
+}
+
+const handleTransferWorkPackage = async(pkg) => {
+  transferPkg.value = pkg
+  transferTargetId.value = ''
+  // 拉用户列表（排除自己）——注意不能依赖 fetchAdminOptions，那个只给管理员/领导拉
+  try {
+    const res = await getAllUsersApi()
+    transferTargets.value = (res.data?.data || []).filter(u => String(u.id) !== currentUserId.value)
+  } catch (err) {
+    return ElMessage.error('获取用户列表失败')
+  }
+  transferDialogVisible.value = true 
+}
+
+const confirmTransfer = async () => { //确认发起函数
+  if (!transferTargetId.value) return ElMessage.warning('请选择接收人')
+  transferring.value = true
+  try {
+    const res = await initiateTransferApi({
+      work_package_id: transferPkg.value.id, // pkg.id 就是工作包编号
+      from_user_id: currentUserId.value,
+      to_user_id: transferTargetId.value
+    })
+    if (res.data?.code === 200) {
+      ElMessage.success('转办申请已发送')
+      transferDialogVisible.value = false
+      await fetchAllWorkPackages() // 可选：刷新数据
+    }
+  } catch (err) {
+    ElMessage.error(err.response?.data?.detail || '发起转办失败')
+  } finally {
+    transferring.value = false
   }
 }
 
@@ -458,13 +680,6 @@ onMounted(async () => {
   padding: 4px 0;
 }
 
-.header-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: #1e293b;
-  display: flex;
-  align-items: center;
-}
 
 .header-actions {
   display: flex;
@@ -477,6 +692,12 @@ onMounted(async () => {
 }
 
 /* 文本和列的颜色高亮 */
+.project-code{
+  font-weight: bold;
+  color: #334155;
+  font-size: 14px;
+}
+
 .project-title {
   font-weight: bold;
   color: #334155;
@@ -539,21 +760,5 @@ onMounted(async () => {
 :deep(.el-table__expanded-cell) {
   padding: 0 !important;
   background-color: #fbfbfc !important;
-}
-
-/* 完成行灰显处理 */
-:deep(.el-table .completed-row) {
-  --el-table-tr-bg-color: #f8fafc;
-  color: #94a3b8;
-}
-
-:deep(.el-table .completed-row:hover > td) {
-  background-color: #f1f5f9 !important;
-}
-
-:deep(.el-table .completed-row .el-tag),
-:deep(.el-table .completed-row .status-dot) {
-  opacity: 0.6;
-  filter: grayscale(0.8);
 }
 </style>

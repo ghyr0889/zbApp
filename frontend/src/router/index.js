@@ -9,19 +9,23 @@ import ScoreBoard from '../views/ScoreBoard.vue'
 import ProjectOverview from '../views/ProjectOverview.vue'
 import PersonalInfo from '../views/PersonalInfo.vue'
 import WorkItemList from '../views/WorkItemList.vue'
+import PersonnelManagement from '../views/PersonnelManagement.vue'
+import AdminPanel from '../views/AdminPanel.vue'
 
 const routes = [
   { path: '/', redirect: '/project-overview' },
   { path: '/login', name: 'Login', component: Login },
   { path: '/project-overview', name: 'ProjectOverview', component: ProjectOverview },
-  { path: '/review', name: 'ReviewLogs', component: Review, meta: { requiresOwner: true } },
+  { path: '/review', name: 'ReviewLogs', component: Review },
   { path: '/score-board', name: 'ScoreBoard', component: ScoreBoard },
   { path: '/personal-info', name: 'PersonalInfo', component: PersonalInfo },
-  { path: '/work-package/:id/work-items', name: 'WorkItemList', component: WorkItemList }
+  { path: '/work-package/:id/work-items', name: 'WorkItemList', component: WorkItemList },
+  { path: '/personnel-management', name: 'PersonnelManagement', component: PersonnelManagement, meta: { requiresAdmin: true } },
+  { path: '/admin-panel', name: 'AdminPanel', component: AdminPanel, meta: { requiresAdmin: true } }
 ]
 
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHistory(), 
   routes
 })
 
@@ -41,13 +45,6 @@ router.beforeEach((to, from, next) => {
       next() // 允许进入
     } else {
       ElMessage.error('权限不足！仅管理员可以访问该页面。')
-      next('/project-overview')
-    }
-  } else if (to.meta.requiresOwner) {
-    if (userStore.isOwner) {
-      next()
-    } else {
-      ElMessage.error('权限不足！仅项目负责人可以访问审批查阅。')
       next('/project-overview')
     }
   } else {

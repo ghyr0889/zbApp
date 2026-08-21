@@ -1,174 +1,222 @@
-# # xiangmu/backend/routers/review.py
-# from fastapi import APIRouter, Depends, HTTPException, Query
-# from sqlalchemy.orm import Session
+# xiangmu/backend/routers/review.py
+import json
+from datetime import datetime
 
-# import models
-# from database import get_db
-# from schemas import ReviewDecision, ReviewApprove, TaskAssignCreate
-# from utils import work_package_summary, deadline_str
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
 
-# router = APIRouter(prefix="/api/v1/review", tags=["Owner Review"])
+import models
+from database import get_db
+from schemas import (
+    SplitRequestCreate,
+    SplitRequestReview,
+)
+from utils import work_package_summary, deadline_str, parse_deadline
 
-
-# def ensure_project_owner(db: Session, reviewer_id: str, work_log: models.WorkLog):
-#     """校验审核人：必须是 OWNER/LEADER，且是该日志所属项目的负责人。"""
-#     reviewer = db.query(models.User).filter(models.User.id == str(reviewer_id)).first()
-#     if not reviewer or str(reviewer.role).upper() not in ["OWNER", "LEADER"]:
-#         raise HTTPException(status_code=403, detail="只有项目负责人可以审核工作包申请")
-
-#     item = work_log.work_item
-#     work_package = item.work_package if item else None
-#     project = work_package.project if work_package else None
-#     if not project or project.owner_id != str(reviewer_id):
-#         raise HTTPException(status_code=403, detail="只能审核自己负责项目下的工作包申请")
+router = APIRouter(prefix="/api/v1/review", tags=["Owner Review"])
 
 
-# # ---------------------------------------------------------------- 待审核列表
-# @router.get("/reviews/pending")
-# def get_pending_reviews(user_id: str = Query(...), db: Session = Depends(get_db)):
-#     reviewer = db.query(models.User).filter(models.User.id == str(user_id)).first()
-#     if not reviewer or str(reviewer.role).upper() not in ["OWNER", "LEADER"]:
-#         return {"code": 200, "data": []}
-
-#     pending_logs = (
-#         db.query(models.WorkLog)
-#         .join(models.WorkItem, models.WorkLog.work_item_id == models.WorkItem.id)
-#         .join(models.WorkPackage, models.WorkItem.work_package_id == models.WorkPackage.id)
-#         .join(models.Project, models.WorkPackage.project_id == models.Project.id)
-#         .filter(
-#             models.WorkLog.status == "PENDING",
-#             models.Project.owner_id == str(user_id)
-#         )
-#         .order_by(models.WorkLog.created_at.desc())
-#         .all()
-#     )
-
-#     data = []
-#     for log in pending_logs:
-#         item = log.work_item
-#         work_package = item.work_package if item else None
-#         project = work_package.project if work_package else None
-#         category = work_package.category if work_package else None
-#         node = deadline_str(item.deadline) if item else ""
-#         data.append({
-#             "id": log.id,
-#             "work_package_id": work_package.id if work_package else None,
-#             "work_item_id": item.id if item else None,
-#             "applicant_name": log.user.username if log.user else log.user_id,
-#             "user_id": log.user_id,
-#             "project_id": project.id if project else None,
-#             "project_name": project.name if project else "-",
-#             "project_owner_id": project.owner_id if project else "-",
-#             "category_name": category.name if category else "-",
-#             "work_package_name": work_package.name if work_package else "-",
-#             "deadline": node or "-",
-#             "node_requirement": node or "-",
-#             "base_score": log.base_score,
-#             "created_at": log.created_at.strftime("%Y-%m-%d %H:%M") if log.created_at else "-",
-#             "status": log.status,
-#         })
-
-#     return {"code": 200, "data": data}
+# ---------------------------------------------------------------- 工作包拆分申请
+def _split_request_view(req):
+    """把拆分申请展开为前端需要的结构。"""
+    work_package = req.work_package
+    project = work_package.project if work_package else None
+    try:
+        items = json.loads(req.split_items or "[]")
+    except Exception:
+        items = []
+    return {
+        "id": req.id,
+        "work_package_id": req.work_package_id,
+        "work_package_name": work_package.id if work_package else "-",
+        "project_id": work_package.project_id if work_package else None,
+        "project_name": project.name if project else "-",
+        "project_owner_id": project.owner_id,
+        "project_owner_name": project.owner.username,
+        "category_name": work_package.category_name if work_package else "-",
+        "applicant_id": req.applicant_id,
+        "applicant_name": req.applicant.username if req.applicant else req.applicant_id,
+        "reason": req.reason,
+        "split_items": items,
+        "status": req.status,
+        "reviewer_id": req.reviewer_id or "",
+        "review_comment": req.review_comment or "",
+        "created_at": req.created_at.strftime("%Y-%m-%d %H:%M") if req.created_at else "-",
+        "reviewed_at": req.reviewed_at.strftime("%Y-%m-%d %H:%M") if req.reviewed_at else "-",
+    }
 
 
-# # ---------------------------------------------------------------- 审核
-# @router.post("/{log_id}")
-# def review_log(log_id: str, decision: ReviewDecision, db: Session = Depends(get_db)):
-#     work_log = db.query(models.WorkLog).filter(models.WorkLog.id == str(log_id)).first()
-#     if not work_log:
-#         raise HTTPException(status_code=404, detail="工作日志记录不存在")
-#     if work_log.status != "PENDING":
-#         raise HTTPException(status_code=400, detail="该申请已处理，不能重复审核")
-
-#     ensure_project_owner(db, decision.reviewer_id, work_log)
-
-#     work_log.reviewer_id = str(decision.reviewer_id)
-#     work_log.review_comment = decision.remark or ("审核通过" if decision.approved else "")
-#     if decision.approved:
-#         item = work_log.work_item
-#         base_score = (item.score if item and item.score else 0.0) or work_log.base_score
-#         work_log.base_score = round(base_score * float(decision.weight or 1.0), 2)
-#         work_log.status = "APPROVED"
-#     else:
-#         work_log.status = "REJECTED"
-#         work_log.base_score = 0.0
-
-#     db.commit()
-#     return {
-#         "code": 200,
-#         "message": "审核通过" if decision.approved else "已驳回该申请",
-#         "data": {"log_id": work_log.id, "status": work_log.status, "score_earned": work_log.base_score}
-#     }
+def _split_items_payload(items):
+    """把工作项变更列表序列化为 JSON 字符串（带 work_item_id 表示编辑）。"""
+    return json.dumps([
+        {
+            "work_item_id": it.work_item_id,
+            "name": it.name,
+            "standard": it.standard,
+            "difficulty": it.difficulty,
+            "importance": it.importance,
+            "innovation": it.innovation,
+            "deadline": it.deadline,
+            "score": it.score,
+            "category": it.category,
+        }
+        for it in items
+    ], ensure_ascii=False)
 
 
-# @router.post("/reviews/{log_id}/approve")
-# def approve_review(log_id: str, body: ReviewApprove, db: Session = Depends(get_db)):
-#     """备用审核通过接口（前端历史 api 保留），按权重直接通过。"""
-#     work_log = db.query(models.WorkLog).filter(models.WorkLog.id == str(log_id)).first()
-#     if not work_log:
-#         raise HTTPException(status_code=404, detail="工作日志记录不存在")
-#     if work_log.status != "PENDING":
-#         raise HTTPException(status_code=400, detail="该申请已处理，不能重复审核")
+@router.post("/split-requests")
+def create_split_request(req: SplitRequestCreate, db: Session = Depends(get_db)):
+    """员工提交“拆解工作包为多个工作项”的申请。"""
+    applicant = db.query(models.User).filter(models.User.id == req.applicant_id).first()
+    if not applicant:
+        raise HTTPException(status_code=404, detail="申请人不存在")
 
-#     item = work_log.work_item
-#     base_score = (item.score if item and item.score else 0.0) or work_log.base_score
-#     work_log.base_score = round(base_score * float(body.weight or 1.0), 2)
-#     work_log.status = "APPROVED"
-#     work_log.review_comment = "审核通过"
-#     db.commit()
-#     return {
-#         "code": 200,
-#         "message": "审核通过",
-#         "data": {"log_id": work_log.id, "status": work_log.status, "score_earned": work_log.base_score}
-#     }
+    work_package = db.query(models.WorkPackage).filter(
+        models.WorkPackage.id == req.work_package_id
+    ).first()
+    if not work_package:
+        raise HTTPException(status_code=404, detail="工作包不存在")
 
+    reason = (req.reason or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="请填写拆分原因")
+    if not req.split_items or not any((it.name or "").strip() for it in req.split_items):
+        raise HTTPException(status_code=400, detail="请至少填写一个拆分出的工作项")
 
-# # ---------------------------------------------------------------- 我负责的项目
-# @router.get("/projects/my/{user_id}")
-# def get_projects_for_current_user(user_id: str, db: Session = Depends(get_db)):
-#     my_projects = db.query(models.Project).filter(models.Project.owner_id == str(user_id)).all()
-#     data = []
-#     for project in my_projects:
-#         package_data = []
-#         for wp in project.work_packages:
-#             score, deadline = work_package_summary(wp)
-#             owner_id = wp.owner_id or ""
-#             owner = wp.owner
-#             package_data.append({
-#                 "id": wp.id,
-#                 "project_id": wp.project_id,
-#                 "name": wp.name,
-#                 "score": score,
-#                 "deadline": deadline or "-",
-#                 "category_name": wp.category_name or "-",
-#                 "current_assignee_id": owner_id,
-#                 "current_assignee_name": owner.username if owner else "",
-#             })
-#         data.append({
-#             "project_id": project.id,
-#             "project_name": project.name,
-#             "work_packages": package_data,
-#         })
-#     return {"code": 200, "data": data}
+    # 权限：普通员工只能拆自己负责的工作包；领导/管理员可代拆
+    role = str(applicant.role).upper()
+    if role == "EMPLOYEE" and work_package.owner_id != applicant.id:
+        raise HTTPException(status_code=403, detail="只能申请拆分自己负责的工作包")
+
+    new_req = models.WorkPackageSplitRequest(
+        work_package_id=req.work_package_id,
+        applicant_id=req.applicant_id,
+        reason=reason,
+        split_items=_split_items_payload(req.split_items),
+        status="PENDING"
+    )
+    db.add(new_req)
+    db.commit()
+    db.refresh(new_req)
+    return {"code": 200, "message": "拆分申请已提交，等待领导审核", "data": {"id": new_req.id}}
 
 
-# # ---------------------------------------------------------------- 工作包指派
-# @router.post("/projects/assign")
-# def assign_work_package(req: TaskAssignCreate, db: Session = Depends(get_db)):
-#     pkg = db.query(models.WorkPackage).filter(
-#         models.WorkPackage.id == req.work_package_id
-#     ).first()
-#     if not pkg:
-#         raise HTTPException(status_code=404, detail="工作包不存在")
+@router.get("/split-requests")
+def get_split_requests(user_id: str = Query(...), db: Session = Depends(get_db)):
+    """查询拆分申请。
+    - 普通员工：只看自己的申请
+    - 科室主任 / 领导 / 管理员：查看全部申请（各自审核对应状态的申请）
+    """
+    viewer = db.query(models.User).filter(models.User.id == user_id).first()
+    if not viewer:
+        raise HTTPException(status_code=404, detail="用户不存在")
 
-#     project = pkg.project
-#     if not project or project.owner_id != str(req.assigner_id):
-#         raise HTTPException(status_code=403, detail="只能指派自己负责项目下的工作包")
+    role = str(viewer.role).upper()
+    if role in ["LEADER", "ADMIN", "DEPARTMENT"]:
+        requests = db.query(models.WorkPackageSplitRequest).order_by(
+            models.WorkPackageSplitRequest.created_at.desc()
+        ).all()
+    else:
+        requests = db.query(models.WorkPackageSplitRequest).filter(
+            models.WorkPackageSplitRequest.applicant_id == user_id
+        ).order_by(models.WorkPackageSplitRequest.created_at.desc()).all()
 
-#     assignee = db.query(models.User).filter(models.User.id == req.assignee_id).first()
-#     if not assignee:
-#         raise HTTPException(status_code=404, detail="指定员工不存在")
+    return {"code": 200, "data": [_split_request_view(r) for r in requests]}
 
-#     pkg.owner_id = req.assignee_id
-#     db.commit()
-#     return {"code": 200, "message": "工作包指派成功"}
+
+@router.post("/split-requests/{request_id}/review")
+def review_split_request(request_id: int, body: SplitRequestReview, db: Session = Depends(get_db)):
+    """两级审核：
+    - 科室主任 DEPARTMENT 审核 PENDING：同意(APPROVE)→直接生效 / 驳回(REJECT) / 提交(SUBMIT)→转领导
+    - 领导 LEADER/ADMIN 审核 SUBMITTED：通过(APPROVE)→生效 / 驳回(REJECT)
+    """
+    req = db.query(models.WorkPackageSplitRequest).filter(
+        models.WorkPackageSplitRequest.id == request_id
+    ).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="拆分申请不存在")
+
+    reviewer = db.query(models.User).filter(models.User.id == body.reviewer_id).first()
+    if not reviewer:
+        raise HTTPException(status_code=404, detail="审核人不存在")
+    reviewer_role = str(reviewer.role).upper()
+
+    action = (body.action or "APPROVE").upper()
+    if action not in ["APPROVE", "REJECT", "SUBMIT"]:
+        raise HTTPException(status_code=400, detail="无效的审核动作，只能是 APPROVE / REJECT / SUBMIT")
+
+    # 按角色校验：谁、在什么状态下、能做什么操作
+    if reviewer_role == "DEPARTMENT":
+        # 科室主任：只审待科室主任的申请，三种操作均可
+        if req.status != "PENDING":
+            raise HTTPException(status_code=400, detail="该申请当前不在科室主任待审状态，不能重复处理")
+    elif reviewer_role in ["LEADER", "ADMIN"]:
+        # 领导/管理员：只审科室主任提交上来的申请，可通过或驳回，不能再提交
+        if req.status != "SUBMITTED":
+            raise HTTPException(status_code=400, detail="只有科室主任提交(SUBMITTED)的申请才由领导审核")
+        if action == "SUBMIT":
+            raise HTTPException(status_code=400, detail="领导审核时不能再次提交")
+    else:
+        raise HTTPException(status_code=403, detail="当前角色没有审核权限")
+
+    try:
+        if action == "SUBMIT":
+            # 科室主任提交 → 转给领导
+            req.status = "SUBMITTED"
+            req.review_comment = (body.comment or "").strip() or "科室主任已提交，等待领导审核"
+        elif action == "REJECT":
+            comment = (body.comment or "").strip()
+            if not comment:
+                raise HTTPException(status_code=400, detail="驳回时必须填写驳回原因")
+            req.status = "REJECTED"
+            req.review_comment = comment
+        else:  # APPROVE —— 同意/通过，最终生效，生成工作项
+            work_package = db.query(models.WorkPackage).filter(
+                models.WorkPackage.id == req.work_package_id
+            ).first()
+            if not work_package:
+                raise HTTPException(status_code=400, detail="工作包不存在，无法拆分")
+
+            items = json.loads(req.split_items or "[]")
+            if not items:
+                raise HTTPException(status_code=400, detail="变更内容为空，无法处理")
+
+            for it in items:
+                # 带 work_item_id → 编辑已有工作项；否则 → 新增
+                if it.get("work_item_id"):
+                    item = db.query(models.WorkItem).filter(
+                        models.WorkItem.id == it["work_item_id"]
+                    ).first()
+                    if not item or str(item.work_package_id) != str(work_package.id):
+                        raise HTTPException(status_code=400, detail="待编辑的工作项不存在或不属于该工作包")
+                else:
+                    item = models.WorkItem(work_package_id=work_package.id)
+                    db.add(item)
+
+                item.name = (it.get("name") or "").strip() or "未命名工作项"
+                item.standard = it.get("standard")
+                item.difficulty = it.get("difficulty")
+                item.importance = it.get("importance")
+                item.innovation = it.get("innovation")
+                item.deadline = parse_deadline(it.get("deadline")) if it.get("deadline") else None
+                item.score = it.get("score") or 0.0
+                item.category = it.get("category")
+            req.status = "APPROVED"
+            req.review_comment = (body.comment or "").strip() or "审核通过"
+
+        req.reviewer_id = reviewer.id
+        req.reviewed_at = datetime.now()
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"处理拆分申请失败: {str(e)}")
+
+    message = {
+        "APPROVE": "申请已通过并生成工作项",
+        "REJECT": "申请已驳回",
+        "SUBMIT": "已提交，等待领导审核",
+    }.get(action, "操作成功")
+    return {"code": 200, "message": message, "data": {"id": req.id, "status": req.status}}

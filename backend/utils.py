@@ -60,10 +60,17 @@ def ensure_default_work_item(db, pkg, score=None, deadline_str_val=""):
         return first
 
     item = models.WorkItem(
-        name=pkg.name or "默认工作项",
+        name=pkg.id or "默认工作项",
         work_package_id=pkg.id,
         score=score if score is not None else 0.0,
         deadline=parse_deadline(deadline_str_val) if deadline_str_val else None
     )
     db.add(item)
     return item
+
+
+def calc_progress(month_score, full_score):
+    """完成度：month_score(累计完成量) / full_score(满分)，封顶 100%，返回百分比。"""
+    if not full_score:
+        return 0
+    return round(min(month_score / full_score, 1.0) * 100, 1)

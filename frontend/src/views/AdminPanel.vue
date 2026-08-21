@@ -1,455 +1,478 @@
-﻿<!-- xiangmu/frontend/src/views/AdminPanel.vue -->
+<!-- xiangmu/frontend/src/views/AdminPanel.vue -->
 <template>
-  <div class="admin-panel-container">
-    <el-card shadow="hover">
+  <div class="admin-panel-page">
+    <el-card shadow="never" class="box-card">
       <template #header>
         <div class="card-header">
-          <span>⚙️ 系统基础数据与任务分配管理后台</span>
-          <el-button type="primary" size="small" @click="fetchAllData" icon="Refresh">刷新数据</el-button>
+          <span class="title">后台管理</span>
+          <el-button
+            v-if="activeTab === 'score'"
+            type="primary"
+            size="small"
+            :loading="saving"
+            @click="handleSaveScoreRules"
+          >保存系数配置</el-button>
         </div>
       </template>
 
-      <el-tabs v-model="activeTab" type="border-card">
-        
-        <!-- 👥 1. 人员列表与新增 -->
-        <el-tab-pane label="👥 人员管理" name="users">
-          <el-row :gutter="20">
-            <!-- 左侧：新增表单 -->
-            <el-col :span="8">
-              <el-card header="➕ 新增人员" shadow="never">
-                <el-form :model="userForm" label-width="80px" size="default">
-                  <el-form-item label="工号" required>
-                    <el-input v-model="userForm.id" placeholder="如: 1003" />
-                  </el-form-item>
-                  <el-form-item label="姓名" required>
-                    <el-input v-model="userForm.username" placeholder="如: 张三" />
-                  </el-form-item>
-                  <el-form-item label="密码" required>
-                    <el-input v-model="userForm.password" type="password" show-password placeholder="默认 123" />
-                  </el-form-item>
-                  <el-form-item label="角色" required>
-                    <el-select v-model="userForm.role" style="width: 100%">
-                      <el-option label="普通员工 (EMPLOYEE)" value="EMPLOYEE" />
-                      <el-option label="项目负责人 (OWNER)" value="OWNER" />
-                      <el-option label="系统管理员 (ADMIN)" value="ADMIN" />
-                    </el-select>
-                  </el-form-item>
-                  <el-form-item>
-                    <el-button type="primary" style="width: 100%" @click="handleCreateUser">确认添加人员</el-button>
-                  </el-form-item>
-                </el-form>
-              </el-card>
-            </el-col>
-
-            <!-- 右侧：现有人员表格 -->
-            <el-col :span="16">
-              <el-card header="📋 现有人员名册" shadow="never">
-                <el-table :data="allUsers" border stripe style="width: 100%">
-                  <el-table-column prop="id" label="工号 (ID)" width="120" sortable />
-                  <el-table-column prop="username" label="姓名" width="150" />
-                  <el-table-column label="系统角色">
-                    <template #default="{ row }">
-                      <el-tag v-if="String(row.role).toUpperCase() === 'ADMIN'" type="danger">
-                        管理员 (ADMIN)
-                      </el-tag>
-                      <el-tag v-else-if="String(row.role).toUpperCase() === 'OWNER' || String(row.role).toUpperCase() === 'LEADER'" type="warning">
-                        项目负责人 (OWNER)
-                      </el-tag>
-                      <el-tag v-else type="info">
-                        普通员工 (EMPLOYEE)
-                      </el-tag>
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="操作" width="120" align="center">
-                    <template #default="{ row }">
-                      <el-popconfirm
-                        title = "确定删除该员工？"
-                        confirm-button-text = "确定删除"
-                        cancel-button-text = "取消"
-                        confirm-button-type = "danger"
-                        @confirm="deleteUser(row)"
-                      >
-                      <template #reference>
-                        <el-button type="danger" size="small" plain>删除</el-button>
-                      </template>
-                      </el-popconfirm>
-                    </template>
-                  </el-table-column>
-                </el-table>
-              </el-card>
-            </el-col>
-
-          </el-row>
+      <el-tabs v-model="activeTab">
+        <!-- 人员管理 -->
+        <el-tab-pane label="人员管理" name="users">
+          <PersonnelManagement />
         </el-tab-pane>
 
-          <!-- =================  项目管理 ================= -->
-        <el-tab-pane label="✈️ 项目管理">
-          <div style="margin-bottom: 15px;">
-            <el-button type="primary" icon="Plus" @click="handleAddProjectRow">
-             ➕ 在表格中新增一行项目
-           </el-button>
-          </div>
-        
-          <el-table :data="projectList" border stripe style="width: 100%">
-            <!-- <el-table-column prop="id" label="ID" width="80" align="center" /> -->
-            
-            <el-table-column label="项目名称" min-width="150">
-              <template #default="{ row }">
-                <el-input v-if="row.isEdit" v-model="row.name" placeholder="请输入项目名称" size="small" />
-                <span v-else>{{ row.name }}</span>
-              </template>
-            </el-table-column>
-            
-            <el-table-column label="负责人ID/工号" min-width="150">
-              <template #default="{ row }">
-                <el-input v-if="row.isEdit" v-model="row.owner_id" placeholder="选填，可输入负责人ID" size="small" />
-                <span v-else>{{ row.owner_id || '未绑定' }}</span>
-              </template>
-            </el-table-column>
-            
-            <el-table-column label="操作" width="180" align="center">
-              <template #default="{ row, $index }">
-                <div v-if="row.isEdit">
-                  <el-button type="success" size="small" @click="handleSaveProject(row)">💾 保存</el-button>
-                  <el-button type="info" size="small" plain @click="handleCancelProject(row, $index)">取消</el-button>
-                </div>
-                <div v-else>
-                  <el-button type="primary" size="small" plain @click="row.isEdit = true">✏️ 编辑</el-button>
-                  </div>
+        <el-tab-pane label="计算得分系数" name="score">
+          <div class="score-rule-wrapper">
+            <el-alert
+              type="info"
+              :closable="false"
+              show-icon
+              class="rule-tip"
+              title="计算得分 = 本月分值 ×（ 难度系数 + 创新度系数 + 重要度系数）+ 质量分（档位查不到按 1.0）"
+            />
+
+            <!-- 顶部筛选操作区 -->
+            <div class="filter-container" style="display: flex; gap: 24px; margin: 16px 0; align-items: center;">
+              
+              <!-- 1. 变量下拉框 -->
+              <div class="filter-item">
+                <span style="margin-right: 12px; font-weight: 600; color: #334155;">请选择变量:</span>
+                <el-select 
+                  v-model="selectedVariable" 
+                  @change="handleVariableChange"
+                  placeholder="请选择变量" 
+                  style="width: 200px;"
+                >
+                  <el-option
+                    v-for="item in variableOptions"
+                    :key="item.value"
+                    :label="item.label"
+                    :value="item.value"
+                  />
+                </el-select>
+              </div>
+
+              <!-- 2. 职级下拉框 (重点：利用 v-if 仅在需要时显示) -->
+              <div class="filter-item" v-if="showJobGradeSelector">
+                <span style="margin-right: 12px; font-weight: 600; color: #334155;">请选择职级:</span>
+                <el-select 
+                  v-model="selectedJobgrade" 
+                  placeholder="请选择职级" 
+                  style="width: 200px;"
+                >
+                  <el-option
+                    v-for="item in jobgradeOptions"
+                    :key="item.value"
+                    :label="item.label"
+                    :value="item.value"
+                  />
+                </el-select>
+              </div>
+
+            </div>
+
+            <!-- 表格：根据变量和职级双重过滤 -->
+            <el-table
+              :data="currentTableData"
+              border
+              stripe
+              v-loading="loading"
+              style="width: 100%"
+              empty-text="请在上方完成选择，或暂无匹配的档位数据"
+              :header-cell-style="{ background: '#f8fafc', color: '#334155', fontWeight: '600' }"
+            >
+              <el-table-column prop="level" label="档位" min-width="120" align="center">
+                <template #default="{ row }">
+                  <el-tag size="small" type="info" effect="plain">{{ row.level }}</el-tag>
+                </template>
+              </el-table-column>
+
+              <el-table-column label="系数" width="250" align="center">
+                <template #default="{ row }">
+                  <el-input-number
+                    v-model="row.factor"
+                    :min="0"
+                    :max="5"
+                    :precision="3"
+                    :step="0.01"
+                    size="small"
+                    style="width: 130px"
+                    controls-position="right"
+                  />
                 </template>
               </el-table-column>
             </el-table>
-        </el-tab-pane>
 
-        <!-- ================= 工作包管理 ================= -->
-        <el-tab-pane label="📦 工作包管理">
-          <div style="margin-bottom: 15px;">
-            <el-button type="primary" icon="Plus" @click="handleAddWorkPackageRow">
-              ➕ 在表格中新增一行工作包
-            </el-button>
-          </div>
-          
-          <el-table :data="workPackageList" border stripe style="width: 100%" height="600">
-            <el-table-column label="所属项目" width="140">
-              <template #default="{ row }">
-                <el-select v-if="row.isEdit" v-model="row.project_id" size="small" placeholder="选项目">
-                  <el-option v-for="ac in projectList" :key="ac.id" :label="ac.name" :value="ac.id" />
-                </el-select>
-                <span v-else>{{ row.project_name }}</span>
-              </template>
-            </el-table-column>
             
-            <el-table-column label="工作类型" width="140">
-              <template #default="{ row }">
-                <el-select 
-                  v-if="row.isEdit" 
-                  v-model="row.category_name" 
-                  size="small" 
-                  placeholder="请选择类型"
-                >
-                  <el-option 
-                    v-for="type in categoryOptions" 
-                    :key="type" 
-                    :label="type" 
-                    :value="type" 
-                  />
-                </el-select>
-                <span v-else>
-                  <el-tag size="small" type="info">{{ row.category_name }}</el-tag>
-                </span>
-              </template>
-            </el-table-column>
-
-            <el-table-column label="工作包名称" min-width="180">
-              <template #default="{ row }">
-                <el-input v-if="row.isEdit" v-model="row.name" size="small" placeholder="工作包名称" />
-                <span v-else>{{ row.name }}</span>
-              </template>
-            </el-table-column>
-
-            <el-table-column label="基础积分" width="100" align="center">
-              <template #default="{ row }">
-                <el-input-number v-if="row.isEdit" v-model="row.score" :min="0" :step="0.5" size="small" style="width: 80px;" controls-position="right" />
-                <span v-else style="color: #67c23a; font-weight: bold;">{{ row.score }}</span>
-              </template>
-            </el-table-column>
-
-            <el-table-column label="负责员工" width="170">
-              <template #default="{ row }">
-                <el-tag v-if="row.assignee_id" effect="plain">
-                  {{ row.assignee_name || row.assignee_id }}({{ row.assignee_id }})
-                </el-tag>
-                <span v-else>-</span>
-            </template>
-          </el-table-column>
-
-            <el-table-column label="时间节点要求" min-width="160">
-              <template #default="{ row }">
-                <el-input v-if="row.isEdit" v-model="row.node_requirement" size="small" placeholder="如: 2026-08-15" />
-                <el-tag v-else-if="row.node_requirement" type="danger" effect="plain">⏰ {{ row.node_requirement }}</el-tag>
-                <span v-else style="color: #909399; font-size: 13px;">无</span>
-              </template>
-            </el-table-column>
-
-            <el-table-column label="操作" width="160" align="center" fixed="right">
-              <template #default="{ row, $index }">
-                <div v-if="row.isEdit">
-                  <el-button type="success" size="small" @click="handleSaveWorkPackage(row)">💾 保存</el-button>
-                  <el-button type="info" size="small" plain style="margin-left: 5px;" @click="handleCancelWorkPackage(row, $index)">取消</el-button>
-                </div>
-                <div v-else>
-                  <el-button type="primary" size="small" plain @click="row.isEdit = true">✏️ 编辑</el-button>
-                </div>
-              </template>
-            </el-table-column>
-          </el-table>
+          </div>
         </el-tab-pane>
 
+        <el-tab-pane label="档位管理" name="level">
+          <div class="level-def-header">
+            <el-button type="primary" :loading="savingDefs" @click="handleSaveLevelDefs">
+              保存档位设置
+            </el-button>
+            <el-alert
+              title="保存后会按新档位重建系数矩阵（已有系数保留，新增档位默认 0）"
+              type="info"
+              show-icon
+              :closable="false"
+              class="level-tip-alert"
+            />
+          </div>
+          <div class="level-def-grid">
+            <el-card 
+              v-for="g in levelDefGroups" 
+              :key="g.key" 
+              class="level-def-card" 
+              shadow="hover"
+            >
+              <template #header>
+                <div class="level-def-title">{{ g.label }}</div>
+              </template>
+              <div class="level-def-tags-vertical">
+                <el-tag
+                  v-for="(name, i) in levelDefs[g.key]"
+                  :key="name"
+                  closable
+                  size="large"
+                  effect="light"
+                  class="vertical-tag"
+                  :disable-transitions="true"
+                  @close="removeLevelDef(g.key, i)"
+                >
+                  {{ name }}
+                </el-tag>
+              </div>
+              <div class="level-def-add">
+                <el-input
+                  v-model="levelDefInputs[g.key]"
+                  placeholder="输入新档位名称"
+                  @keyup.enter="addLevelDef(g.key)"
+                >
+                  <template #append>
+                    <el-button @click="addLevelDef(g.key)">添加</el-button>
+                  </template>
+                </el-input>
+              </div>
+            </el-card>
+          </div>
+        </el-tab-pane>
       </el-tabs>
     </el-card>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { 
-  getAllUsersApi, 
-  getAllProjectsApi, 
-  getWorkPackagesOverviewApi,
-  createUserApi, 
-  createProjectApi, 
-  createWorkPackageApi,
-  deleteUserApi
-} from '../api'
+import { getComputedScoreDimensionsApi, putComputedScoreDimensionsApi, getLevelDefsApi, putLevelDefsApi } from '../api'
+import { useUserStore } from '../stores/user'
+import PersonnelManagement from './PersonnelManagement.vue'
 
+const userStore = useUserStore()
 const activeTab = ref('users')
+const loading = ref(false)
+const saving = ref(false)
+const dimensions = ref([])
+const selectedVariable = ref('')
+const selectedJobgrade = ref('')
 
-// 数据源
-const allUsers = ref([])
-const allProjects = ref([])
-const allWorkPackages = ref([])
+// 把「维度 → 档位列表」拍平为表格行，方便直接编辑每个档位的系数
+const flatRows = computed(() => {
+  const rows = []
+  dimensions.value.forEach(d => {
+    ;(d.levels || []).forEach(lv => {
+      // 直接引用原始 lv 对象（不浅拷贝），让表格 v-model 编辑能回写到 dimensions 数据
+      rows.push(Object.assign(lv, { variable: d.variable, variable_name: d.name || d.variable }))
+    })
+  })
+  return rows
+})
 
-// 表单响应式绑定
-const userForm = reactive({ id: '', username: '', password: '123', role: 'EMPLOYEE' })
-const projectList = ref([])
-const workPackageList = ref([])
-const categoryOptions = ref(['类型1', '类型2', '类型3', '类型4'])
-const employeeOptions = ref([])
+const variableOptions = computed(() => {
+  if (!flatRows.value) return []
+  const uniqueNames = [...new Set(flatRows.value.map(row => row.variable_name))]
+  return uniqueNames.map(name => ({ label: name, value: name }))
+})
 
-const currentUser = ref(JSON.parse(localStorage.getItem('user_info') || '{}'))
+const showJobGradeSelector = computed(() => {
+  // 只有当选中 "难度" 或 "重要度" 时，才返回 true
+  // 注意：如果你的字典里叫 "difficulty" 或 "难度系数"，请自行修改这里的字符串匹配
+  return ['难度', '重要度'].includes(selectedVariable.value)
+})
 
-// 批量加载所有数据
-const fetchAllData = async () => {
-  try {
-    const [resUsers, resProjects, resWorkPackages] = await Promise.all([
-      getAllUsersApi(),
-      getAllProjectsApi(),
-      getWorkPackagesOverviewApi()
-    ])
-    if (resUsers.data.code === 200){
-      const users = resUsers.data.data || []
-      allUsers.value = users.sort((a,b) => {
-        return String(a.id).localeCompare(String(b.id), undefined, {numeric:true})
-      })
+const jobgradeOptions = computed(() => {
+  if (!showJobGradeSelector.value || !flatRows.value) return []
+  
+  // 从当前选中的变量数据中，提取出所有不重复的职级
+  const rowsForVar = flatRows.value.filter(row => row.variable_name === selectedVariable.value)
+  // 过滤掉空的职级
+  const uniqueRanks = [...new Set(rowsForVar.map(row => row.job_grade).filter(Boolean))]
+  return uniqueRanks.map(rank => ({ label: rank, value: rank }))
+})
+
+const handleVariableChange = () => {
+  if (showJobGradeSelector.value) {
+    // 如果切到了难度/重要度，为了方便用户，默认帮他选中第一个职级
+    if (jobgradeOptions.value.length > 0) {
+      selectedJobgrade.value = jobgradeOptions.value[0].value
+    } else {
+      selectedJobgrade.value = ''
     }
-    if (resProjects.data.code === 200) allProjects.value = resProjects.data.data || []
-    if (resWorkPackages.data.code === 200) allWorkPackages.value = resWorkPackages.data.data || []
-  } catch (err) {
-    console.error('拉取后台数据失败:', err)
+  } else {
+    // 如果切到了创新度等不需要职级的变量，清空职级选中状态
+    selectedJobgrade.value = ''
   }
 }
 
-// 1. 新增人员
-const handleCreateUser = async () => {
-  if (!userForm.id.trim() || !userForm.username.trim()) return ElMessage.warning('请填写工号和姓名！')
+const currentTableData = computed(() => {
+  // 还没选变量时，啥也不显示
+  if (!selectedVariable.value) return []
+
+  if (showJobGradeSelector.value) {
+    // 【情况A】如果是难度/重要度：必须“变量”和“职级”同时对上号才显示
+    if (!selectedJobgrade.value) return [] 
+    return flatRows.value.filter(row => 
+      row.variable_name === selectedVariable.value && 
+      row.job_grade === selectedJobgrade.value
+    )
+  } else {
+    // 【情况B】如果是普通变量：只要“变量”对上号就显示
+    return flatRows.value.filter(row => row.variable_name === selectedVariable.value)
+  }
+})
+
+const fetchRules = async () => {
+  loading.value = true
   try {
-    const res = await createUserApi({ 
-        id: userForm.id.trim(), 
-        username: userForm.username.trim(),
-        password: userForm.password.trim(),
-        role: String(userForm.role).toUpperCase() })
-    if (res.data.code === 200) {
-      ElMessage.success('人员创建成功！')
-      userForm.id = ''
-      userForm.username = ''
-      fetchAllData()
-    }
+    const res = await getComputedScoreDimensionsApi()
+    if (res.data?.code === 200) dimensions.value = res.data.data || []
   } catch (err) {
-    ElMessage.error(err.response?.data?.detail || '创建失败')
+    ElMessage.error(err.response?.data?.detail || '获取评分规则失败')
+  } finally {
+    loading.value = false
   }
 }
 
-//删除人员
-const deleteUser = async(row) => {
-    try {
-      const res = await deleteUserApi(row.id)
-      
-      if (res.data && res.data.code === 200) {
-        ElMessage.success(`已成功删除员工 ${row.name}`)
-        // 3. 删除成功后，重新拉取最新的人员列表刷新页面
-        fetchAllData()
-      }
-    } catch (err) {
-      console.error('删除员工失败', err)
-      ElMessage.error(err.response?.data?.detail || '删除失败，可能该员工有关联数据未清理')
-    }
-}
-
-// 2. 配置项目与负责人
-const fetchProjects = async () => {
+const handleSaveScoreRules = async () => {
+  saving.value = true
   try {
-    const res = await getAllProjectsApi()
-    // 核心：从后端获取数据后，给每一行都主动加上 isEdit: false 属性
-    projectList.value = (res.data.data || []).map(item => ({
-      ...item,
-      isEdit: false 
+    const items = dimensions.value.map(d => ({
+      variable: d.variable,
+      levels: (d.levels || []).map(lv => ({ level: lv.level, factor: lv.factor, job_grade: lv.job_grade }))
     }))
+    const res = await putComputedScoreDimensionsApi({
+      user_id: userStore.userInfo?.id,
+      items
+    })
+    if (res.data?.code === 200) {
+      ElMessage.success('系数配置已保存')
+      await fetchRules()
+    }
   } catch (err) {
-    console.error('获取项目失败', err)
+    ElMessage.error(err.response?.data?.detail || '保存失败')
+  } finally {
+    saving.value = false
   }
 }
 
-// ======================== 拉取员工名单 ========================
-const fetchEmployees = async () => {
+// ---------------------------------------------------------------- 档位管理
+const levelDefGroups = [
+  { key: 'job_grade', label: '职级' },
+  { key: 'difficulty', label: '难度档位' },
+  { key: 'importance', label: '重要度档位' },
+  { key: 'innovation', label: '创新度档位' }
+]
+const levelDefs = ref({ job_grade: [], difficulty: [], importance: [], innovation: [] })
+const levelDefInputs = ref({ job_grade: '', difficulty: '', importance: '', innovation: '' })
+const savingDefs = ref(false)
+
+const fetchLevelDefs = async () => {
   try {
-    const res = await getAllUsersApi()
-    if (res.data && res.data.code === 200) {
-      const users = res.data.data || []
-      employeeOptions.value = users
-      .filter(user => String(user.role).toUpperCase() === 'EMPLOYEE')
-      .map(user => {
-        const name = user.full_name || user.username
-        return {
-          id: String(user.id),
-          label: `${name} (${user.id})`
-        }
-      })
+    const res = await getLevelDefsApi()
+    if (res.data?.code === 200) levelDefs.value = res.data.data || levelDefs.value
+  } catch (err) {
+    ElMessage.error(err.response?.data?.detail || '获取档位定义失败')
+  }
+}
+
+const addLevelDef = (key) => {
+  const val = (levelDefInputs.value[key] || '').trim()
+  if (!val) return
+  if (levelDefs.value[key].includes(val)) return ElMessage.warning('该档位已存在')
+  levelDefs.value[key].push(val)
+  levelDefInputs.value[key] = ''
+}
+
+const removeLevelDef = (key, index) => {
+  levelDefs.value[key].splice(index, 1)
+}
+
+const handleSaveLevelDefs = async () => {
+  savingDefs.value = true
+  try {
+    const res = await putLevelDefsApi({
+      user_id: userStore.userInfo?.id,
+      job_grade: levelDefs.value.job_grade,
+      difficulty: levelDefs.value.difficulty,
+      importance: levelDefs.value.importance,
+      innovation: levelDefs.value.innovation
+    })
+    if (res.data?.code === 200) {
+      ElMessage.success('档位已保存并重建系数矩阵')
+      await fetchLevelDefs()
+      await fetchRules()   // 刷新系数配置表格（矩阵已重建）
     }
   } catch (err) {
-    console.error('获取员工列表失败:', err)
+    ElMessage.error(err.response?.data?.detail || '保存档位失败')
+  } finally {
+    savingDefs.value = false
   }
 }
 
 onMounted(() => {
-  fetchAllData()
-  fetchProjects()
-  fetchWorkPackages()
-  fetchEmployees()
+  fetchRules()
+  fetchLevelDefs()
 })
-
-const handleAddProjectRow = () => {
-  // 在表格开头插入一个空的新行，并立即进入编辑状态
-  projectList.value.unshift({
-    id: null, 
-    name: '',
-    owner_id: '',
-    isEdit: true
-  })
-}
-
-const handleCancelProject = (row, index) => {
-  if (row.id === null) {
-    // 如果是还没有保存过的新行，直接从数组里删除
-    projectList.value.splice(index, 1)
-  } else {
-    // 如果是旧数据取消编辑，直接把状态改回去，并重新拉取一次数据覆盖修改
-    row.isEdit = false
-    fetchProjects()
-  }
-}
-
-const handleSaveProject = async (row) => {
-  if (!row.name.trim()) return ElMessage.warning('项目名称不能为空！')
-  try {
-    // 调用你的后端保存接口（根据你的实际接口参数名调整）
-    const res = await createProjectApi({
-      id: row.id,
-      name: row.name,
-      owner_id: row.owner_id || null
-    })
-    if (res.data.code === 200) {
-      ElMessage.success('项目保存成功！')
-      row.isEdit = false
-      fetchProjects() // 刷新获取最新生成的 ID
-    }
-  } catch (err) {
-    ElMessage.error('保存失败，请检查数据')
-  }
-}
-
-// 获取工作包
-const fetchWorkPackages = async () => {
-  try {
-    const res = await getWorkPackagesOverviewApi()
-    // 同样注入 isEdit 状态
-    workPackageList.value = (res.data.data || []).map(item => ({
-      id: item.id,
-      name: item.name,
-      project_name: item.project_name,
-      category_name: item.category_name,
-      score: item.score,
-      assignee_id: item.assignee_id || '',
-      assignee_name: item.assignee_name || '',
-      node_requirement: item.deadline || item.node_requirement || '',
-      isEdit: false
-    }))
-  } catch (err) {
-    console.error('获取工作包失败', err)
-  }
-}
-
-const handleAddWorkPackageRow = () => {
-  workPackageList.value.unshift({
-    id: null,
-    project_name: '',
-    category_name: '类型1',
-    name: '',
-    score: 0,
-    node_requirement: '',
-    assignee_id: '',
-    assignee_name: '',
-    isEdit: true
-  })
-}
-
-const handleCancelWorkPackage = (row, index) => {
-  if (!row.id) {
-    workPackageList.value.splice(index, 1)
-  } else {
-    row.isEdit = false
-    fetchWorkPackages()
-  }
-}
-
-const handleSaveWorkPackage = async (row) => {
-  if (!row.project_name || !row.category_name || !row.name) {
-    return ElMessage.warning('项目、工作类型和工作包名称均为必填项！')
-  }
-  try {
-    const payload = ({
-      work_package_id: row.id,
-      project_id: row.project_id,
-      category_name: row.category_name,
-      name: row.name,
-      score: row.score,
-      deadline: row.node_requirement || row.deadline || ''
-    })
-
-    const res = await createWorkPackageApi(payload)
-    if (res.data.code === 200) {
-      ElMessage.success('工作包保存成功！')
-      row.isEdit = false
-      fetchWorkPackages()
-    }
-  } catch (err) {
-    ElMessage.error('保存失败，请检查数据格式')
-  }
-}
 </script>
 
 <style scoped>
-.admin-panel-container { padding: 20px; }
-.card-header { display: flex; justify-content: space-between; align-items: center; font-weight: bold; font-size: 16px; }
-</style>
+.admin-panel-page {
+  padding: 20px;
+  animation: fadeIn 0.4s ease;
+}
 
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.box-card {
+  border-radius: 12px;
+  border: none;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+  min-height: calc(100vh - 120px);
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.score-rule-wrapper {
+  padding: 8px 4px;
+}
+
+.rule-tip {
+  margin-bottom: 8px;
+}
+
+/* 档位管理 */
+.level-def-card {
+  margin-top: 8px;
+  border-radius: 8px;
+}
+.level-def-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.level-def-block {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px;
+}
+.level-def-title {
+  font-weight: 600;
+  color: #334155;
+  margin-bottom: 8px;
+}
+.level-def-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 32px;
+  margin-bottom: 8px;
+}
+.level-def-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.level-def-save {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.level-def-tip {
+  font-size: 12px;
+  color: #94a3b8;
+}
+/* --- 档位管理页面美化 --- */
+
+/* 顶部操作区 */
+.level-def-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #ebeef5;
+}
+
+/* 提示条宽度自适应填满剩余空间 */
+.level-tip-alert {
+  margin: 0;
+  flex: 1;
+}
+
+/* 修改后的网格布局：强制在一行显示4个，均分宽度 */
+.level-def-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr); /* 核心修改：数字 4 代表固定 4 列，1fr 代表宽度平分 */
+  gap: 20px;
+}
+
+.level-def-card {
+  border-radius: 8px;
+}
+
+.level-def-title {
+  font-weight: 600;
+  font-size: 15px;
+  color: #303133;
+}
+
+/* 【核心实现】：档位竖向排列 */
+.level-def-tags-vertical {
+  display: flex;
+  flex-direction: column; /* 控制内部元素竖向堆叠 */
+  gap: 10px;              /* 每个档位上下之间的间距 */
+  margin-bottom: 20px;
+  min-height: 120px;      /* 没数据时也能撑起一定高度，保持排版整齐 */
+}
+
+/* 将 Tag 拉宽到 100%，并将关闭按钮推到最右侧 */
+.vertical-tag {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+  padding: 0 12px;
+}
+
+/* 输入框区域撑满 */
+.level-def-add {
+  width: 100%;
+}
+</style>

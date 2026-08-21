@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import engine, Base, ensure_database_schema
-from routers import auth, work_logs, review, admin, tasks
+from routers import auth, work_logs, review, admin, tasks, score_board
 
 # 建表 + 轻量迁移（为旧库补列，如 projects.level）
 Base.metadata.create_all(bind=engine)
@@ -27,9 +27,10 @@ app.add_middleware(
 # 注册 API 模块路由
 app.include_router(auth.router)
 app.include_router(work_logs.router)
-# app.include_router(review.router)
+app.include_router(review.router)
 app.include_router(admin.router)
 app.include_router(tasks.router)
+app.include_router(score_board.router)
 # 兼容前端历史路径（如 DELETE /api/v1/users/{id}）
 app.include_router(admin.legacy_router)
 

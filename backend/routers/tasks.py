@@ -47,7 +47,6 @@ def initiate_transfer(payload: TransferCreate, db: Session = Depends(get_db)):
     transfer = models.TaskTransfer(
         task_assignment_id=payload.task_id or pkg.id,
         work_package_id=pkg.id,
-        task_name=pkg.name,
         from_user_id=payload.from_user_id,
         to_user_id=payload.to_user_id,
         status="PENDING"
@@ -84,12 +83,46 @@ def get_incoming_transfers(user_id: str = Query(...), db: Session = Depends(get_
             "id": item.id,
             "task_assignment_id": item.task_assignment_id,
             "work_package_id": item.work_package_id,
-            "task_name": pkg.name if pkg else item.task_name,
             "project_id": pkg.project_id if pkg else None,
             "project_name": pkg.project.name if (pkg and pkg.project) else "-",
             "from_user_id": item.from_user_id,
             "from_username": user_label(from_user),
             "to_user_id": item.to_user_id,
+            "status": item.status,
+            "created_at": item.created_at.strftime("%Y-%m-%d %H:%M") if item.created_at else "-",
+        })
+
+    return {"code": 200, "data": data}
+
+
+# ---------------------------------------------------------------- 我发起的转办
+@router.get("/my-outgoing")
+def get_outgoing_transfers(user_id: str = Query(...), db: Session = Depends(get_db)):
+    transfers = (
+        db.query(models.TaskTransfer)
+        .filter(models.TaskTransfer.from_user_id == user_id)
+        .order_by(models.TaskTransfer.created_at.desc())
+        .all()
+    )
+
+    to_user_ids = {item.to_user_id for item in transfers}
+    users_by_id = {}
+    if to_user_ids:
+        users_by_id = {u.id: u for u in db.query(models.User).filter(models.User.id.in_(to_user_ids)).all()}
+
+    data = []
+    for item in transfers:
+        to_user = users_by_id.get(item.to_user_id)
+        pkg = item.work_package
+        data.append({
+            "id": item.id,
+            "task_assignment_id": item.task_assignment_id,
+            "work_package_id": item.work_package_id,
+            "project_id": pkg.project_id if pkg else None,
+            "project_name": pkg.project.name if (pkg and pkg.project) else "-",
+            "from_user_id": item.from_user_id,
+            "to_user_id": item.to_user_id,
+            "to_username": user_label(to_user),
             "status": item.status,
             "created_at": item.created_at.strftime("%Y-%m-%d %H:%M") if item.created_at else "-",
         })

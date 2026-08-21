@@ -1,88 +1,289 @@
-﻿<!-- xiangmu/frontend/src/views/ScoreBoard.vue -->
+<!-- xiangmu/frontend/src/views/ScoreBoard.vue -->
 <template>
   <div class="score-board-page">
-    <el-card shadow="hover">
-      <template #header>
-        <div class="page-header">
-          <div>
-            <h2>积分查看</h2>
-            <p>所有人员已审核通过的工作包积分明细</p>
-          </div>
-          <el-radio-group v-model="currentPeriod" size="small" @change="fetchPublicScoreBoard">
-            <el-radio-button label="day">今日</el-radio-button>
-            <el-radio-button label="month">本月</el-radio-button>
-            <el-radio-button label="quarter">本季度</el-radio-button>
-            <el-radio-button label="all">全部历史</el-radio-button>
-          </el-radio-group>
-        </div>
-      </template>
+    <el-card class="box-card" shadow="never">
+      <!-- 全局查询区：选择查看哪个月 / 哪个季度 / 哪一年 -->
+      <div class="global-filter">
+        <span class="filter-label">查询维度：</span>
+        <el-select v-model="queryMode" size="default" style="width: 120px" @change="onQueryChange">
+          <el-option label="按月份" value="month" />
+          <el-option label="按季度" value="quarter" />
+          <el-option label="按年份" value="year" />
+        </el-select>
 
-      <div class="summary-row">
-        <el-statistic title="当前周期总积分" :value="totalScore" />
-        <el-statistic title="有积分人员" :value="activePeopleCount" />
-        <el-statistic title="公开工作包记录" :value="totalWorkPackageCount" />
+        <el-date-picker
+          v-if="queryMode === 'month'"
+          v-model="selectedMonth"
+          type="month"
+          value-format="YYYY-MM"
+          size="default"
+          style="width: 150px"
+          placeholder="选择月份"
+          @change="fetchPublicScoreBoard"
+        />
+
+        <template v-else-if="queryMode === 'quarter'">
+          <el-select v-model="selectedYear" size="default" style="width: 110px" @change="fetchPublicScoreBoard">
+            <el-option v-for="y in yearOptions" :key="y" :label="`${y}年`" :value="y" />
+          </el-select>
+          <el-select v-model="selectedQuarter" size="default" style="width: 100px" @change="fetchPublicScoreBoard">
+            <el-option label="第1季度" :value="1" />
+            <el-option label="第2季度" :value="2" />
+            <el-option label="第3季度" :value="3" />
+            <el-option label="第4季度" :value="4" />
+          </el-select>
+        </template>
+
+        <el-select v-else-if="queryMode === 'year'" v-model="selectedYear" size="default" style="width: 110px" @change="fetchPublicScoreBoard">
+          <el-option v-for="y in yearOptions" :key="y" :label="`${y}年`" :value="y" />
+        </el-select>
+
+        <span class="period-label">当前查看：{{ periodLabel }}</span>
       </div>
 
-      <el-table
-        :data="peopleList"
-        v-loading="loading"
-        stripe
-        border
-        style="width: 100%"
-        empty-text="当前周期暂无已通过的积分数据"
-      >
-        <el-table-column type="expand" width="48">
-          <template #default="{ row }">
-            <div class="detail-panel">
-              <el-table
-                v-if="row.details && row.details.length"
-                :data="row.details"
-                size="small"
-                border
-                style="width: 100%"
-              >
-                <el-table-column prop="project_name" label="所属项目" width="130" />
-                <el-table-column prop="category_name" label="工作类型" width="130" />
-                <el-table-column prop="work_package_name" label="工作包名称" min-width="220" show-overflow-tooltip />
-                <el-table-column prop="base_score" label="获得分值" width="110" align="center">
-                  <template #default="scope">
-                    <el-tag type="success">+{{ scope.row.base_score }} 分</el-tag>
+      <!-- 主体内容区：Tabs 顶格显示 -->
+      <el-tabs v-model="activeTab" class="custom-tabs">
+        
+        <!-- 页面一：个人积分 -->
+        <el-tab-pane label="个人积分" name="personal">
+          <div class="tab-content">
+            
+            <!-- 个人积分仪表盘：显示所选周期的基础得分与计算得分 -->
+            <div class="dashboard-container">
+              <div class="dashboard-card">
+                <!-- 统计项 1：基础得分 -->
+                <div class="stat-item">
+                  <span class="stat-title">{{ periodLabel }}基础得分：</span>
+                  <span class="stat-value" style="color: #475569;">{{ periodBaseScore || 0 }}</span>
+                </div>
+                
+                <!-- 中间的分隔线 -->
+                <div class="divider"></div>
+                
+                <!-- 统计项 2：计算得分 -->
+                <div class="stat-item">
+                  <span class="stat-title">{{ periodLabel }}计算得分：</span>
+                  <!-- 加上 score-text 类名，让计算总分显示为显眼的绿色 -->
+                  <span class="stat-value" style="color: #475569;">{{ periodCalculatedScore || 0 }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 个人积分详情：嵌套展开表格 -->
+            <el-table
+              :data="groupedMyDetails"
+              v-loading="loading"
+              border
+              style="width: 100%"
+              empty-text="当前周期暂无您的积分记录"
+              :header-cell-style="{ background: '#f8fafc', color: '#334155' }"
+            >
+              <!-- 展开列：内层表格显示具体工作项、分值及扣除分值 -->
+              <el-table-column type="expand">
+                <template #default="{ row }">
+                  <div class="inner-table-container">
+                    <el-table :data="row.items" border size="small" :header-cell-style="{ background: '#f1f5f9' }">
+                      <el-table-column prop="work_item_name" label="工作项名称" />
+                      <el-table-column prop="difficulty" label="难度" width="80" align="center">
+                      <template #default="{ row: item }">
+                        <span>{{ item.difficulty || '-' }}</span>
+                      </template>
+                    </el-table-column>
+                    <el-table-column prop="importance" label="重要度" width="80" align="center">
+                      <template #default="{ row: item }">
+                        <span>{{ item.importance || '-' }}</span>
+                      </template>
+                    </el-table-column>
+                    <el-table-column prop="innovation" label="创新度" width="80" align="center">
+                      <template #default="{ row: item }">
+                        <span>{{ item.innovation || '-' }}</span>
+                      </template>
+                    </el-table-column>
+                      <el-table-column prop="score" label="本月得分" width="110" align="center">
+                        <template #default="scope">
+                          <span class="score-text" v-if="scope.row.score > 0">{{ scope.row.score }}</span>
+                          <span class="muted-text" v-else>0</span>
+                        </template>
+                      </el-table-column>
+                      <el-table-column prop="quality_score" label="质量分" width="100" align="center">
+                        <template #default="scope">
+                          <span :class="scope.row.quality_score < 0 ? 'penalty-text' : 'score-text'">{{ scope.row.quality_score ?? 0 }}</span>
+                        </template>
+                      </el-table-column>
+                      <el-table-column prop="calculate_score" label="计算得分" width="110" align="center">
+                        <template #default="scope">
+                          <span class="score-text" v-if="scope.row.calculate_score > 0">{{ scope.row.calculate_score }}</span>
+                          <span class="muted-text" v-else>0</span>
+                        </template>
+                      </el-table-column>
+                      <el-table-column prop="deducted_score" label="进度扣分" width="110" align="center">
+                        <template #default="scope">
+                          <span class="penalty-text" v-if="scope.row.deducted_score > 0">-{{ scope.row.deducted_score }}</span>
+                          <span class="muted-text" v-else>0</span>
+                        </template>
+                      </el-table-column>
+                    </el-table>
+                  </div>
+                </template>
+              </el-table-column>
+
+              <!-- 外层表格：显示项目及工作包信息 -->
+              <el-table-column prop="project_name" label="所属项目名称" min-width="150" show-overflow-tooltip />
+              <el-table-column prop="project_code" label="所属项目编号" min-width="150" show-overflow-tooltip />
+              <el-table-column prop="work_package_id" label="所属工作包" width="180" align="center" />
+              <el-table-column prop="work_package_category" label="所属工作包类型" width="180" align="center" />
+            </el-table>
+          </div>
+        </el-tab-pane>
+
+        <!-- 页面二：所有人员积分 -->
+        <el-tab-pane label="所有人员积分" name="all">
+          <div class="tab-content">
+            
+            <!-- 【表格 1：月度表】当查询维度为“月份”时显示 -->
+            <el-table
+              v-if="queryMode === 'month'"
+              :data="peopleList"
+              v-loading="loading"
+              stripe
+              border
+              style="width: 100%"
+              empty-text="当前月份暂无积分数据"
+              :header-cell-style="{ background: '#f8fafc', color: '#334155' }"
+            >
+              <el-table-column prop="username" label="人员" width="100" align="center" fixed="left" />
+              <!-- 工作项基础分 -->
+              <el-table-column label="工作项" align="center">
+                <el-table-column prop="month_score" label="基础得分" min-width="80" align="center" />
+                <el-table-column prop="calculate_score" label="计算得分" min-width="80" align="center" />
+                <el-table-column prop="deducted_score" label="进度扣分" min-width="80" align="center" />
+              </el-table-column>
+              <!-- 额外加分项 -->
+              <el-table-column label="技术提升" align="center">
+                <el-table-column prop="patent_score" label="专利" min-width="80" align="center">
+                  <template #default="{ row }">
+                    <el-input-number v-if="row.isEditing" v-model="row.patent_score" :step="0.5" size="small" style="width: 80px" controls-position="right" />
+                    <span v-else>{{ row.patent_score || 0 }}</span>
                   </template>
                 </el-table-column>
-                <el-table-column prop="approved_at" label="审核通过时间" width="170" align="center" />
-              </el-table>
-              <el-empty v-else description="该人员当前周期暂无积分工作包" :image-size="56" />
-            </div>
-          </template>
-        </el-table-column>
+                <el-table-column prop="knowledge_score" label="知识库" min-width="80" align="center" >
+                  <template #default="{ row }">
+                    <el-input-number v-if="row.isEditing" v-model="row.knowledge_score" :step="0.5" size="small" style="width: 80px" controls-position="right" />
+                    <span v-else>{{ row.knowledge_score || 0 }}</span>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="train_score" label="培训" min-width="80" align="center">
+                  <template #default="{ row }">
+                    <el-input-number v-if="row.isEditing" v-model="row.train_score" :step="0.5" size="small" style="width: 80px" controls-position="right" />
+                    <span v-else>{{ row.train_score || 0 }}</span>
+                  </template>
+                </el-table-column>
+              </el-table-column>
 
-        <el-table-column type="index" label="排名" width="70" align="center" />
-        <el-table-column prop="username" label="姓名" width="140" />
-        <el-table-column prop="user_id" label="工号" width="120" />
-        <el-table-column label="角色" width="140" align="center">
-          <template #default="{ row }">
-            <el-tag :type="roleTagType(row.role)">{{ roleLabel(row.role) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="total_score" label="周期总分" width="130" align="center" sortable>
-          <template #default="{ row }">
-            <span class="score-text">{{ row.total_score }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="对应工作包数量" width="150" align="center">
-          <template #default="{ row }">
-            {{ row.details?.length || 0 }}
-          </template>
-        </el-table-column>
-        <el-table-column label="工作包概览" min-width="260" show-overflow-tooltip>
-          <template #default="{ row }">
-            <span v-if="row.details && row.details.length">
-              {{ row.details.map(item => item.work_package_name).join('、') }}
-            </span>
-            <span v-else class="muted-text">暂无</span>
-          </template>
-        </el-table-column>
-      </el-table>
+              <el-table-column label="日常管理" align="center">
+                <el-table-column prop="deduct_score" label="扣分" min-width="80" align="center">
+                  <template #default="{ row }">
+                    <el-input-number v-if="row.isEditing" v-model="row.deduct_score" :step="0.5" size="small" style="width: 80px" controls-position="right" />
+                    <span v-else>{{ row.deduct_score || 0 }}</span>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="quality_event_score" label="质量事件" min-width="80" align="center">
+                  <template #default="{ row }">
+                    <el-input-number v-if="row.isEditing" v-model="row.quality_event_score" :step="0.5" size="small" style="width: 80px" controls-position="right" />
+                    <span v-else>{{ row.quality_event_score || 0 }}</span>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="carrier_inspection_score" label="载体检查" min-width="80" align="center">
+                  <template #default="{ row }">
+                    <el-input-number v-if="row.isEditing" v-model="row.carrier_inspection_score" :step="0.5" size="small" style="width: 80px" controls-position="right" />
+                    <span v-else>{{ row.carrier_inspection_score || 0 }}</span>
+                  </template>
+                </el-table-column>
+              </el-table-column>
+
+              <!-- 汇总计算项 -->
+              <el-table-column prop="tech_growth_score" label="技术成长分" min-width="80" align="center" />
+              <el-table-column prop="total_calculated" label="计算总分" min-width="80" align="center"/>
+              <el-table-column prop="converted_score" label="折算总分" min-width="80" align="center" />
+              <!-- 最终等级 -->
+              <el-table-column prop="grade" label="等级" width="90" align="center" fixed="right">
+                <template #default="{ row }">
+                  <el-tag :type="getGradeTagType(row.grade)" effect="dark" size="small">
+                    {{ row.grade || '-' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <!-- 操作：管理员/领导/科室可编辑 技术提升/日常管理 附加分 -->
+              <el-table-column label="操作" width="80" align="center" fixed="right" v-if="isEdit">
+                <template #default="{ row }">
+                  <template v-if="!row.isEditing">
+                    <el-button type="primary" link size="small" @click="startEdit(row)">编辑</el-button>
+                  </template>
+                  <template v-else>
+                    <el-button type="success" link size="small" :loading="savingRow" @click="saveRow(row)">保存</el-button>
+                    <el-button type="info" link size="small" @click="cancelEdit(row)">取消</el-button>
+                  </template>
+                </template>
+              </el-table-column>
+            </el-table>
+
+            <!-- 【表格 2：季度表 / 年度表】当查询维度为“季度”或“年度”时显示 -->
+            <el-table
+              v-else
+              :data="peopleList"
+              v-loading="loading"
+              stripe
+              border
+              style="width: 100%"
+              empty-text="当前周期暂无积分数据"
+              :header-cell-style="{ background: '#f8fafc', color: '#334155' }"
+            >
+              <el-table-column prop="username" label="人员" width="100" align="center" fixed="left" />
+              
+              <!-- 动态生成的子周期列：季度显示3个月，年度可根据后端返回显示12个月或4个季度 -->
+              <el-table-column prop="period_1" :label="queryMode === 'quarter' ? '该季度第一个月' : '第一季度'" min-width="130" align="center">
+                 <template #default="{ row }">
+                  <span>{{ row.period_1 || 0 }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="period_2" :label="queryMode === 'quarter' ? '该季度第二个月' : '第二季度'" min-width="130" align="center">
+                 <template #default="{ row }">
+                  <span>{{ row.period_2 || 0 }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="period_3" :label="queryMode === 'quarter' ? '该季度第三个月' : '第三季度'" min-width="130" align="center">
+                 <template #default="{ row }">
+                  <span>{{ row.period_3 || 0 }}</span>
+                </template>
+              </el-table-column>
+              <!-- 若为年度逻辑，可在下方继续使用 v-if="queryMode === 'year'" 增加更多子列 -->
+               <el-table-column prop="period_4" v-if = "queryMode === 'year'" label = '第四季度' min-width="130" align="center">
+                 <template #default="{ row }">
+                  <span>{{ row.period_4 || 0 }}</span>
+                </template>
+              </el-table-column>
+
+              <!-- 汇总列 -->
+              <el-table-column prop="total_score" label="得分" min-width="100" align="center">
+                <template #default="{ row }">
+                  <span class="score-text">{{ row.total_score || 0 }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="final_calculated" label="计算得分" min-width="100" align="center" />
+              
+              <el-table-column prop="grade" label="等级" width="90" align="center" fixed="right">
+                <template #default="{ row }">
+                  <el-tag :type="getGradeTagType(row.grade)" effect="dark" size="small">
+                    {{ row.grade || '-' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+            </el-table>
+
+          </div>
+        </el-tab-pane>
+
+      </el-tabs>
     </el-card>
   </div>
 </template>
@@ -91,41 +292,130 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getPublicScoreBoardApi } from '../api'
+import { useUserStore } from '../stores/user'
 
-const currentPeriod = ref('all')
+const userStore = useUserStore()
+const currentUser = computed(() => userStore.userInfo)
+
+const activeTab = ref('personal')
 const peopleList = ref([])
 const loading = ref(false)
 
-const totalScore = computed(() => {
-  return peopleList.value.reduce((sum, person) => sum + Number(person.total_score || 0), 0)
+// 查询维度与具体选择：默认按月份看当前月
+const now = new Date()
+const queryMode = ref('month')
+const selectedMonth = ref(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`)
+const selectedYear = ref(now.getFullYear())
+const selectedQuarter = ref(1)
+const yearOptions = computed(() => {
+  const cur = now.getFullYear()
+  return [cur - 3, cur - 2, cur - 1, cur, cur + 1]
 })
 
-const activePeopleCount = computed(() => {
-  return peopleList.value.filter(person => Number(person.total_score || 0) > 0).length
+// 当前查看周期文案
+const periodLabel = computed(() => {
+  if (queryMode.value === 'month') {
+    const [y, m] = selectedMonth.value.split('-')
+    return `${y}年${+m}月`
+  }
+  if (queryMode.value === 'quarter') return `${selectedYear.value}年第${selectedQuarter.value}季度`
+  if (queryMode.value === 'year') return `${selectedYear.value}年`
 })
 
-const totalWorkPackageCount = computed(() => {
-  return peopleList.value.reduce((sum, person) => sum + (person.details?.length || 0), 0)
+// 所选周期总得分（仪表盘）
+const periodBaseScore = computed(() => {
+  // 如果没有数据，直接返回 0
+  if (!currentPeriodPersonalData.value || !currentPeriodPersonalData.value.details) return 0
+  // 遍历 details 数组，把所有的基础分 (score) 累加起来
+  const total = currentPeriodPersonalData.value.details.reduce((sum, item) => sum + (item.score || 0), 0)
+  // 保留两位小数，防止 JavaScript 浮点数计算出现 0.000000001 的精度问题
+  return parseFloat(total.toFixed(2))
+})
+const periodCalculatedScore = computed(() => {
+  if (!currentPeriodPersonalData.value || !currentPeriodPersonalData.value.details) return 0
+  
+  // 遍历 details 数组，把所有的计算分 (calculate_score) 累加起来
+  const total = currentPeriodPersonalData.value.details.reduce((sum, item) => sum + (item.calculate_score || 0), 0)
+  return parseFloat(total.toFixed(2))
 })
 
-const roleLabel = (role) => {
-  const normalizedRole = String(role || '').toUpperCase()
-  if (normalizedRole === 'ADMIN') return '管理员'
-  if (normalizedRole === 'OWNER' || normalizedRole === 'LEADER') return '项目负责人'
-  return '普通员工'
+// 提取当前选中周期下登录人的数据总览（用于下方详情展示的基础数据）
+const currentPeriodPersonalData = computed(() => {
+  if (!currentUser.value) return null
+  return peopleList.value.find(p => String(p.user_id) === String(currentUser.value.id)) || null
+})
+
+// 计算个人的分组详情数据（外层项目/工作包，内层具体工作项+扣分）
+const groupedMyDetails = computed(() => {
+  if (!currentPeriodPersonalData.value || !currentPeriodPersonalData.value.details) return []
+  const map = {}
+  const itemRows = {}   // work_item_id -> 行对象（跨月合并用）
+
+  currentPeriodPersonalData.value.details.forEach(item => {
+    const pName = item.project_name || '未归属项目'
+    const pCode = item.project_code || '无项目编号'
+    const wpId = item.work_package_id || '无编号'
+    const key = `${pName}_${wpId}`
+
+    if (!map[key]) {
+      map[key] = {
+        project_name: pName,
+        project_code: pCode,
+        work_package_id: wpId,
+        work_package_category: item.work_package_category || '-',
+        items: []
+      }
+    }
+
+    // 按工作项合并：同一工作项跨月只显示一行；本月得分/计算得分累加；扣除分取该工作项判定（超期1/未超期0）
+    const iid = item.work_item_id
+    if (!itemRows[iid]) {
+      const row = {
+        work_item_name: item.work_item_name || item.work_package_name || '未命名工作项',
+        score: 0,
+        quality_score: item.quality_score || 0,
+        difficulty: item.work_item_difficulty || null,
+        importance: item.work_item_importance || null,
+        innovation: item.work_item_innovation || null,
+        calculate_score: 0,
+        deducted_score: item.deducted_score || 0
+      }
+      itemRows[iid] = row
+      map[key].items.push(row)
+    }
+    const row = itemRows[iid]
+    row.score += item.score || 0
+    row.calculate_score += item.calculate_score || 0
+    // 质量分：同一工作项不同月可能不同，保留该工作项最近一条的值
+    row.quality_score = item.quality_score ?? row.quality_score
+    row.difficulty = item.work_item_difficulty
+    row.importance = item.work_item_importance
+    row.innovation = item.work_item_innovation
+  })
+
+  return Object.values(map)
+})
+
+// 切换维度时触发查询（季度/年份选择器也已直接绑定 change）
+const onQueryChange = () => {
+  fetchPublicScoreBoard()
 }
 
-const roleTagType = (role) => {
-  const normalizedRole = String(role || '').toUpperCase()
-  if (normalizedRole === 'ADMIN') return 'danger'
-  if (normalizedRole === 'OWNER' || normalizedRole === 'LEADER') return 'warning'
-  return 'info'
-}
-
+// 按所选维度与具体年月/季/年拉取积分数据
 const fetchPublicScoreBoard = async () => {
   loading.value = true
   try {
-    const res = await getPublicScoreBoardApi(currentPeriod.value)
+    let year = '', month = '', quarter = ''
+    if (queryMode.value === 'month') {
+      year = selectedMonth.value ? +selectedMonth.value.slice(0, 4) : now.getFullYear()
+      month = selectedMonth.value ? +selectedMonth.value.slice(5, 7) : now.getMonth() + 1
+    } else if (queryMode.value === 'quarter') {
+      year = selectedYear.value
+      quarter = selectedQuarter.value
+    } else if (queryMode.value === 'year') {
+      year = selectedYear.value
+    }
+    const res = await getPublicScoreBoardApi(queryMode.value, year, month, quarter)
     if (res?.data?.code === 200) {
       peopleList.value = res.data.data.people || []
     }
@@ -137,6 +427,79 @@ const fetchPublicScoreBoard = async () => {
   }
 }
 
+const getGradeTagType = (grade) => {
+  if (grade === 'S') return 'danger'   // 红色
+  if (grade === 'A') return 'warning'  // 橙色
+  if (grade === 'B') return 'success'  // 绿色
+  if (grade === 'C') return 'info'     // 灰色
+  return ''                            // 默认 D 为无色/常规色
+}
+
+const isEdit = computed(() => {
+  if (!currentUser.value) return false
+  return ['ADMIN', 'DEPARTMENT', 'LEADER'].includes(String(currentUser.value.role).toUpperCase())
+})
+
+const editBackup = new Map()
+
+const startEdit = (row) => {
+  // 把该行原来的分数备份起来
+  editBackup.set(row.user_id, {
+    patent_score: row.patent_score,
+    knowledge_score: row.knowledge_score,
+    train_score: row.train_score,
+    deduct_score: row.deduct_score,
+    quality_event_score: row.quality_event_score,
+    carrier_inspection_score: row.carrier_inspection_score
+  })
+  // 开启该行的编辑模式
+  row.isEditing = true
+}
+
+const cancelEdit = (row) => {
+  // 从备份中恢复原始数据
+  const backup = editBackup.get(row.user_id)
+  if (backup) {
+    row.patent_score = backup.patent_score
+    row.knowledge_score = backup.knowledge_score
+    row.train_score = backup.train_score
+    row.deduct_score = backup.deduct_score
+    row.quality_event_score = backup.quality_event_score
+    row.carrier_inspection_score = backup.carrier_inspection_score
+  }
+  // 关闭编辑模式
+  row.isEditing = false
+}
+
+const savingRow = ref(false)
+const saveRow = async (row) => {
+  savingRow.value = true
+  try {
+    const res = await updateMonthlyExtraScoreApi({
+      user_id: row.user_id,
+      month: selectedMonth.value,
+      updated_by_id: currentUser.value?.id,
+      patent_score: row.patent_score,
+      knowledge_score: row.knowledge_score,
+      train_score: row.train_score,
+      deduct_score: row.deduct_score,
+      quality_event_score: row.quality_event_score,
+      carrier_inspection_score: row.carrier_inspection_score
+    })
+
+    if (res?.data?.code === 200) {
+      ElMessage.success('附加积分修改成功')
+      row.isEditing = false
+      fetchPublicScoreBoard()
+    }
+  } catch (err) {
+    console.error(err)
+    ElMessage.error(err.response?.data?.detail || '保存失败')
+  } finally {
+    savingRow.value = false
+  }
+}
+
 onMounted(() => {
   fetchPublicScoreBoard()
 })
@@ -145,61 +508,167 @@ onMounted(() => {
 <style scoped>
 .score-board-page {
   padding: 20px;
+  animation: fadeIn 0.4s ease;
 }
 
-.page-header {
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.box-card {
+  border-radius: 12px;
+  border: none;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+  min-height: calc(100vh - 120px);
+}
+
+.custom-tabs :deep(.el-tabs__item) {
+  font-size: 16px;
+  padding: 0 24px;
+  height: 48px;
+  line-height: 48px;
+  font-weight: 600;
+}
+
+.custom-tabs :deep(.el-tabs__nav-wrap::after) {
+  height: 1px;
+  background-color: #e2e8f0;
+}
+
+.tab-content {
+  padding: 16px 4px;
+  animation: fadeIn 0.3s ease;
+}
+
+/* 全局查询区样式 */
+.global-filter {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 16px;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px 4px 8px;
 }
 
-.page-header h2 {
-  margin: 0;
-  font-size: 20px;
-  color: #303133;
+.period-label {
+  color: #475569;
+  font-weight: 600;
+  margin-left: 8px;
 }
 
-.page-header p {
-  margin: 6px 0 0;
-  color: #909399;
-  font-size: 13px;
-}
-
-.summary-row {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
+/* 顶部仪表盘样式 */
+.dashboard-container {
   margin-bottom: 20px;
-  padding: 16px;
-  background: #f8fafc;
-  border: 1px solid #ebeef5;
-  border-radius: 8px;
 }
 
-.detail-panel {
-  padding: 12px 24px;
-  background: #fbfdff;
+.dashboard-card {
+  display: flex;
+  align-items: center;
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 16px 0; /* 上下留白，左右由内部控制 */
 }
 
+.stat-item {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.divider {
+  width: 1px;
+  height: 32px;
+  background-color: #cbd5e1;
+}
+
+.stat-title {
+  font-size: 16px;
+  color: #475569;
+  font-weight: 500;
+}
+
+.stat-value {
+  font-size: 28px;
+  font-weight: bold;
+  color: #000403c1;
+}
+
+@media (max-width: 600px) {
+  .dashboard-card {
+    flex-direction: column;
+    padding: 16px;
+    gap: 16px;
+  }
+  .divider {
+    width: 100%;
+    height: 1px;
+  }
+  .stat-item {
+    width: 100%;
+    justify-content: space-between;
+    padding: 0 16px;
+  }
+}
+
+/* 筛选条样式 */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  margin-bottom: 16px;
+  padding: 0 4px;
+}
+
+.filter-label {
+  font-size: 14px;
+  color: #475569;
+  font-weight: 500;
+  margin-right: 12px;
+}
+
+/* 内层表格容器留白调整 */
+.inner-table-container {
+  padding: 16px 48px;
+  background-color: #fcfcfc;
+}
+
+/* 文字与数字样式 */
 .score-text {
-  color: #67c23a;
+  color: #10b981;
   font-weight: 700;
+  font-size: 15px;
+}
+
+.penalty-text {
+  color: #ef4444;
+  font-weight: 600;
 }
 
 .muted-text {
-  color: #c0c4cc;
+  color: #94a3b8;
 }
 
-@media (max-width: 900px) {
-  .page-header {
-    align-items: flex-start;
-    flex-direction: column;
-  }
+.rank-badge {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  font-weight: bold;
+  color: #475569;
+  background-color: #f1f5f9;
+}
 
-  .summary-row {
-    grid-template-columns: 1fr;
+.rank-1 { background-color: #fef0f0; color: #f56c6c; }
+.rank-2 { background-color: #fdf6ec; color: #e6a23c; }
+.rank-3 { background-color: #f0f9eb; color: #67c23a; }
+
+@media (max-width: 768px) {
+  .dashboard-container {
+    flex-direction: column;
+    gap: 16px;
   }
 }
 </style>
-

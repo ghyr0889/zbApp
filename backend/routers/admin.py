@@ -5,7 +5,7 @@ import traceback
 
 import models
 from database import get_db
-from schemas import UserCreate, ProjectCreate, WorkPackageCreate
+from schemas import UserCreate, ProjectCreate, WorkPackageCreate, ScoreRuleUpdate, LevelDefsUpdate, UserUpdate
 from utils import work_package_summary, ensure_default_work_item
 
 router = APIRouter(prefix="/api/v1/admin", tags=["Admin Management"])
@@ -18,7 +18,7 @@ legacy_router = APIRouter(prefix="/api/v1", tags=["Legacy Compat"])
 def get_all_users(db: Session = Depends(get_db)):
     users = db.query(models.User).all()
     return {"code": 200, "data": [
-        {"id": u.id, "username": u.username, "role": u.role} for u in users
+        {"id": u.id, "username": u.username, "role": u.role, "job_grade": u.job_grade} for u in users
     ]}
 
 
@@ -36,7 +36,8 @@ def create_user(user_in: UserCreate, db: Session = Depends(get_db)):
             id=user_id,
             username=user_in.username.strip(),
             password=user_in.password or "123456",
-            role=(user_in.role or "EMPLOYEE").upper()
+            role=(user_in.role or "EMPLOYEE").upper(),
+            job_grade=user_in.job_grade
         )
         db.add(new_user)
         db.commit()
@@ -45,34 +46,40 @@ def create_user(user_in: UserCreate, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=500, detail=f"数据库写入异常: {str(e)}")
 
-
-def _delete_user(user_id: str, db: Session):
-    user = db.query(models.User).filter(models.User.id == user_id).first()
+@router.put("/users/{userId}")
+def update_user(userId: str, data: UserUpdate, db:Session = Depends(get_db)):
+    updater = db.query(models.User).filter(models.User.id == data.updated_by_id).first()
+    role = (updater.role).upper()
+    if role != "ADMIN":
+        raise HTTPException(status_code=404, detail="只有管理员可以修改人员信息")
+    
+    user = db.query(models.User).filter(models.User.id == userId).first()
     if not user:
         raise HTTPException(status_code=400, detail="数据库中没有这个人")
 
-    # 解除该用户作为“项目负责人 / 工作包负责人”的绑定，避免外键冲突
-    db.query(models.Project).filter(models.Project.owner_id == user_id).update(
-        {models.Project.owner_id: None}, synchronize_session=False
-    )
-    db.query(models.WorkPackage).filter(models.WorkPackage.owner_id == user_id).update(
-        {models.WorkPackage.owner_id: None}, synchronize_session=False
-    )
+    user.username = data.username or user.username
+    user.role = data.role or user.role
+    user.job_grade = data.job_grade or user.job_grade
+    db.commit()
+    return{"code":200,
+           "message":"人员信息已更新"
+           }
 
+@router.delete("/users/{userId}")
+def delete_user(userId: str, db:Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.id == userId).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="数据库中没有这个人")
+
+    project = db.query(models.Project).filter(models.Project.owner_id == userId).all()
+    wp = db.query(models.WorkPackage).filter(models.WorkPackage.owner_id == userId).all()
+
+    if (project and project.complete_status) or (wp and wp.complete_status):
+        raise HTTPException(status_code=402, detail="该员工有未完成的工作")
+        
     db.delete(user)
     db.commit()
     return {"code": 200, "message": "删除用户成功"}
-
-
-@router.delete("/users/{userId}")
-def delete_user(userId: str, db: Session = Depends(get_db)):
-    return _delete_user(userId, db)
-
-
-@legacy_router.delete("/users/{userId}")
-def legacy_delete_user(userId: str, db: Session = Depends(get_db)):
-    """兼容前端 deleteUserApi 请求的 /api/v1/users/{id}。"""
-    return _delete_user(userId, db)
 
 
 # ---------------------------------------------------------------- 项目
@@ -84,6 +91,7 @@ def get_all_projects(db: Session = Depends(get_db)):
         res.append({
             "id": project.id,
             "name": project.name,
+            "code": project.code,
             "owner_id": project.owner_id or "-",
             "owner_name": project.owner.username if project.owner else "未指定负责人",
             "level": project.level or "",
@@ -104,18 +112,29 @@ def create_or_update_project(project_in: ProjectCreate, db: Session = Depends(ge
             ).first()
             if not project:
                 raise HTTPException(status_code=404, detail="项目不存在")
+            if project.complete_status:
+                raise HTTPException(status_code=400, detail="项目已完成，不能修改")
             project.name = project_name
+            project.code = project_in.code
             project.owner_id = project_in.owner_id or None
+            project.category = project_in.category or "-"
+            project.level = project_in.level or "-"
         else:
             project = models.Project(
                 name=project_name,
-                owner_id=project_in.owner_id or None
+                code=project_in.code,
+                owner_id=project_in.owner_id or None,
+                category=project_in.category or "-",
+                level=project_in.level or "-"
             )
             db.add(project)
 
         db.commit()
         db.refresh(project)
-        return {"code": 200, "message": "项目配置成功", "data": {"id": project.id, "name": project.name}}
+        return {"code": 200, 
+                "message": "项目配置成功", 
+                "data": {"id": project.id, 
+                         "name": project.name}}
     except Exception as e:
         db.rollback()
         print("❌ 保存项目报错详情:")
@@ -141,9 +160,6 @@ def _work_package_view(pkg):
         "deadline": deadline or "-",
         "owner_id": owner_id,
         "owner_name": owner_name,
-        "assignee_id": owner_id,
-        "assignee_name": owner_name,
-        "assigned_employees": [{"id": owner_id, "name": owner_name}] if owner_id else [],
     }
 
 
@@ -172,47 +188,35 @@ def create_or_update_work_package(pkg_in: WorkPackageCreate, db: Session = Depen
             ).first()
             if not pkg:
                 raise HTTPException(status_code=404, detail="未找到要修改的工作包")
+            if pkg.complete_status:
+                raise HTTPException(status_code=400, detail="工作包已完成，不能修改")
 
-            conflict = db.query(models.WorkPackage).filter(
-                models.WorkPackage.id != pkg.id,
-                models.WorkPackage.project_id == project.id,
-                models.WorkPackage.name == pkg_in.name
-            ).first()
-            if conflict:
-                raise HTTPException(status_code=400, detail="同一项目下工作包名称已存在，请换一个名称！")
-
-            pkg.name = pkg_in.name
             pkg.project_id = project.id
             pkg.category_name = pkg_in.category_name
-            new_owner = pkg_in.owner_id or pkg_in.assignee_id
-            if new_owner:
-                pkg.owner_id = new_owner
+            new_owner = pkg_in.owner_id
+            pkg.owner_id = new_owner or None
+            pkg.next_step_work = (pkg_in.next_step_work or "").strip()
+            pkg.objective = (pkg_in.objective or "").strip()
             message = "工作包更新成功"
         else:
-            conflict = db.query(models.WorkPackage).filter(
-                models.WorkPackage.project_id == project.id,
-                models.WorkPackage.name == pkg_in.name
-            ).first()
-            if conflict:
-                raise HTTPException(status_code=400, detail="同一项目下工作包名称已存在！")
-
             # 自动生成工作包 ID（项目下递增序号）
             existing_count = db.query(models.WorkPackage).filter(
                 models.WorkPackage.project_id == project.id
             ).count()
             pkg = models.WorkPackage(
                 id=f"P{project.id}-WP{existing_count + 1:02d}",
-                name=pkg_in.name,
                 project_id=project.id,
                 category_name=pkg_in.category_name,
-                owner_id=pkg_in.owner_id or pkg_in.assignee_id or None,
+                owner_id=pkg_in.owner_id or None,
+                next_step_work=pkg_in.next_step_work or "",
+                objective=pkg_in.objective or ""
             )
             db.add(pkg)
             message = "工作包创建成功"
 
         db.flush()  # 先落库拿到 pkg.id，供关系使用
         # 把前端传的 分值/节点 保存到默认工作项
-        ensure_default_work_item(db, pkg, score=pkg_in.score, deadline_str_val=pkg_in.deadline or "")
+        ensure_default_work_item(db, pkg)
         db.commit()
         db.refresh(pkg)
         return {"code": 200, "message": message, "data": {"id": pkg.id}}
@@ -236,3 +240,122 @@ def get_work_packages_overview(db: Session = Depends(get_db)):
         print("❌ work-packages-overview 接口报错详情:")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"查询工作包概览失败: {str(e)}")
+
+
+# ---------------------------------------------------------------- 计算得分：评分维度与档位
+@router.get("/computed-score-dimensions")
+def get_computed_score_dimensions(db: Session = Depends(get_db)):
+    """返回计算得分所需的评分维度及各档位系数（变量固定为工作项的难度/创新度/重要度）。"""
+    variable = {
+        "difficulty": "难度",
+        "innovation": "创新度",
+        "importance": "重要度",
+    }
+    levels = db.query(models.ScoreDimensionLevel).order_by(models.ScoreDimensionLevel.id).all()
+
+    levels_by_dim = {}
+    for lv in levels:
+        levels_by_dim.setdefault(lv.variable, []).append({
+            "job_grade": lv.job_grade or "",
+            "level": lv.level,
+            "factor": round(lv.factor or 0.0, 3)
+        })
+
+    data = [{
+        "variable": key,
+        "name": variable.get(key, key),
+        "levels": levels_by_dim.get(key, []),
+    } for key in ["difficulty", "innovation", "importance"]]
+
+    return {"code": 200, "data": data}
+
+
+@router.put("/computed-score-dimensions")
+def put_computed_score_dimensions(body: ScoreRuleUpdate, db: Session = Depends(get_db)):
+    """管理员保存各维度档位系数（仅 ADMIN 可操作，不再有权重）。"""
+    user = db.query(models.User).filter(models.User.id == body.user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    if str(user.role).upper() != "ADMIN":
+        raise HTTPException(status_code=403, detail="仅管理员可以配置评分规则")
+
+    for item in body.items:
+        for lv in item.levels:
+            rec = db.query(models.ScoreDimensionLevel).filter(
+                models.ScoreDimensionLevel.variable == item.variable,
+                models.ScoreDimensionLevel.job_grade == (lv.job_grade or ""),
+                models.ScoreDimensionLevel.level == lv.level
+            ).first()
+            if rec:
+                rec.factor = round(float(lv.factor or 0.0), 3)
+    db.commit()
+    return {"code": 200, "message": "评分规则已保存"}
+
+
+# ---------------------------------------------------------------- 档位字典表（职级/难度/重要度/创新度 档位定义）
+def rebuild_score_matrix(db, job_grades, difficulty_levels, importance_levels, innovation_levels):
+    """按档位定义重建系数矩阵，保留已有系数（新增档位默认 0）。"""
+    old = {}
+    for row in db.query(models.ScoreDimensionLevel).all():
+        old[(row.variable, row.job_grade or "", row.level)] = row.factor or 0
+    db.query(models.ScoreDimensionLevel).delete()
+    for g in job_grades:
+        for lv in difficulty_levels:
+            db.add(models.ScoreDimensionLevel(variable="difficulty", job_grade=g, level=lv,
+                                              factor=old.get(("difficulty", g, lv), 0)))
+        for lv in importance_levels:
+            db.add(models.ScoreDimensionLevel(variable="importance", job_grade=g, level=lv,
+                                              factor=old.get(("importance", g, lv), 0)))
+    for lv in innovation_levels:
+        db.add(models.ScoreDimensionLevel(variable="innovation", job_grade="", level=lv,
+                                          factor=old.get(("innovation", "", lv), 0)))
+
+
+@router.get("/level-defs")
+def get_level_defs(db: Session = Depends(get_db)):
+    """返回职级、难度、重要度、创新度的档位定义。"""
+    rows = db.query(models.ScoreLevelDef).order_by(models.ScoreLevelDef.category, models.ScoreLevelDef.sort_order).all()
+    result = {"job_grade": [], "difficulty": [], "importance": [], "innovation": []}
+    for r in rows:
+        if r.category in result:
+            result[r.category].append(r.name)
+    return {"code": 200, "data": result}
+
+
+@router.put("/level-defs")
+def put_level_defs(body: LevelDefsUpdate, db: Session = Depends(get_db)):
+    """管理员维护档位定义并重建系数矩阵（仅 ADMIN）。"""
+    user = db.query(models.User).filter(models.User.id == body.user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    if str(user.role).upper() != "ADMIN":
+        raise HTTPException(status_code=403, detail="仅管理员可以维护档位定义")
+
+    def clean(items):
+        seen = []
+        for x in items or []:
+            x = (x or "").strip()
+            if x and x not in seen:
+                seen.append(x)
+        return seen
+
+    job_grades = clean(body.job_grade)
+    difficulty_levels = clean(body.difficulty)
+    importance_levels = clean(body.importance)
+    innovation_levels = clean(body.innovation)
+    if not job_grades or not difficulty_levels or not importance_levels or not innovation_levels:
+        raise HTTPException(status_code=400, detail="职级、难度、重要度、创新度档位都不能为空")
+
+    # 1) 重写档位字典表
+    db.query(models.ScoreLevelDef).delete()
+    for cat, names in [("job_grade", job_grades), ("difficulty", difficulty_levels),
+                       ("importance", importance_levels), ("innovation", innovation_levels)]:
+        for i, name in enumerate(names):
+            db.add(models.ScoreLevelDef(category=cat, name=name, sort_order=i, is_active=1))
+
+    # 2) 重建系数矩阵（保留已有 factor）
+    rebuild_score_matrix(db, job_grades, difficulty_levels, importance_levels, innovation_levels)
+    db.commit()
+    return {"code": 200, "message": "档位定义已保存并重建系数矩阵", "data": {
+        "job_grade": job_grades, "difficulty": difficulty_levels,
+        "importance": importance_levels, "innovation": innovation_levels}}
