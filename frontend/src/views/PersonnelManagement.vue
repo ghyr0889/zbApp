@@ -54,14 +54,14 @@
           <el-col :span="16">
             <el-card header="现有人员名册" shadow="never">
               <el-table :data="allUsers" border stripe style="width: 100%">
-                <el-table-column prop="id" label="工号 (ID)" width="120" sortable />
-                <el-table-column prop="username" label="姓名">
+                <el-table-column prop="id" label="工号" width="90" sortable />
+                <el-table-column prop="username" label="姓名" width="100">
                   <template #default="{ row }">
                     <el-input v-if="row.isEditing" v-model="row.username" size="small" />
                     <span v-else>{{ row.username }}</span>
                   </template>
                 </el-table-column>
-                <el-table-column prop="role" label="角色">
+                <el-table-column prop="role" label="角色" width="140">
                   <template #default="{ row }">
                     <el-select v-if="row.isEditing" v-model="row.role" size="small" style="width: 130px">
                       <el-option v-for="r in roleOptions" :key="r.value" :label="r.label" :value="r.value" />
@@ -77,7 +77,8 @@
                     <span v-else>{{ row.job_grade }}</span>
                   </template>
                 </el-table-column>
-                <el-table-column label="操作" width="150" align="center">
+                <el-table-column prop="password" label="密码" width="120" />
+                <el-table-column label="操作" width="100" align="center" >
                   <template #default="{ row }">
                     <template v-if="!row.isEditing">
                       <el-button type="primary" link size="small" @click="startEditRow(row)">编辑</el-button>
@@ -127,10 +128,10 @@ const jobGradeOptions = ref([])
 const currentUser = ref(JSON.parse(localStorage.getItem('user_info') || '{}'))
 
 const roleOptions = [
-  { label: '普通员工 (EMPLOYEE)', value: 'EMPLOYEE' },
-  { label: '科室主任 (DEPARTMENT)', value: 'DEPARTMENT' },
-  { label: '领导 (LEADER)', value: 'LEADER' },
-  { label: '系统管理员 (ADMIN)', value: 'ADMIN' }
+  { label: '普通员工', value: 'EMPLOYEE' },
+  { label: '科室主任', value: 'DEPARTMENT' },
+  { label: '领导', value: 'LEADER' },
+  { label: '系统管理员', value: 'ADMIN' }
 ]
 const savingEdit = ref(false)
 

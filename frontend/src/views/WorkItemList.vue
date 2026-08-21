@@ -109,10 +109,17 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="score" label="分值" width="90" align="center">
+        <el-table-column prop="score" label="基础总分值" width="90" align="center">
           <template #default="{ row }">
             <el-input-number v-if="row.isEdit" v-model="row.score" :min="0" :step="0.5" size="small" style="width: 100%" controls-position="right" />
             <span v-else class="score-text">{{ row.score }}</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="remaining_score" label="剩余分值" width="90" align="center">
+          <template #default="{ row }">
+            <el-input-number v-if="row.isEdit" v-model="row.remaining_score" :min="0" :step="0.5" size="small" style="width: 100%" controls-position="right" />
+            <span v-else class="score-text">{{ row.remaining_score }}</span>
           </template>
         </el-table-column>
 
@@ -128,7 +135,6 @@
             <template v-else>
               <span class="score-text">{{ row.month_score ?? 0 }}</span>
               <el-button v-if="canManage && row.id && !row.complete_status" type="primary" link size="small" @click="row.isEditMonth = true">填写</el-button>
-              <el-tag v-if="row.complete_status" size="small" type="success" effect="plain">已完成</el-tag>
             </template>
           </template>
         </el-table-column>
@@ -166,7 +172,6 @@
             </template>
             <template v-else>
               <el-tag v-if="row.isStaged" size="small" type="info" effect="plain" class="staged-tag">已暂存</el-tag>
-              <el-tag v-if="row.complete_status" size="small" type="success" effect="plain">已完成</el-tag>
               <el-button v-else type="primary" link size="small" @click="row.isEdit = true">编辑</el-button>
               <el-popconfirm v-if="!row.complete_status" title="确定删除该工作项？" confirm-button-type="danger" @confirm="removeItem(row)">
                 <template #reference>
@@ -294,6 +299,7 @@ const handleAddWorkItem = () => {
     innovation: '',
     deadline: '',
     score: 0,
+    remaining_score: 0,
     category: '',
     work_package_id: workPackageId,
     isEdit: true,

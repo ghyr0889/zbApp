@@ -18,7 +18,7 @@ legacy_router = APIRouter(prefix="/api/v1", tags=["Legacy Compat"])
 def get_all_users(db: Session = Depends(get_db)):
     users = db.query(models.User).all()
     return {"code": 200, "data": [
-        {"id": u.id, "username": u.username, "role": u.role, "job_grade": u.job_grade} for u in users
+        {"id": u.id, "username": u.username, "role": u.role, "job_grade": u.job_grade, "password": u.password} for u in users
     ]}
 
 

@@ -4,6 +4,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 import models
 from database import get_db
@@ -69,9 +70,12 @@ def get_public_work_packages(db: Session = Depends(get_db)):
     packages = db.query(models.WorkPackage).all()
 
     # 累计各工作项所有月份分值（进度 = 累计完成量 / 工作项分值，封顶 100%）
-    sum_by_item = {}
-    for r in db.query(models.WorkItemMonthlyScore).all():
-        sum_by_item[r.work_item_id] = sum_by_item.get(r.work_item_id, 0.0) + (r.score or 0.0)
+    results = db.query(
+        models.WorkItemMonthlyScore.work_item_id,
+        func.sum(models.WorkItemMonthlyScore.score).label('total_score')
+    ).group_by(models.WorkItemMonthlyScore.work_item_id).all()
+
+    sum_by_item = {r.work_item_id: r.total_score for r in results}
 
     # 项目聚合：完成量 / 满分
     project_done = {}
@@ -178,6 +182,14 @@ def get_work_items(work_package_id: str, db: Session = Depends(get_db)):
         ).all():
             acc_sum[r.work_item_id] = acc_sum.get(r.work_item_id, 0.0) + (r.score or 0.0)
 
+    remaining_scores = {}
+    if item_ids:
+        work_items = db.query(models.WorkItem).filter(models.WorkItem.id.in_(item_ids)).all()
+        for item in work_items:
+            total_score = item.score or 0.0
+            completed_score = acc_sum.get(item.id, 0.0)
+            remaining_scores[item.id] = total_score - completed_score
+
     # 工作包级扣分汇总：超期完成的工作项每个扣 1 分
     deducted = sum(compute_deducted(it) for it in items)
 
@@ -203,6 +215,7 @@ def get_work_items(work_package_id: str, db: Session = Depends(get_db)):
                     "quality_score": monthly_quality_score(db, it.id, cur_month),
                     "calc_score": calc_scores.get(it.id) if calc_scores.get(it.id) is not None else compute_calc_score(month_scores.get(it.id, 0.0), it, db, owner_job_grade, monthly_quality_score(db, it.id, cur_month)),
                     "progress": calc_progress(acc_sum.get(it.id, 0.0), it.score or 0.0),
+                    "remaining_score": remaining_scores.get(it.id, 0.0),
                     "deducted_score": compute_deducted(it),
                     "month": cur_month,
                 }

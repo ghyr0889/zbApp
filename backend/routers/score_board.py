@@ -337,8 +337,6 @@ def save_month_score(work_item_id: int, body: MonthScoreIn, db: Session = Depend
     item = db.query(models.WorkItem).filter(models.WorkItem.id == work_item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="工作项不存在")
-    if item.complete_status:
-        raise HTTPException(status_code=400, detail="工作项已完成，不能填写分值")
 
     user = db.query(models.User).filter(models.User.id == body.user_id).first()
     if not user:
