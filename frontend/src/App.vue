@@ -82,7 +82,6 @@
 import { ElMessage } from 'element-plus'
 import { computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { getWorkPackagesOverviewApi } from './api/index'
 import { useUserStore } from './stores/user'
 
 const router = useRouter()

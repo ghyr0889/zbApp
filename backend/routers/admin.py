@@ -6,7 +6,6 @@ import traceback
 import models
 from database import get_db
 from schemas import UserCreate, ProjectCreate, WorkPackageCreate, ScoreRuleUpdate, LevelDefsUpdate, UserUpdate
-from utils import work_package_summary, ensure_default_work_item
 
 router = APIRouter(prefix="/api/v1/admin", tags=["Admin Management"])
 # 兼容前端历史路径：deleteUserApi 实际请求 DELETE /api/v1/users/{id}
@@ -94,6 +93,8 @@ def get_all_projects(db: Session = Depends(get_db)):
             "code": project.code,
             "owner_id": project.owner_id or "-",
             "owner_name": project.owner.username if project.owner else "未指定负责人",
+            "tech_owner_id": project.tech_owner_id or "-",
+            "tech_owner_name": project.tech_owner.username if project.tech_owner else "未指定机型主管",
             "level": project.level or "",
         })
     return {"code": 200, "data": res}
@@ -112,11 +113,10 @@ def create_or_update_project(project_in: ProjectCreate, db: Session = Depends(ge
             ).first()
             if not project:
                 raise HTTPException(status_code=404, detail="项目不存在")
-            if project.complete_status:
-                raise HTTPException(status_code=400, detail="项目已完成，不能修改")
-            project.name = project_name
+            project.name = project_in.name
             project.code = project_in.code
             project.owner_id = project_in.owner_id or None
+            project.tech_owner_id = project_in.tech_owner_id or None
             project.category = project_in.category or "-"
             project.level = project_in.level or "-"
         else:
@@ -124,6 +124,7 @@ def create_or_update_project(project_in: ProjectCreate, db: Session = Depends(ge
                 name=project_name,
                 code=project_in.code,
                 owner_id=project_in.owner_id or None,
+                tech_owner_id=project_in.tech_owner_id or None,
                 category=project_in.category or "-",
                 level=project_in.level or "-"
             )
@@ -142,26 +143,26 @@ def create_or_update_project(project_in: ProjectCreate, db: Session = Depends(ge
         raise HTTPException(status_code=500, detail=f"保存项目失败: {str(e)}")
 
 
-# ---------------------------------------------------------------- 工作包
-def _work_package_view(pkg):
-    """构造工作包视图：聚合分值/节点，附带负责人与指派信息。"""
-    score, deadline = work_package_summary(pkg)
-    project = pkg.project
-    owner = pkg.owner
-    owner_id = pkg.owner_id or ""
-    owner_name = owner.username if owner else ""
-    return {
-        "id": pkg.id,
-        "name": pkg.name,
-        "project_id": pkg.project_id,
-        "project_name": project.name if project else "-",
-        "category_name": pkg.category_name or "-",
-        "score": score,
-        "deadline": deadline or "-",
-        "owner_id": owner_id,
-        "owner_name": owner_name,
-    }
+@router.delete("/projects/{project_id}")
+def delete_project(project_id: int, user_id: str, db: Session = Depends(get_db)):
+    """删除项目"""
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    if not user:
+        raise HTTPException(status_code=404, detail=f"查不到对应的用户 (接收到的 user_id: {user_id})")
+    if user.role not in ["LEADER", "DEPARTMENT", "ADMIN"] and (not project or project.owner_id != user.id):
+        raise HTTPException(status_code=405, detail="只有项目负责人和部门领导、科室主任、管理员可以删除项目")
+    if project.complete_status:
+        raise HTTPException(status_code=400, detail="项目已完成，不能删除")
 
+    db.delete(project)  
+    db.commit()
+    return {"code": 200, "message": "项目删除成功"}
+
+
+# ---------------------------------------------------------------- 工作包
 
 @router.post("/work-packages")
 def create_or_update_work_package(pkg_in: WorkPackageCreate, db: Session = Depends(get_db)):
@@ -182,33 +183,29 @@ def create_or_update_work_package(pkg_in: WorkPackageCreate, db: Session = Depen
         raise HTTPException(status_code=400, detail="所属项目不存在，请先选择正确的项目")
 
     try:
-        if pkg_in.work_package_id:
+        if pkg_in.id:
             pkg = db.query(models.WorkPackage).filter(
-                models.WorkPackage.id == pkg_in.work_package_id
+                models.WorkPackage.id == pkg_in.id
             ).first()
             if not pkg:
                 raise HTTPException(status_code=404, detail="未找到要修改的工作包")
-            if pkg.complete_status:
-                raise HTTPException(status_code=400, detail="工作包已完成，不能修改")
 
             pkg.project_id = project.id
             pkg.category_name = pkg_in.category_name
             new_owner = pkg_in.owner_id
             pkg.owner_id = new_owner or None
-            pkg.next_step_work = (pkg_in.next_step_work or "").strip()
             pkg.objective = (pkg_in.objective or "").strip()
             message = "工作包更新成功"
         else:
-            # 自动生成工作包 ID（项目下递增序号）
+            # 自动生成工作包 code（项目下递增序号）
             existing_count = db.query(models.WorkPackage).filter(
                 models.WorkPackage.project_id == project.id
             ).count()
             pkg = models.WorkPackage(
-                id=f"P{project.id}-WP{existing_count + 1:02d}",
+                code=f"P{project.id}-WP{existing_count + 1:02d}",
                 project_id=project.id,
                 category_name=pkg_in.category_name,
                 owner_id=pkg_in.owner_id or None,
-                next_step_work=pkg_in.next_step_work or "",
                 objective=pkg_in.objective or ""
             )
             db.add(pkg)
@@ -216,7 +213,6 @@ def create_or_update_work_package(pkg_in: WorkPackageCreate, db: Session = Depen
 
         db.flush()  # 先落库拿到 pkg.id，供关系使用
         # 把前端传的 分值/节点 保存到默认工作项
-        ensure_default_work_item(db, pkg)
         db.commit()
         db.refresh(pkg)
         return {"code": 200, "message": message, "data": {"id": pkg.id}}
@@ -230,17 +226,23 @@ def create_or_update_work_package(pkg_in: WorkPackageCreate, db: Session = Depen
         raise HTTPException(status_code=500, detail=f"保存工作包失败: {str(e)}")
 
 
-@router.get("/work-packages-overview")
-def get_work_packages_overview(db: Session = Depends(get_db)):
-    try:
-        packages = db.query(models.WorkPackage).all()
-        res = [_work_package_view(pkg) for pkg in packages]
-        return {"code": 200, "data": res}
-    except Exception as e:
-        print("❌ work-packages-overview 接口报错详情:")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"查询工作包概览失败: {str(e)}")
+@router.delete("/work-packages/{work_package_id}")
+def delete_work_package(work_package_id: int, user_id: str, db: Session = Depends(get_db)):
+    """删除工作包"""
+    work_package = db.query(models.WorkPackage).filter(models.WorkPackage.id == work_package_id).first()
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not work_package:
+        raise HTTPException(status_code=404, detail="工作包不存在")
+    if not user:
+        raise HTTPException(status_code=404, detail=f"查不到对应的用户 (接收到的 user_id: {user_id})")
+    if user.role not in ["LEADER", "DEPARTMENT", "ADMIN"] and (not work_package or work_package.owner_id != user.id):
+        raise HTTPException(status_code=405, detail="只有改工作包负责人和部门领导、科室主任、管理员可以删除项目")
+    if work_package.complete_status:
+        raise HTTPException(status_code=400, detail="工作包已完成，不能删除")
 
+    db.delete(work_package)
+    db.commit()
+    return {"code": 200, "message": "工作包删除成功"}
 
 # ---------------------------------------------------------------- 计算得分：评分维度与档位
 @router.get("/computed-score-dimensions")

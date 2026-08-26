@@ -43,30 +43,6 @@ def work_package_summary(pkg):
     return total_score, deadline_str(earliest)
 
 
-def ensure_default_work_item(db, pkg, score=None, deadline_str_val=""):
-    """确保工作包至少有一个承载“分值/节点”的工作项。
-    - 工作包尚无工作项：自动创建一个“默认工作项”（名称取工作包名），写入 score/deadline
-    - 工作包已有工作项：把第一个工作项视为默认工作项，更新其 score/deadline
-    调用前需先 db.flush() 保证 pkg.id 与关系可访问。
-    """
-    items = list(pkg.work_items or [])
-    if items:
-        first = items[0]
-        if score is not None:
-            first.score = score
-        parsed = parse_deadline(deadline_str_val)
-        if parsed:
-            first.deadline = parsed
-        return first
-
-    item = models.WorkItem(
-        name=pkg.id or "默认工作项",
-        work_package_id=pkg.id,
-        score=score if score is not None else 0.0,
-        deadline=parse_deadline(deadline_str_val) if deadline_str_val else None
-    )
-    db.add(item)
-    return item
 
 
 def calc_progress(month_score, full_score):

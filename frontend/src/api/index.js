@@ -5,10 +5,6 @@ const api = axios.create({
   timeout: 5000
 })
 
-export const loginApi = (data) => api.post('/auth/login', data)
-
-export const getMyAssignedWorkPackagesApi = (userId) => api.get(`/work-logs/my-assigned-work-packages/${userId}`)
-
 export const getPublicScoreBoardApi = (period, year, month, quarter) => {
   const params = { period, year, month, quarter }
   Object.keys(params).forEach(k => {
@@ -17,19 +13,16 @@ export const getPublicScoreBoardApi = (period, year, month, quarter) => {
   return api.get('/score-board/public-score-board', { params })
 }
 
-export const getPublicWorkPackagesApi = () => api.get('/work-logs/public-work-packages')
-
 export const getAllUsersApi = () => api.get('/admin/users')
 export const createUserApi = (data) => api.post('/admin/users', data)
 export const deleteUserApi = (userId) => api.delete(`/admin/users/${userId}`)
-export const updateUserApi = (userId) => api.put(`/admin/user/${userId}`, data)
+export const updateUserApi = (userId,data) => api.put(`/admin/users/${userId}`, data)
 // 修改自己的登录密码（校验旧密码）
 export const changePasswordApi = (data) => api.put('/auth/password', data) 
 
 export const getAllProjectsApi = () => api.get('/admin/projects')
 export const createProjectApi = (data) => api.post('/admin/projects', data)
-
-export const getWorkPackagesOverviewApi = () => api.get('/admin/work-packages-overview')
+export const deleteProjectApi = (projectId, userId) => api.delete(`/admin/projects/${projectId}`,{params: { user_id: userId}})
 
 export const createWorkPackageApi = (data) => api.post('/admin/work-packages', data)
 
@@ -38,17 +31,25 @@ export const getIncomingTransfersApi = (userId) => api.get(`/transfers/my-incomi
 export const processTransferApi = (transferId, action) => api.post(`/transfers/process?transfer_id=${transferId}&action=${action}`)
 export const getMyOutgoingTransfersApi = (userId) => api.get(`/transfers/my-outgoing?user_id=${userId}`)
 
-// 审核通过接口
-export const taskAssignmentApi = (data) => api.post('/review/projects/assign', data)
-
-
 export const userLoginApi = (data) => api.post('/auth/user-login', data)
 export const adminLoginApi = (data) => api.post('/auth/admin-login', data)
 
 
 // 工作项管理（工作包 → 工作项）
 export const getWorkItemsApi = (workPackageId) => api.get(`/work-logs/work-packages/${workPackageId}/work-items`)
+export const deleteWorkPackageApi = (workPackageId, userId) => api.delete(`/admin/work-packages/${workPackageId}`,{params: { user_id: userId}})
 export const deleteWorkItemApi = (workItemId) => api.delete(`/work-logs/work-items/${workItemId}`)
+
+// 确认/取消完成（负责人手动标记）
+export const confirmCompletionApi = (data) => api.put('/work-logs/confirm-completion', data)
+
+// 项目总览分页/筛选（大数据量）
+export const getPagedProjectsApi = (params) => api.get('/work-logs/projects', { params })
+export const getProjectDetailApi = (projectId) => api.get(`/work-logs/projects/${projectId}`)
+export const getPagedProjectWorkPackagesApi = (projectId, params) =>
+  api.get(`/work-logs/projects/${projectId}/work-packages`, { params })
+export const getMyWorkPackagesPagedApi = (userId, params) =>
+  api.get(`/work-logs/my-work-packages/${userId}`, { params })
 // 保存工作项本月分值（直接生效，不经过审核）
 export const saveMonthScoreApi = (workItemId, data) => api.put(`/score-board/work-items/${workItemId}/month-score`, data)
 

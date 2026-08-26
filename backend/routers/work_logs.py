@@ -3,19 +3,16 @@ import re
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import func, or_
 
 import models
 from database import get_db
-from schemas import MonthScoreIn
+from schemas import ConfirmCompletionIn, MonthScoreIn
 from utils import work_package_summary, deadline_str, parse_deadline, calc_progress
 from routers.score_board import compute_calc_score, compute_deducted, monthly_quality_score
 
 router = APIRouter(prefix="/api/v1/work-logs", tags=["Work Logs"])
-
-
-
 
 # ---------------------------------------------------------------- 我的工作包（员工用于申请拆分）
 @router.get("/my-assigned-work-packages/{user_id}")
@@ -30,6 +27,7 @@ def get_my_assigned_work_packages(user_id: str, db: Session = Depends(get_db)):
         proj_owner = project.owner if project else None
         data.append({
             "work_package_id": pkg.id,
+            "work_package_code": pkg.code,
             "project_id": pkg.project_id,
             "project_name": project.name if project else "-",
             "category_name": pkg.category_name or "-",
@@ -50,80 +48,200 @@ def _public_package_view(pkg, db):
 
     return {
         "id": pkg.id,
+        "code": pkg.code,
         "project_id": pkg.project_id,
         "project_code": project.code,
         "project_name": project.name if project else "-",
         "project_category": project.category if project else "",  # 项目类别
         "category_name": pkg.category_name or "-",
-        "next_step_work": pkg.next_step_work or "",  # 下阶段工作
         "objective": pkg.objective or "",  # 目标
         "project_owner_id": project.owner_id if project else "",
         "project_owner_name": proj_owner.username if proj_owner else "",
         "package_owner_id": pkg_owner_id,
         "package_owner_name": pkg_owner_name,
         "level": project.level if project else "",
+        "package_tech_owner":pkg.tech_owner
     }
 
 
-@router.get("/public-work-packages")
-def get_public_work_packages(db: Session = Depends(get_db)):
-    packages = db.query(models.WorkPackage).all()
+# ---------------------------------------------------------------- 项目分页/筛选（大数据量项目总览）
+@router.get("/projects")
+def get_paged_projects(page: int = 1,
+                       page_size: int = 20,
+                       keyword: str = None,
+                       owner_id: str = None,
+                       tech_owner_id: str = None,
+                       level: str = None,
+                       complete_status: str = None,
+                       db: Session = Depends(get_db)):
+    """项目分页 + 筛选 + 聚合统计：keyword(编号/名称)、owner_id、level、complete_status。"""
+    page = max(int(page or 1), 1)
+    page_size = min(max(int(page_size or 20), 1), 100)
 
-    # 累计各工作项所有月份分值（进度 = 累计完成量 / 工作项分值，封顶 100%）
-    results = db.query(
-        models.WorkItemMonthlyScore.work_item_id,
-        func.sum(models.WorkItemMonthlyScore.score).label('total_score')
-    ).group_by(models.WorkItemMonthlyScore.work_item_id).all()
+    q = db.query(models.Project)
+    if keyword and str(keyword).strip():
+        kw = f"%{str(keyword).strip()}%"
+        q = q.filter(or_(models.Project.code.like(kw), models.Project.name.like(kw)))
+    if owner_id:
+        q = q.filter(models.Project.owner_id == owner_id)
+    if level:
+        q = q.filter(models.Project.level == level)
+    if complete_status is not None and str(complete_status) != "":
+        flag = str(complete_status).lower() in ("1", "true", "yes")
+        q = q.filter(models.Project.complete_status == flag)
 
-    sum_by_item = {r.work_item_id: r.total_score for r in results}
+    total = q.count()
+    projects = q.options(
+        selectinload(models.Project.owner),
+        selectinload(models.Project.work_packages).selectinload(
+            models.WorkPackage.work_items
+        ).selectinload(models.WorkItem.monthly_scores),
+    ).order_by(models.Project.id).offset((page - 1) * page_size).limit(page_size).all()
 
-    # 项目聚合：完成量 / 满分
-    project_done = {}
-    for pkg in packages:
-        done = sum(sum_by_item.get(it.id, 0.0) for it in (pkg.work_items or []))
-        full = sum(it.score or 0.0 for it in (pkg.work_items or []))
-        d, f = project_done.get(pkg.project_id, (0.0, 0.0))
-        project_done[pkg.project_id] = (d + done, f + full)
+    items = []
+    for p in projects:
+        wps = list(p.work_packages or [])
+        done, full = 0.0, 0.0
+        for wp in wps:
+            for it in (wp.work_items or []):
+                full += it.score or 0.0
+                done += sum((ms.score or 0.0) for ms in (it.monthly_scores or []))
+        items.append({
+            "id": p.id,
+            "name": p.name,
+            "code": p.code,
+            "owner_id": p.owner_id or "-",
+            "owner_name": p.owner.username if p.owner else "未指定负责人",
+            "tech_owner_id": p.tech_owner_id or "-",
+            "tech_owner_name": p.tech_owner.username if p.tech_owner else "未指定机型主管",
+            "level": p.level or "",
+            "category": p.category or "",
+            "complete_status": bool(p.complete_status),
+            "work_package_count": len(wps),
+            "done_count": sum(1 for w in wps if w.complete_status),
+            "work_item_count": sum(len(list(w.work_items or [])) for w in wps),
+            "project_progress": calc_progress(done, full),
+        })
+    return {"code": 200, "data": {"total": total, "page": page, "page_size": page_size, "items": items}}
 
-    data = []
-    for pkg in packages:
+
+@router.get("/projects/{project_id}")
+def get_project_detail(project_id: int, db: Session = Depends(get_db)):
+    """项目详情（含聚合统计），供项目详情页标题/信息卡使用。"""
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    wps = list(project.work_packages or [])
+    done, full = 0.0, 0.0
+    for wp in wps:
+        for it in (wp.work_items or []):
+            full += it.score or 0.0
+            done += sum((ms.score or 0.0) for ms in (it.monthly_scores or []))
+    return {"code": 200, "data": {
+        "id": project.id,
+        "name": project.name,
+        "code": project.code,
+        "owner_id": project.owner_id or "-",
+        "owner_name": project.owner.username if project.owner else "未指定负责人",
+        "tech_owner_id": project.tech_owner_id or "-",
+        "tech_owner_name": project.tech_owner.username if project.tech_owner else "未指定机型主管",
+        "level": project.level or "",
+        "category": project.category or "",
+        "complete_status": bool(project.complete_status),
+        "work_package_count": len(wps),
+        "done_count": sum(1 for w in wps if w.complete_status),
+        "work_item_count": sum(len(list(w.work_items or [])) for w in wps),
+        "project_progress": calc_progress(done, full),
+    }}
+
+
+@router.get("/projects/{project_id}/work-packages")
+def get_paged_project_work_packages(project_id: int,
+                                    page: int = 1,
+                                    page_size: int = 20,
+                                    keyword: str = None,
+                                    db: Session = Depends(get_db)):
+    """某项目下的工作包分页 + 筛选：keyword(工作包编号/类别/下阶段工作)。"""
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    page = max(int(page or 1), 1)
+    page_size = min(max(int(page_size or 20), 1), 100)
+
+    q = db.query(models.WorkPackage).filter(models.WorkPackage.project_id == project_id)
+    if keyword and str(keyword).strip():
+        kw = f"%{str(keyword).strip()}%"
+        q = q.filter(or_(
+            models.WorkPackage.id.like(kw),
+            models.WorkPackage.category_name.like(kw),
+        ))
+
+    total = q.count()
+    pkgs = q.options(
+        selectinload(models.WorkPackage.owner),
+        selectinload(models.WorkPackage.project).selectinload(models.Project.owner),
+        selectinload(models.WorkPackage.work_items).selectinload(models.WorkItem.monthly_scores),
+    ).order_by(models.WorkPackage.id).offset((page - 1) * page_size).limit(page_size).all()
+
+    items = []
+    for pkg in pkgs:
         view = _public_package_view(pkg, db)
-        done = sum(sum_by_item.get(it.id, 0.0) for it in (pkg.work_items or []))
+        done = sum(
+            sum((ms.score or 0.0) for ms in (it.monthly_scores or []))
+            for it in (pkg.work_items or [])
+        )
         full = sum(it.score or 0.0 for it in (pkg.work_items or []))
         view["package_progress"] = calc_progress(done, full)
-        pd, pf = project_done.get(pkg.project_id, (0.0, 0.0))
-        view["project_progress"] = calc_progress(pd, pf)
-        data.append(view)
+        view["work_item_count"] = len(list(pkg.work_items or []))
+        view["done_count"] = sum(1 for it in (pkg.work_items or []) if it.complete_status)
+        view["complete_status"] = bool(pkg.complete_status)
+        items.append(view)
+    return {"code": 200, "data": {
+        "project_id": project_id,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "items": items,
+    }}
 
-    # 补充没有任何工作包的项目（占位记录），保证新建项目在总览中也能显示
-    project_ids_with_pkgs = {p["project_id"] for p in data}
-    for project in db.query(models.Project).all():
-        if project.id in project_ids_with_pkgs:
-            continue
-        owner = project.owner
-        data.append({
-            "id": "",
-            "project_id": project.id,
-            "project_code": project.code,
-            "project_name": project.name,
-            "project_category": project.category or "",
-            "category_name": "-",
-            "next_step_work": "",
-            "objective": "",
-            "project_owner_id": project.owner_id or "",
-            "project_owner_name": owner.username if owner else "",
-            "package_owner_id": "",
-            "package_owner_name": "",
-            "package_progress": 0,
-            "project_progress": 0,
-            "score": 0,
-            "deadline": "-",
-            "pkg_completed": False,
-            "project_completed": False,
-            "level": project.level or "",
-        })
 
-    return {"code": 200, "data": data}
+@router.get("/my-work-packages/{user_id}")
+def get_my_work_packages_paged(user_id: str,
+                              page: int = 1,
+                              page_size: int = 20,
+                              db: Session = Depends(get_db)):
+    """我的工作：当前用户负责的工作包（分页 + 进度统计）。"""
+    page = max(int(page or 1), 1)
+    page_size = min(max(int(page_size or 20), 1), 100)
+
+    q = db.query(models.WorkPackage).filter(models.WorkPackage.owner_id == user_id)
+    total = q.count()
+    pkgs = q.options(
+        selectinload(models.WorkPackage.owner),
+        selectinload(models.WorkPackage.project).selectinload(models.Project.owner),
+        selectinload(models.WorkPackage.work_items).selectinload(models.WorkItem.monthly_scores),
+    ).order_by(models.WorkPackage.id).offset((page - 1) * page_size).limit(page_size).all()
+
+    items = []
+    for pkg in pkgs:
+        view = _public_package_view(pkg, db)
+        done = sum(
+            sum((ms.score or 0.0) for ms in (it.monthly_scores or []))
+            for it in (pkg.work_items or [])
+        )
+        full = sum(it.score or 0.0 for it in (pkg.work_items or []))
+        view["package_progress"] = calc_progress(done, full)
+        view["work_item_count"] = len(list(pkg.work_items or []))
+        view["complete_status"] = bool(pkg.complete_status)
+        items.append(view)
+    return {"code": 200, "data": {
+        "user_id": user_id,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "items": items,
+    }}
 
 
 # ---------------------------------------------------------------- 工作项管理
@@ -142,6 +260,7 @@ def _work_item_view(item):
         "completed_at": deadline_str(item.completed_at),
         "complete_status": item.complete_status or "",
         "work_package_id": item.work_package_id,
+        "work_package_code": item.work_package.code
     }
 
 
@@ -198,11 +317,11 @@ def get_work_items(work_package_id: str, db: Session = Depends(get_db)):
         "data": {
             "work_package": {
                 "id": pkg.id,
+                "code": pkg.code,
                 "project_id": pkg.project_id,
                 "project_code":project.code if project else "-",
                 "project_name": project.name if project else "-",
                 "category_name": pkg.category_name or "-",
-                "next_step_work": pkg.next_step_work or "",
                 "objective": pkg.objective or "",
                 "owner_id": pkg.owner_id or "",
                 "owner_name": pkg.owner.username if pkg.owner else "",
@@ -237,4 +356,72 @@ def delete_work_item(work_item_id: int, db: Session = Depends(get_db)):
     db.delete(item)
     db.commit()
     return {"code": 200, "message": "工作项删除成功"}
+
+
+# ---------------------------------------------------------------- 确认完成（负责人手动标记，完成时间随确认记录）
+@router.put("/confirm-completion")
+def confirm_completion(data: ConfirmCompletionIn, db: Session = Depends(get_db)):
+    """确认/取消完成：只有负责人（或领导/管理员）可操作。
+    确认时记录完成时间（仅工作项有 completed_at）；取消时清空。
+    """
+    operator = db.query(models.User).filter(models.User.id == data.user_id).first()
+    if not operator:
+        raise HTTPException(status_code=404, detail="操作人不存在")
+    role = str(operator.role).upper()
+
+    # 定位目标对象与负责人
+    target = None
+    owner_id = None
+    try:
+        if data.target_type == "work_item":
+            target = db.query(models.WorkItem).filter(
+                models.WorkItem.id == int(data.target_id)
+            ).first()
+            if target:
+                owner_id = target.work_package.owner_id if target.work_package else None
+        elif data.target_type == "work_package":
+            target = db.query(models.WorkPackage).filter(
+                models.WorkPackage.id == data.target_id
+            ).first()
+            if target:
+                owner_id = target.owner_id
+        elif data.target_type == "project":
+            target = db.query(models.Project).filter(
+                models.Project.id == int(data.target_id)
+            ).first()
+            if target:
+                owner_id = target.owner_id
+        else:
+            raise HTTPException(status_code=400, detail="target_type 必须是 work_item / work_package / project")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="target_id 格式错误")
+
+    if not target:
+        raise HTTPException(status_code=404, detail="目标不存在")
+
+    # 权限：负责人本人 / 领导 / 管理员
+    if role not in ("LEADER", "ADMIN") and str(owner_id or "") != str(operator.id):
+        raise HTTPException(status_code=403, detail="只有负责人或领导可以确认完成")
+
+    confirmed = bool(data.confirmed)
+    target.complete_status = confirmed
+
+    # 完成时间：仅工作项有 completed_at 列，且只在确认完成时记录 / 取消时清空
+    if data.target_type == "work_item":
+        if confirmed:
+            if not target.completed_at:
+                target.completed_at = datetime.now()
+        else:
+            target.completed_at = None
+
+    db.commit()
+    return {
+        "code": 200,
+        "message": "已确认完成" if confirmed else "已取消完成",
+        "data": {
+            "target_type": data.target_type,
+            "target_id": data.target_id,
+            "complete_status": confirmed,
+        },
+    }
 

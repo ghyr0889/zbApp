@@ -218,6 +218,7 @@ const saveEditRow = async (row) => {
   savingEdit.value = true
   try {
     const res = await updateUserApi(row.id, {
+      updated_by_id: currentUser.value.id,
       username: row.username,
       role: row.role,
       job_grade: row.job_grade

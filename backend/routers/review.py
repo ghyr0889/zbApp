@@ -28,7 +28,7 @@ def _split_request_view(req):
     return {
         "id": req.id,
         "work_package_id": req.work_package_id,
-        "work_package_name": work_package.id if work_package else "-",
+        "work_package_code": work_package.code if work_package else "-",
         "project_id": work_package.project_id if work_package else None,
         "project_name": project.name if project else "-",
         "project_owner_id": project.owner_id,

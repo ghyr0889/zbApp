@@ -26,8 +26,12 @@ try:
     db.commit()
 
     # 2. 项目 (绑定项目负责人 0123)
-    proj1 = models.Project(id=1, code="ABCD", name="项目1", level="A", owner_id="0123", category="类别1",complete_status = None)
-    proj2 = models.Project(id=2, code="TLJC", name="项目2", level="B", owner_id="0123", category="类别2",complete_status = None)
+    proj1 = models.Project(id=1, code="ABCD", name="项目1", level="A", 
+                           owner_id="0123", category="类别1",complete_status = None,
+                           tech_owner_id = None)
+    proj2 = models.Project(id=2, code="TLJC", name="项目2", level="B", 
+                           owner_id="0123", category="类别2",complete_status = None,
+                           tech_owner_id = None)
     db.add_all([proj1, proj2])
     db.commit()
 
@@ -39,41 +43,45 @@ try:
     # 4. 工作包：不同项目下有不同的工作包，类别固定为 类型1-4
     #    —— 项目1 下的工作包（类别：类型1、类型2）
     pkg1 = models.WorkPackage(
-        id="P1-WP01",
+        id=1,
+        code="P1-WP01",
         project_id=1,
         category_name="类型1",
-        next_step_work="完成项目1-工作包1 的下一阶段任务",
         owner_id="1234",
         objective="完成项目1-工作包1 的工作目标",
-        complete_status = None
+        complete_status = None,
+        tech_owner = None
     )
     pkg2 = models.WorkPackage(
-        id="P1-WP02",
+        id=2,
+        code="P1-WP02",
         project_id=1,
         category_name="类型2",
-        next_step_work="完成项目1-工作包2 的下一阶段任务",
         owner_id="1234",
         objective="完成项目1-工作包2 的工作目标",
-        complete_status = None
+        complete_status = None,
+        tech_owner = None
     )
     #    —— 项目2 下的工作包（类别：类型3、类型4）
     pkg3 = models.WorkPackage(
-        id="P2-WP01",
+        id=3,
+        code="P2-WP01",
         project_id=2,
         category_name="类型3",
-        next_step_work="完成项目2-工作包1 的下一阶段任务",
         owner_id="1234",
         objective="完成项目2-工作包1 的工作目标",
-        complete_status = None
+        complete_status = None,
+        tech_owner = None
     )
     pkg4 = models.WorkPackage(
-        id="P2-WP02",
+        id=4,
+        code="P2-WP02",
         project_id=2,
         category_name="类型4",
-        next_step_work="完成项目2-工作包2 的下一阶段任务",
         owner_id="1234",
         objective="完成项目2-工作包2 的工作目标",
-        complete_status = None
+        complete_status = None,
+        tech_owner = None
     )
     db.add_all([pkg1, pkg2, pkg3, pkg4])
     db.commit()

@@ -8,9 +8,9 @@ import Review from '../views/Review.vue'
 import ScoreBoard from '../views/ScoreBoard.vue'
 import ProjectOverview from '../views/ProjectOverview.vue'
 import PersonalInfo from '../views/PersonalInfo.vue'
-import WorkItemList from '../views/WorkItemList.vue'
 import PersonnelManagement from '../views/PersonnelManagement.vue'
 import AdminPanel from '../views/AdminPanel.vue'
+import ProjectDetail from '../views/ProjectDetail.vue'
 
 const routes = [
   { path: '/', redirect: '/project-overview' },
@@ -19,9 +19,9 @@ const routes = [
   { path: '/review', name: 'ReviewLogs', component: Review },
   { path: '/score-board', name: 'ScoreBoard', component: ScoreBoard },
   { path: '/personal-info', name: 'PersonalInfo', component: PersonalInfo },
-  { path: '/work-package/:id/work-items', name: 'WorkItemList', component: WorkItemList },
   { path: '/personnel-management', name: 'PersonnelManagement', component: PersonnelManagement, meta: { requiresAdmin: true } },
-  { path: '/admin-panel', name: 'AdminPanel', component: AdminPanel, meta: { requiresAdmin: true } }
+  { path: '/admin-panel', name: 'AdminPanel', component: AdminPanel, meta: { requiresAdmin: true } },
+  { path: '/project/:id', name: 'ProjectDetail', component: ProjectDetail }
 ]
 
 const router = createRouter({

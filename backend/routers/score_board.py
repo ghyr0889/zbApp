@@ -71,7 +71,8 @@ def monthly_score_detail(rec, db):
         "work_item_difficulty": item.difficulty if item else "-",
         "work_item_importance": item.importance if item else "-",
         "work_item_innovation": item.innovation if item else "-",
-        "work_package_id": wp.id if wp else None,
+        "work_package_id": wp.id,
+        "work_package_code": wp.code if wp else None,
         "work_package_category": wp.category_name if wp else "-",
         "project_id": project.id if project else None,
         "project_name": project.name if project else "-",
@@ -351,10 +352,15 @@ def save_month_score(work_item_id: int, body: MonthScoreIn, db: Session = Depend
     month = (body.month or "").strip()
     if not month:
         raise HTTPException(status_code=400, detail="月份不能为空")
+    
+    db.flush()
+    acc = sum(r.score or 0.0 for r in db.query(models.WorkItemMonthlyScore)
+                .filter(models.WorkItemMonthlyScore.work_item_id == work_item_id).all())
+    remain = item.score - acc
 
     score = round(float(body.score or 0.0), 3)
-    if score > (item.score or 0.0):
-        raise HTTPException(status_code=400, detail=f"本月分值不能超过该工作项分值 {item.score or 0.0}")
+    if score > (remain or 0.0):
+        raise HTTPException(status_code=400, detail=f"本月分值不能超过剩余分值 {remain or 0.0}")
     rec = db.query(models.WorkItemMonthlyScore).filter(
         models.WorkItemMonthlyScore.work_item_id == work_item_id,
         models.WorkItemMonthlyScore.month == month
@@ -378,24 +384,6 @@ def save_month_score(work_item_id: int, body: MonthScoreIn, db: Session = Depend
     owner_job_grade = work_package.owner.job_grade if (work_package and work_package.owner) else ""
     rec.calculate_score = compute_calc_score(score, item, db, owner_job_grade, q)
 
-    # 记录完成时间：本次保存后累计分值首次达到工作项分值 → 锁定完成时间
-    # 会话 autoflush=False，必须先手动 flush，本次 rec 才会计入下面的累计查询
-    db.flush()
-    acc = sum(r.score or 0.0 for r in db.query(models.WorkItemMonthlyScore)
-              .filter(models.WorkItemMonthlyScore.work_item_id == work_item_id).all())
-    if (item.score or 0) > 0 and round(acc, 2) >= round(item.score or 0.0, 2) and item.completed_at is None:
-        item.completed_at = datetime.now()
-
-    # ---- 完成状态联动：工作项 → 工作包 → 项目（全部子项完成才置为 COMPLETED）----
-    if item.completed_at and not item.complete_status:
-        item.complete_status = True
-    if work_package and all(it.complete_status for it in (work_package.work_items or [])):
-        if not work_package.complete_status:
-            work_package.complete_status = True
-        project = work_package.project
-        if project and all(w.complete_status for w in (project.work_packages or [])):
-            if not project.complete_status:
-                project.complete_status = True
     db.commit()
     return {
         "code": 200,

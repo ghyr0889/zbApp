@@ -130,7 +130,7 @@
               <!-- 外层表格：显示项目及工作包信息 -->
               <el-table-column prop="project_name" label="所属项目名称" min-width="150" show-overflow-tooltip />
               <el-table-column prop="project_code" label="所属项目编号" min-width="150" show-overflow-tooltip />
-              <el-table-column prop="work_package_id" label="所属工作包" width="180" align="center" />
+              <el-table-column prop="work_package_code" label="所属工作包" width="180" align="center" />
               <el-table-column prop="work_package_category" label="所属工作包类型" width="180" align="center" />
             </el-table>
           </div>
@@ -355,6 +355,7 @@ const groupedMyDetails = computed(() => {
     const pName = item.project_name || '未归属项目'
     const pCode = item.project_code || '无项目编号'
     const wpId = item.work_package_id || '无编号'
+    const wpCode = item.work_package_code || '无编号'
     const key = `${pName}_${wpId}`
 
     if (!map[key]) {
@@ -362,6 +363,7 @@ const groupedMyDetails = computed(() => {
         project_name: pName,
         project_code: pCode,
         work_package_id: wpId,
+        work_package_code: wpCode,
         work_package_category: item.work_package_category || '-',
         items: []
       }

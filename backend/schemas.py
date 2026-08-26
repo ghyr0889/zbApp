@@ -15,6 +15,13 @@ class ChangePasswordRequest(BaseModel):
     new_password: str = Field(..., description="新密码")
 
 
+class ConfirmCompletionIn(BaseModel):
+    target_type: str = Field(..., description="目标类型：work_item / work_package / project")
+    target_id: int = Field(..., description="目标 ID（工作包为字符串，其余为数字字符串）")
+    user_id: str = Field(..., description="操作人 ID")
+    confirmed: bool = Field(True, description="True=确认完成，False=取消完成")
+
+
 class UserCreate(BaseModel):
     id: str = Field(..., description="工号")
     username: str = Field(..., description="姓名")
@@ -33,26 +40,27 @@ class ProjectCreate(BaseModel):
     name: str = Field(..., description="项目名称")
     code: str = Field(..., description="项目编号")
     owner_id: Optional[str] = Field(None, description="项目负责人 ID")
+    tech_owner_id: Optional[str] = Field(None, description="机型主管/责任人 ID")
     category: Optional[str] = Field(None, description="项目类别")
     level: Optional[str] = Field("C", description="项目级别：A/B/C/D（可扩展）")
 
 
 class WorkPackageCreate(BaseModel):
     """创建/更新工作包。 """
-    work_package_id: Optional[str] = Field(None, description="工作包 ID，新增时为空，修改时传入")
+    id: Optional[int] = None
+    work_package_code: str = Field(None, description="工作包code")
     project_id: Optional[int] = Field(None, description="所属项目 ID")
     project_name: Optional[str] = Field(None, description="所属项目名称（兼容前端）")
     project_code:Optional[str] = Field(None, description="所属项目编号（兼容前端）")
     category_name: str = Field(..., description="工作类型：类型1-4")
     owner_id: Optional[str] = Field(None, description="工作包负责人 ID")
     objective: Optional[str] = Field(None, description="工作目标")
-    next_step_work: Optional[str] = Field(None, description="下一阶段工作")
 
 
 class WorkItemCreate(BaseModel):
     """创建/更新工作项。"""
     work_item_id: Optional[int] = Field(None, description="工作项 ID，新增时为空，修改时传入")
-    work_package_id: str = Field(..., description="所属工作包 ID")
+    work_package_id: int = Field(..., description="所属工作包 ID")
     name: str = Field(..., description="工作项名称")
     standard: Optional[str] = Field(None, description="工作项完成标准")
     difficulty: Optional[str] = Field(None, description="工作项难度")
@@ -109,7 +117,7 @@ class SplitItemIn(BaseModel):
 class SplitRequestCreate(BaseModel):
     """提交工作包拆分申请。"""
     applicant_id: str = Field(..., description="申请人 ID")
-    work_package_id: str = Field(..., description="被拆分的工作包 ID")
+    work_package_id: int = Field(..., description="被拆分的工作包 ID")
     reason: str = Field(..., description="拆分原因")
     split_items: list[SplitItemIn] = Field(..., description="拆分出的工作项列表")
 
@@ -124,7 +132,7 @@ class SplitRequestReview(BaseModel):
 
 class TransferCreate(BaseModel):
     task_id: Optional[str] = Field(None, description="任务分配记录 ID（兼容，可空）")
-    work_package_id: str = Field(..., description="工作包 ID")
+    work_package_id: int = Field(..., description="工作包 ID")
     from_user_id: str = Field(..., description="发起人 ID（当前负责人）")
     to_user_id: str = Field(..., description="接收人 ID（新负责人）")
 
@@ -133,7 +141,7 @@ class TaskAssignCreate(BaseModel):
     """工作包指派（负责人把工作包指派给员工）。"""
     assigner_id: str = Field(..., description="指派人（项目负责人）ID")
     assignee_id: str = Field(..., description="被指派员工 ID")
-    work_package_id: str = Field(..., description="工作包 ID")
+    work_package_id: int = Field(..., description="工作包 ID")
 
 
 class ScoreLevelFactorIn(BaseModel):

@@ -32,9 +32,11 @@ class Project(Base):
     level = Column(String(10), nullable=False, default="C")  # 项目级别: A/B/C/D（可扩展）
     complete_status = Column(Boolean, default=False, nullable=True) # 完成状态
     category = Column(String(100), default=False,nullable=True)  # 项目类别
+    tech_owner_id = Column(String(50),ForeignKey("users.id"),nullable=True) #机型主管/责任人
 
     owner = relationship("User", foreign_keys=[owner_id])
-    work_packages = relationship("WorkPackage", back_populates="project")
+    tech_owner = relationship("User", foreign_keys=[tech_owner_id])
+    work_packages = relationship("WorkPackage", back_populates="project", cascade="all, delete-orphan")
 
 
 class WorkProjectCategory(Base):
@@ -48,18 +50,19 @@ class WorkProjectCategory(Base):
 class WorkPackage(Base):
     __tablename__ = "work_packages" # 工作包表
 
-    id = Column(String(50), primary_key=True, index=True)  # 工作包ID为字符串，由业务方指定，不可自增
-    next_step_work= Column(Text, nullable=True)  # 下阶段工作
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    code = Column(String(50), nullable=False)  # 工作包ID为字符串，由业务方指定，不可自增
     owner_id = Column(String(50), ForeignKey("users.id"), nullable=True)  # 工作包负责人
     objective = Column(Text, nullable=True)  # 工作目标
     complete_status = Column(Boolean, default=False, nullable=True) # 完成状态
+    tech_owner = Column(String(50),default="",nullable=True)
 
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     category_name = Column(String(100), ForeignKey("work_project_categories.name"), nullable=False)
 
     project = relationship("Project", back_populates="work_packages")
     category = relationship("WorkProjectCategory", back_populates="work_packages")
-    work_items = relationship("WorkItem", back_populates="work_package")
+    work_items = relationship("WorkItem", back_populates="work_package", cascade="all, delete-orphan")
     owner = relationship("User", foreign_keys=[owner_id])  # 工作包负责人
 
 
@@ -78,7 +81,7 @@ class WorkItem(Base):
     category= Column(String(100), nullable=True)  # 工作项类别（冗余字段，便于查询）
     complete_status = Column(Boolean, default=False, nullable=True) # 完成状态
 
-    work_package_id = Column(String(50), ForeignKey("work_packages.id"), nullable=False)
+    work_package_id = Column(Integer, ForeignKey("work_packages.id"), nullable=False)
 
     work_package = relationship("WorkPackage", back_populates="work_items")
     monthly_scores = relationship("WorkItemMonthlyScore", back_populates="work_item", cascade="all, delete-orphan")
@@ -89,7 +92,7 @@ class TaskTransfer(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     task_assignment_id = Column(String(50), nullable=False, comment="任务分配记录 ID")
-    work_package_id = Column(String(50), ForeignKey("work_packages.id"), nullable=False)
+    work_package_id = Column(Integer, ForeignKey("work_packages.id"), nullable=False)
     from_user_id = Column(String(50), nullable=False, comment="发起人(原负责人)")
     to_user_id = Column(String(50), nullable=False, comment="接收人(新负责人)")
     status = Column(String(20), default="PENDING", comment="状态: PENDING/ACCEPTED/REJECTED")
@@ -103,7 +106,7 @@ class WorkPackageSplitRequest(Base):
     __tablename__ = "work_package_split_requests"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    work_package_id = Column(String(50), ForeignKey("work_packages.id"), nullable=False)
+    work_package_id = Column(Integer, ForeignKey("work_packages.id"), nullable=False)
     applicant_id = Column(String(50), ForeignKey("users.id"), nullable=False)  # 申请人
     reason = Column(Text, nullable=False)  # 拆分原因
     split_items = Column(Text, nullable=False)  # 拆分方案（JSON：工作项数组）

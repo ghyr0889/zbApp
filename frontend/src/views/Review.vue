@@ -86,7 +86,11 @@
 
           <!-- 2. 外层表格列 -->
           <el-table-column prop="project_name" label="项目名称" min-width="160" show-overflow-tooltip />
-          <el-table-column prop="work_package_id" label="工作包编号" min-width="120" />
+          <el-table-column label="工作包编号" min-width="120">
+            <template #default="{ row }">
+              <span>{{ row.work_package_code }}</span>
+            </template>
+          </el-table-column>
           <el-table-column prop="project_owner_name" label="项目负责人" min-width="100" />
           <el-table-column prop="applicant_name" label="申请人" width="100" />        
           <el-table-column prop="created_at" label="提交时间" width="160" align="center">
@@ -124,10 +128,10 @@
         </el-tab-pane>
 
         <!-- 工作包转办标签页 -->
-        <el-tab-pane label="工作包转办" name="transfers">
-          <div class="transfers-container">
+        <!-- <el-tab-pane label="工作包转办" name="transfers">
+          <div class="transfers-container"> -->
             <!-- 收到的转办申请 -->
-            <div class="transfer-section">
+            <!-- <div class="transfer-section">
               <div class="section-title">收到给我的转办申请</div>
               <el-table :data="incomingTransfers" v-loading="loadingIncoming" border style="width: 100%" empty-text="暂无待处理的转办申请" :header-cell-style="{ background: '#f8fafc', color: '#1e293b', fontWeight: '600' }">
                 <el-table-column prop="from_username" label="发起人" width="110" align="center" />
@@ -141,10 +145,10 @@
                   </template>
                 </el-table-column>
               </el-table>
-            </div>
+            </div> -->
 
             <!-- 我发起的转办申请 -->
-            <div class="transfer-section">
+            <!-- <div class="transfer-section">
               <div class="section-title">我发起的转办申请</div>
               <el-table :data="outgoingTransfers" v-loading="loadingOutgoing" border style="width: 100%" empty-text="暂无发起的转办申请" :header-cell-style="{ background: '#f8fafc', color: '#1e293b', fontWeight: '600' }">
                 <el-table-column prop="to_username" label="接收人" width="110" align="center" />
@@ -159,7 +163,7 @@
               </el-table>
             </div>
           </div>
-        </el-tab-pane>
+        </el-tab-pane> -->
       </el-tabs>
     </el-card>
 
