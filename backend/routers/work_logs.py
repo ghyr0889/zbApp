@@ -45,6 +45,9 @@ def _public_package_view(pkg, db):
     pkg_owner = pkg.owner
     pkg_owner_id = pkg.owner_id or ""
     pkg_owner_name = pkg_owner.username if pkg_owner else ""
+    pkg_tech_owner = pkg.tech_owner
+    pkg_tech_owner_id = pkg.tech_owner_id or ""
+    pkg_tech_owner_name = pkg_tech_owner.username if pkg_tech_owner else ""
 
     return {
         "id": pkg.id,
@@ -59,8 +62,10 @@ def _public_package_view(pkg, db):
         "project_owner_name": proj_owner.username if proj_owner else "",
         "package_owner_id": pkg_owner_id,
         "package_owner_name": pkg_owner_name,
+        "package_tech_owner_id": pkg_tech_owner_id,
+        "package_tech_owner_name": pkg_tech_owner_name,
         "level": project.level if project else "",
-        "package_tech_owner":pkg.tech_owner
+        "notes": pkg.notes or ""
     }
 
 
@@ -256,7 +261,6 @@ def _work_item_view(item):
         "innovation": item.innovation or "",
         "deadline": deadline_str(item.deadline) if item.deadline else "",
         "score": item.score or 0.0,
-        "category": item.category or "",
         "completed_at": deadline_str(item.completed_at),
         "complete_status": item.complete_status or "",
         "work_package_id": item.work_package_id,

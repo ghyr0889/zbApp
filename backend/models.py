@@ -5,8 +5,6 @@ from datetime import datetime
 from database import Base
 import enum
 
-FIXED_WORK_CATEGORIES = ["类型1", "类型2", "类型3", "类型4"]
-
 class LogStatus(str, enum.Enum):
     PENDING = "PENGING"
     APPROVED = "APPROVED"
@@ -39,12 +37,14 @@ class Project(Base):
     work_packages = relationship("WorkPackage", back_populates="project", cascade="all, delete-orphan")
 
 
-class WorkProjectCategory(Base):
-    __tablename__ = "work_project_categories"#工作包类别表
+class WorkPackageCategory(Base):
+    __tablename__ = "work_package_categories"#工作包类别表
 
-    name = Column(String(100), primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    name = Column(String(100),nullable=False)
 
     work_packages = relationship("WorkPackage", back_populates="category")
+
 
 
 class WorkPackage(Base):
@@ -55,15 +55,20 @@ class WorkPackage(Base):
     owner_id = Column(String(50), ForeignKey("users.id"), nullable=True)  # 工作包负责人
     objective = Column(Text, nullable=True)  # 工作目标
     complete_status = Column(Boolean, default=False, nullable=True) # 完成状态
-    tech_owner = Column(String(50),default="",nullable=True)
+    tech_owner_id = Column(String(50),ForeignKey("users.id"),nullable=True) #技术负责人
+    notes = Column(Text, nullable=True) # 备注
 
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
-    category_name = Column(String(100), ForeignKey("work_project_categories.name"), nullable=False)
+    category_name = Column(String(100), ForeignKey("work_package_categories.name"), nullable=False)
+    
 
     project = relationship("Project", back_populates="work_packages")
-    category = relationship("WorkProjectCategory", back_populates="work_packages")
+    category = relationship("WorkPackageCategory", back_populates="work_packages")
     work_items = relationship("WorkItem", back_populates="work_package", cascade="all, delete-orphan")
     owner = relationship("User", foreign_keys=[owner_id])  # 工作包负责人
+    tech_owner = relationship("User", foreign_keys=[tech_owner_id])#技术负责人
+    split_requests = relationship("WorkPackageSplitRequest", back_populates="work_package", cascade="all, delete-orphan")
+
 
 
 class WorkItem(Base):
@@ -78,7 +83,6 @@ class WorkItem(Base):
     deadline = Column(DateTime, nullable=True)  # 工作项完成节点要求
     completed_at = Column(DateTime, nullable=True) # 工作完成时间
     score = Column(Float, default=0.00)  # 工作项分值
-    category= Column(String(100), nullable=True)  # 工作项类别（冗余字段，便于查询）
     complete_status = Column(Boolean, default=False, nullable=True) # 完成状态
 
     work_package_id = Column(Integer, ForeignKey("work_packages.id"), nullable=False)
@@ -116,7 +120,7 @@ class WorkPackageSplitRequest(Base):
     created_at = Column(DateTime, default=datetime.now) # 提交原因
     reviewed_at = Column(DateTime, nullable=True)  # 审核时间
 
-    work_package = relationship("WorkPackage")
+    work_package = relationship("WorkPackage", back_populates="split_requests")
     applicant = relationship("User", foreign_keys=[applicant_id])
 
 

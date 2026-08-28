@@ -75,6 +75,7 @@
               v-loading="loading"
               border
               style="width: 100%"
+              height="calc(100vh - 380px)"
               empty-text="当前周期暂无您的积分记录"
               :header-cell-style="{ background: '#f8fafc', color: '#334155' }"
             >
@@ -148,6 +149,7 @@
               stripe
               border
               style="width: 100%"
+              height="calc(100vh - 330px)"
               empty-text="当前月份暂无积分数据"
               :header-cell-style="{ background: '#f8fafc', color: '#334155' }"
             >
@@ -235,6 +237,7 @@
               stripe
               border
               style="width: 100%"
+              height="calc(100vh - 340px)"
               empty-text="当前周期暂无积分数据"
               :header-cell-style="{ background: '#f8fafc', color: '#334155' }"
             >
@@ -291,7 +294,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getPublicScoreBoardApi } from '../api'
+import { getPublicScoreBoardApi ,updateMonthlyExtraScoreApi} from '../api'
 import { useUserStore } from '../stores/user'
 
 const userStore = useUserStore()
@@ -542,6 +545,9 @@ onMounted(() => {
   padding: 16px 4px;
   animation: fadeIn 0.3s ease;
 }
+
+/* 表格固定高度内部滚动，不受全局 flex:1 拉伸影响 */
+:deep(.el-table) { flex: none !important; }
 
 /* 全局查询区样式 */
 .global-filter {

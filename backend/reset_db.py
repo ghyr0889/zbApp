@@ -37,7 +37,7 @@ try:
 
     # 3. 工作包类别（固定四类：类型1-4）
     for cat_name in models.FIXED_WORK_CATEGORIES:
-        db.add(models.WorkProjectCategory(name=cat_name))
+        db.add(models.WorkPackageCategory(name=cat_name))
     db.commit()
 
     # 4. 工作包：不同项目下有不同的工作包，类别固定为 类型1-4
@@ -49,8 +49,9 @@ try:
         category_name="类型1",
         owner_id="1234",
         objective="完成项目1-工作包1 的工作目标",
+        notes="无",
         complete_status = None,
-        tech_owner = None
+        tech_owner_id = None
     )
     pkg2 = models.WorkPackage(
         id=2,
@@ -59,8 +60,10 @@ try:
         category_name="类型2",
         owner_id="1234",
         objective="完成项目1-工作包2 的工作目标",
+        notes="无",
         complete_status = None,
-        tech_owner = None
+        tech_owner = None,
+        tech_owner_id = None
     )
     #    —— 项目2 下的工作包（类别：类型3、类型4）
     pkg3 = models.WorkPackage(
@@ -70,8 +73,10 @@ try:
         category_name="类型3",
         owner_id="1234",
         objective="完成项目2-工作包1 的工作目标",
+        notes="无",
         complete_status = None,
-        tech_owner = None
+        tech_owner = None,
+        tech_owner_id = None
     )
     pkg4 = models.WorkPackage(
         id=4,
@@ -80,8 +85,10 @@ try:
         category_name="类型4",
         owner_id="1234",
         objective="完成项目2-工作包2 的工作目标",
+        notes="无",
         complete_status = None,
-        tech_owner = None
+        tech_owner = None,
+        tech_owner_id = None
     )
     db.add_all([pkg1, pkg2, pkg3, pkg4])
     db.commit()
@@ -98,7 +105,6 @@ try:
         deadline=datetime(2026, 8, 31),
         score=2.0,
         completed_at=None,
-        category="工作类型1",
         complete_status = None
     )
     item2 = models.WorkItem(
@@ -112,7 +118,6 @@ try:
         deadline=datetime(2026, 9, 15),
         score=3.0,
         completed_at=None,
-        category="工作类型1",
         complete_status = None
     )
     item3 = models.WorkItem(
@@ -126,7 +131,6 @@ try:
         deadline=datetime(2026, 10, 1),
         score=4.0,
         completed_at=None,
-        category="工作类型1",
         complete_status = None
     )
     item4 = models.WorkItem(
@@ -140,7 +144,6 @@ try:
         deadline=datetime(2026, 10, 20),
         score=2.5,
         completed_at=None,
-        category="工作类型1",
         complete_status = None
     )
     item5 = models.WorkItem(
@@ -154,7 +157,6 @@ try:
         deadline=datetime(2026, 11, 5),
         score=3.0,
         completed_at=None,
-        category="工作类型1",
         complete_status = None
     )
     item6 = models.WorkItem(
@@ -168,7 +170,6 @@ try:
         deadline=datetime(2026, 11, 25),
         score=3.5,
         completed_at=None,
-        category="工作类型1",
         complete_status = None
     )
     item7 = models.WorkItem(
@@ -182,7 +183,6 @@ try:
         deadline=datetime(2026, 12, 10),
         score=5.0,
         completed_at=None,
-        category="工作类型1",
         complete_status = None
     )
     item8 = models.WorkItem(
@@ -196,7 +196,6 @@ try:
         deadline=datetime(2026, 12, 25),
         score=4.0,
         completed_at=None,
-        category="工作类型1",
         complete_status = None
     )
     db.add_all([item1, item2, item3, item4, item5, item6, item7, item8])

@@ -12,13 +12,20 @@
             :loading="saving"
             @click="handleSaveScoreRules"
           >保存系数配置</el-button>
+          <el-button
+            v-if="activeTab === 'users'"
+            type="primary"
+            size="small"
+            @click="pmRef?.fetchAllData()"
+            icon="Refresh"
+          >刷新数据</el-button>
         </div>
       </template>
 
       <el-tabs v-model="activeTab">
         <!-- 人员管理 -->
         <el-tab-pane label="人员管理" name="users">
-          <PersonnelManagement />
+          <PersonnelManagement ref="pmRef" />
         </el-tab-pane>
 
         <el-tab-pane label="计算得分系数" name="score">
@@ -78,6 +85,7 @@
               stripe
               v-loading="loading"
               style="width: 100%"
+              height="calc(100vh - 400px)"
               empty-text="请在上方完成选择，或暂无匹配的档位数据"
               :header-cell-style="{ background: '#f8fafc', color: '#334155', fontWeight: '600' }"
             >
@@ -177,6 +185,8 @@ const saving = ref(false)
 const dimensions = ref([])
 const selectedVariable = ref('')
 const selectedJobgrade = ref('')
+
+const pmRef = ref(null)
 
 // 把「维度 → 档位列表」拍平为表格行，方便直接编辑每个档位的系数
 const flatRows = computed(() => {
@@ -360,6 +370,9 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
 }
+
+/* 表格固定高度内部滚动，不受全局 flex:1 拉伸影响 */
+:deep(.el-table) { flex: none !important; }
 
 .title {
   font-size: 18px;

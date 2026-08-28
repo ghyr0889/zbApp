@@ -164,10 +164,22 @@ def delete_project(project_id: int, user_id: str, db: Session = Depends(get_db))
 
 # ---------------------------------------------------------------- 工作包
 
+@router.get("/work-categories")
+def get_work_categories(db: Session = Depends(get_db)):
+    """返回工作包类别（来自 work_project_categories 表，随数据库变化）。"""
+    cats = db.query(models.WorkPackageCategory.name).order_by(models.WorkPackageCategory.name).all()
+    return {"code": 200, "data": [c[0] for c in cats]}
+
+
 @router.post("/work-packages")
 def create_or_update_work_package(pkg_in: WorkPackageCreate, db: Session = Depends(get_db)):
-    if pkg_in.category_name not in models.FIXED_WORK_CATEGORIES:
-        raise HTTPException(status_code=400, detail="工作类型只能选择：类型1、类型2、类型3、类型4")
+    valid_cats = {c[0] for c in db.query(models.WorkPackageCategory.name).all()}
+    if not valid_cats or pkg_in.category_name not in valid_cats:
+        raise HTTPException(status_code=400, detail="工作类型只能从已有类别中选择")
+
+    work_package_code = (pkg_in.work_package_code or "").strip()
+    if not work_package_code:
+        raise HTTPException(status_code=400, detail="工作包编号不能为空")
 
     # 确定所属项目：优先用 project_id，其次按 project_name 反查
     project = None
@@ -191,10 +203,14 @@ def create_or_update_work_package(pkg_in: WorkPackageCreate, db: Session = Depen
                 raise HTTPException(status_code=404, detail="未找到要修改的工作包")
 
             pkg.project_id = project.id
+            pkg.code = pkg_in.work_package_code
             pkg.category_name = pkg_in.category_name
             new_owner = pkg_in.owner_id
             pkg.owner_id = new_owner or None
+            new_tech_owner = pkg_in.tech_owner_id
+            pkg.tech_owner_id = new_tech_owner or None
             pkg.objective = (pkg_in.objective or "").strip()
+            pkg.notes = (pkg_in.notes or "").strip()
             message = "工作包更新成功"
         else:
             # 自动生成工作包 code（项目下递增序号）
@@ -202,11 +218,13 @@ def create_or_update_work_package(pkg_in: WorkPackageCreate, db: Session = Depen
                 models.WorkPackage.project_id == project.id
             ).count()
             pkg = models.WorkPackage(
-                code=f"P{project.id}-WP{existing_count + 1:02d}",
+                code=work_package_code,
                 project_id=project.id,
                 category_name=pkg_in.category_name,
                 owner_id=pkg_in.owner_id or None,
-                objective=pkg_in.objective or ""
+                tech_owner_id=pkg_in.tech_owner_id or None,
+                objective=pkg_in.objective or "",
+                notes=pkg_in.notes or ""
             )
             db.add(pkg)
             message = "工作包创建成功"

@@ -25,6 +25,8 @@ export const createProjectApi = (data) => api.post('/admin/projects', data)
 export const deleteProjectApi = (projectId, userId) => api.delete(`/admin/projects/${projectId}`,{params: { user_id: userId}})
 
 export const createWorkPackageApi = (data) => api.post('/admin/work-packages', data)
+// 工作包类别（来自数据库 work_project_categories 表）
+export const getWorkCategoriesApi = () => api.get('/admin/work-categories')
 
 export const initiateTransferApi = (data) => api.post('/transfers/initiate', data)
 export const getIncomingTransfersApi = (userId) => api.get(`/transfers/my-incoming?user_id=${userId}`)
@@ -57,6 +59,7 @@ export const saveMonthScoreApi = (workItemId, data) => api.put(`/score-board/wor
 export const createSplitRequestApi = (data) => api.post('/review/split-requests', data)
 export const getSplitRequestsApi = (userId) => api.get(`/review/split-requests?user_id=${userId}`)
 export const reviewSplitRequestApi = (requestId, data) => api.post(`/review/split-requests/${requestId}/review`, data)
+export const editSplitRequestApi = (requestId, body) => api.put(`/review/split-requests/${requestId}`, body)
 
 export const saveQualityScoreApi = (workItemId, data) =>
   api.put(`/score-board/work-items/${workItemId}/quality_score`, data)

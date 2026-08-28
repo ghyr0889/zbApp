@@ -1,8 +1,19 @@
 import os
+from pathlib import Path
 
+from dotenv import load_dotenv
 from sqlalchemy import create_engine, text, inspect
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+
+# ============ 加载 .env（位于 database.py 的上级目录 = 项目根目录）============
+# 基于 __file__ 定位，而不是当前工作目录，确保从任何位置启动都能找到 .env
+import sys
+if getattr(sys, 'frozen', False):      # 打包成 exe 时
+    BASE_DIR = Path(sys.executable).resolve().parent   # exe 所在目录
+else:                                   # 开发时
+    BASE_DIR = Path(__file__).resolve().parent.parent  # 项目根目录
+load_dotenv(BASE_DIR / ".env")
 
 # ============ 数据库连接（默认 MySQL，旧 SQLite 已废弃）============
 # 优先级：DATABASE_URL > 各 MYSQL_* 单独配置 > 默认值

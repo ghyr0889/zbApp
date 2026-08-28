@@ -45,6 +45,7 @@
         stripe
         row-key="id"
         style="width: 100%"
+        height="100%"
         empty-text="该项目下暂无工作包"
         :row-class-name="rowClassName"
         :header-cell-style="{ background: '#f8fafc', color: '#334155', fontWeight: 'bold' }"
@@ -59,7 +60,7 @@
 
         <el-table-column prop="code" label="工作包编号" width="120" align="center">
           <template #default="{ row: pkg }">
-            <el-input v-if="pkg.isEdit && pkg.isNew" v-model="pkg.code" size="small" placeholder="留空自动生成" />
+            <el-input v-if="pkg.isEdit" v-model="pkg.code" size="small"/>
             <span v-else class="code-text">{{ pkg.code }}</span>
           </template>
         </el-table-column>
@@ -81,6 +82,14 @@
           </template>
         </el-table-column>
 
+        <el-table-column prop="notes" label="备注" min-width="160">
+          <template #default="{ row: pkg }">
+            <el-input v-if="pkg.isEdit" type="textarea" autosize v-model="pkg.notes" size="small" placeholder="填写备注" />
+            <span v-else-if="!pkg.notes" class="muted-text">暂无设定</span>
+            <span v-else>{{ pkg.notes }}</span>
+          </template>
+        </el-table-column>
+        
         <el-table-column label="责任人" width="100">
           <template #default="{ row: pkg }">
             <el-select v-if="pkg.isEdit" v-model="pkg.owner_id" clearable filterable placeholder="选择责任人" size="small" style="width: 100%">
@@ -88,6 +97,18 @@
             </el-select>
             <span v-else-if="pkg.package_owner_name || pkg.package_owner_id" class="employee-text">
               {{ pkg.package_owner_name }}
+            </span>
+            <span v-else class="tip-text">暂未指定</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="技术负责人" width="100">
+          <template #default="{ row: pkg }">
+            <el-select v-if="pkg.isEdit" v-model="pkg.tech_owner_id" clearable filterable placeholder="选择技术负责人" size="small" style="width: 100%">
+              <el-option v-for="u in userOptions" :key="u.id" :label="`${u.username}（${u.id}）`" :value="u.id" />
+            </el-select>
+            <span v-else-if="pkg.package_tech_owner_name || pkg.package_tech_owner_id" class="employee-text">
+              {{ pkg.package_tech_owner_name }}
             </span>
             <span v-else class="tip-text">暂未指定</span>
           </template>
@@ -145,7 +166,8 @@ import {
   createWorkPackageApi,
   deleteWorkPackageApi,
   initiateTransferApi,
-  confirmCompletionApi
+  confirmCompletionApi,
+  getWorkCategoriesApi
 } from '../api'
 import WorkItemTable from '../components/WorkItemTable.vue'
 import { useUserStore } from '../stores/user'
@@ -163,7 +185,7 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
 const userOptions = ref([])
-const categoryOptions = ['类型1', '类型2', '类型3', '类型4']
+const categoryOptions = ref([])   // 工作包类别：从数据库 work_project_categories 加载
 
 const isAdmin = computed(() => userStore.isAdmin)
 const isLeader = computed(() => userStore.isLEADER)
@@ -232,6 +254,7 @@ const fetchWorkPackages = async (p = 1) => {
         id: wp.id,
         code: wp.code,
         owner_id: wp.package_owner_id || '',
+        tech_owner_id: wp.package_tech_owner_id || '',
         isEdit: false,
         isNew: false,
         _original: null
@@ -250,7 +273,7 @@ const removeWorkPackage = async (row) => {
   try {
     //弹出确认框
     await ElMessageBox.confirm(
-      '确定要删除该工作包吗？此操作会一并删除改工作包下所有工作项，且无法撤销。',
+      '确定要删除该工作包吗？此操作会一并删除改工作包下所有工作项以及拆包请求，且无法撤销。',
       '确认删除',
       {
         confirmButtonText: '确定',
@@ -279,11 +302,13 @@ const removeWorkPackage = async (row) => {
 // 新增工作包（表格顶部插入一条编辑行）
 const handleAddWorkPackage = () => {
   workPackages.value.unshift({
-    code:"",
+    work_package_code:"",
     project_id: projectId,
-    category_name: '类型1',
+    category_name: categoryOptions.value[0] || '',
     objective: '',
     owner_id: '',
+    tech_owner_id:'',
+    notes:'',
     isEdit: true,
     isNew: true,
     _original: null
@@ -291,6 +316,10 @@ const handleAddWorkPackage = () => {
 }
 
 const handleSaveWorkPackage = async (pkg) => {
+  if (!(pkg.code || '').trim()) {
+    ElMessage.error('保存失败，工作包编号不能为空')
+    return          // 直接不发请求
+  }
   saving.value = true
   try {
     const res = await createWorkPackageApi({
@@ -300,7 +329,9 @@ const handleSaveWorkPackage = async (pkg) => {
       project_name: projectInfo.value?.name,
       category_name: pkg.category_name,
       objective: pkg.objective ? pkg.objective.trim() : '',
-      owner_id: pkg.owner_id || null
+      owner_id: pkg.owner_id || null,
+      tech_owner_id: pkg.tech_owner_id || null,
+      notes: pkg.notes ? pkg.notes.trim() : ''
     })
     if (res.data?.code === 200) {
       ElMessage.success('工作包保存成功')
@@ -333,6 +364,13 @@ const refreshAll = () => {
 onMounted(async () => {
   await fetchProjectInfo()
   await fetchWorkPackages(1)
+  // 工作包类别下拉跟随数据库
+  try {
+    const res = await getWorkCategoriesApi()
+    if (res.data?.code === 200) categoryOptions.value = res.data.data || []
+  } catch {
+    /* 类别加载失败不影响主流程 */
+  }
   if (isAdmin.value || isLeader.value) {
     try {
       const res = await getAllUsersApi()
@@ -410,7 +448,7 @@ onMounted(async () => {
 }
 
 .nested-table-container {
-  padding: 16px;
+  padding: 20px;
   background-color: #f8fafc;
   border-radius: 8px;
   margin: 10px 20px;

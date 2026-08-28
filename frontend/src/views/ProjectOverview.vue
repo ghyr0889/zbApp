@@ -6,7 +6,7 @@
           <div class="header-actions">
             <el-input
               v-model="searchKeyword"
-              placeholder="输入项目名称搜索..."
+              placeholder="输入项目名称或项目编号搜索..."
               clearable
               class="search-input"
             >
@@ -18,7 +18,7 @@
             <el-button v-if="canManageProject" type="success" plain @click="handleAddProject">
               <i class="el-icon-folder-add"></i> 新增项目
             </el-button>
-            <el-button type="primary" @click="refreshAll">
+            <el-button type="primary" plain size="default" @click="refreshAll">
               <i class="el-icon-refresh"></i> 刷新
             </el-button>
           </div>
@@ -34,7 +34,7 @@
             border
             style="width: 100%"
             v-loading="loadingAllWorkPackages"
-            height="calc(100vh - 220px)"
+            height="calc(100vh - 310px)"
             empty-text="暂无项目数据"
             row-key="project_id"
             :row-class-name="tableRowClassName"
@@ -43,7 +43,16 @@
           >
 
             <!-- 主表格列配置 -->
-            <el-table-column prop="project_id" label="序号" min-width="70"/>
+            <el-table-column label="序号" min-width="70" align="center">
+              <template #default="{ row, $index }">
+                <!-- 如果是刚点击“新增”尚未保存的行，显示 * 号 -->
+                <span v-if="row.isNew" style="color: #f56c6c; font-weight: bold;">*</span>
+                <!-- 已保存的正常数据，按公式：(当前页码 - 1) * 每页条数 + 当前行索引 + 1 -->
+                <span v-else>
+                  {{ (pagedPage - 1) * pagedPageSize + $index + (tableData[0]?.isNew ? 0 : 1) }}
+                </span>
+              </template>
+            </el-table-column>
 
             <el-table-column prop="project_code" label="项目编号" min-width="100">
               <template #default="{ row }">
@@ -167,7 +176,7 @@
             :data="myWorkPackages"
             border
             style="width: 100%"
-            height="calc(100vh - 260px)"
+            height="calc(100vh - 280px)"
             empty-text="您暂未负责任何工作包"
             row-key="id"
             :row-class-name="tableRowClassName"
@@ -192,20 +201,26 @@
                 <span v-else class="tip-text">-</span>
               </template>
             </el-table-column>
-            <el-table-column prop="package_owner_name" label="工作包负责人" width="110" />
-            <el-table-column prop="project_code" label="所属项目编号" min-width="90" show-overflow-tooltip />
-            <el-table-column label="所属项目负责人" width="130" align="center">
+                        <el-table-column prop="objective" label="目标" width="120" align="center">
               <template #default="{ row: pkg }">
-                <span v-if="pkg.project_owner_name" class="owner-text">{{ pkg.project_owner_name }}</span>
-                <span v-else class="tip-text">暂未指定</span>
+                <el-tag v-if="pkg.objective" size="small" type="info">{{ pkg.objective }}</el-tag>
+                <span v-else class="tip-text">-</span>
               </template>
             </el-table-column>
-            <el-table-column label="工作包进度" width="200">
+            <el-table-column prop="notes" label="备注" width="150" align="center">
+              <template #default="{ row: pkg }">
+                <el-tag v-if="pkg.notes" size="small" type="info">{{ pkg.notes }}</el-tag>
+                <span v-else class="tip-text">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="project_code" label="所属项目编号" min-width="90" show-overflow-tooltip />
+            <el-table-column prop="package_tech_owner_name" label="工作包技术负责人" width="120" fixed="right"/>
+            <el-table-column label="工作包进度" width="200" fixed="right">
               <template #default="{ row: pkg }">
                 <el-progress :percentage="pkg.package_progress || 0" :stroke-width="10" />
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="180" align="center" >
+            <el-table-column label="操作" width="180" align="center" fixed="right">
               <template #default="{ row: pkg }">
                 <!-- <el-button type="warning" link size="small" @click="handleTransferWorkPackage(pkg)">转办</el-button> -->
                 <el-button v-if="canConfirmPkg(pkg)" type="success" link size="small" :loading="confirming" @click="confirmPkg(pkg)">
@@ -444,7 +459,7 @@ const removeProject = async (row) => {
   try {
     //弹出确认框
     await ElMessageBox.confirm(
-      '确定要删除该项目吗？此操作会一并删除改项目下所有工作包和工作项，且无法撤销。',
+      '确定要删除该项目吗？此操作会一并删除改项目下所有工作包和工作项以及拆包请求，且无法撤销。',
       '确认删除',
       {
         confirmButtonText: '确定',
@@ -572,6 +587,7 @@ onMounted(async () => {
 <style scoped>
 /* 延续美化风格的 CSS 样式 */
 .project-overview {
+  padding: 20px;
   animation: fadeIn 0.4s ease;
 }
 
@@ -586,18 +602,21 @@ onMounted(async () => {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
 }
 
+/* 表格固定高度内部滚动，不受全局 flex:1 拉伸影响 */
+:deep(.el-table) { flex: none !important; }
+
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 4px 0;
+  margin-bottom: 1px;
+  padding: 0 4px;
 }
 
 
 .header-actions {
   display: flex;
-  gap: 12px;
-  align-items: center;
+  gap: 16px; /* 两个输入框之间的间距 */
 }
 
 .search-input {
@@ -694,5 +713,27 @@ onMounted(async () => {
 :deep(.completed-row .el-button--link) {
   color: #c0c4cc;
   pointer-events: none;
+}
+
+/* 强制让 Tabs 标签页容器弹性撑满屏幕剩余高度 */
+:deep(.el-tabs) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+:deep(.el-tabs__content) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+:deep(.el-tab-pane) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 </style>

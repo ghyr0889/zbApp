@@ -42,14 +42,6 @@
         </el-button>
       </el-form>
       
-      <!-- 更新了测试账号的提示，标明各自的入口 -->
-      <div class="test-account-box">
-        <p class="tip-title">测试账号及对应入口</p>
-        <p>管理员：<code>0001 / 123456</code> （请使用<b>管理员登录</b>）</p>
-        <p>领导：<code>0123 / 123456</code> （请使用<b>员工登录</b>）</p>
-        <p>科室：<code>5678 / 123456</code> （请使用<b>员工登录</b>）</p>
-        <p>普通员工：<code>1234 / 123456</code> （请使用<b>员工登录</b>）</p>
-      </div>
     </el-card>
   </div>
 </template>

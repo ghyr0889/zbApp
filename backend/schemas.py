@@ -55,6 +55,8 @@ class WorkPackageCreate(BaseModel):
     category_name: str = Field(..., description="工作类型：类型1-4")
     owner_id: Optional[str] = Field(None, description="工作包负责人 ID")
     objective: Optional[str] = Field(None, description="工作目标")
+    tech_owner_id: Optional[str] = Field(None, description="工作包技术负责人 ID")
+    notes:Optional[str] = Field(None, description="备注")
 
 
 class WorkItemCreate(BaseModel):
@@ -68,7 +70,6 @@ class WorkItemCreate(BaseModel):
     innovation: Optional[str] = Field(None, description="工作项创新性")
     deadline: Optional[str] = Field(None, description="完成节点要求（YYYY-MM-DD）")
     score: Optional[float] = Field(0.0, description="分值（可选，若不传则按默认分值计算）")
-    category: Optional[str] = Field(None, description="工作类型")
 
 
 class MonthScoreIn(BaseModel):
@@ -111,8 +112,6 @@ class SplitItemIn(BaseModel):
     innovation: Optional[str] = Field(None, description="创新性")
     deadline: Optional[str] = Field(None, description="截止节点（YYYY-MM-DD）")
     score: Optional[float] = Field(0.0, description="分值")
-    category: Optional[str] = Field(None, description="类别")
-
 
 class SplitRequestCreate(BaseModel):
     """提交工作包拆分申请。"""
@@ -128,6 +127,11 @@ class SplitRequestReview(BaseModel):
     action: str = "APPROVE"  #  # APPROVE=同意 / REJECT=驳回 / SUBMIT=提交给领导
     comment: str = Field("", description="审核意见 / 驳回原因（驳回必填）")
 
+class SplitRequestEdit(BaseModel):
+    """编辑拆分申请内容。"""
+    editor_id: str = Field(..., description="操作人 ID（员工本人 / 领导 / 管理员）")
+    reason: Optional[str] = Field(None, description="修改后的拆分原因")
+    split_items: list[SplitItemIn] = Field(..., description="修改后的工作项列表")
 
 
 class TransferCreate(BaseModel):

@@ -10,6 +10,7 @@ from database import get_db
 from schemas import (
     SplitRequestCreate,
     SplitRequestReview,
+    SplitRequestEdit
 )
 from utils import work_package_summary, deadline_str, parse_deadline
 
@@ -32,7 +33,7 @@ def _split_request_view(req):
         "project_id": work_package.project_id if work_package else None,
         "project_name": project.name if project else "-",
         "project_owner_id": project.owner_id,
-        "project_owner_name": project.owner.username,
+        "project_owner_name": project.owner.username if project.owner else "",
         "category_name": work_package.category_name if work_package else "-",
         "applicant_id": req.applicant_id,
         "applicant_name": req.applicant.username if req.applicant else req.applicant_id,
@@ -58,7 +59,6 @@ def _split_items_payload(items):
             "innovation": it.innovation,
             "deadline": it.deadline,
             "score": it.score,
-            "category": it.category,
         }
         for it in items
     ], ensure_ascii=False)
@@ -220,3 +220,61 @@ def review_split_request(request_id: int, body: SplitRequestReview, db: Session 
         "SUBMIT": "已提交，等待领导审核",
     }.get(action, "操作成功")
     return {"code": 200, "message": message, "data": {"id": req.id, "status": req.status}}
+
+@router.put("/split-requests/{request_id}")
+def edit_split_request(request_id: int, body: SplitRequestEdit, db:Session = Depends(get_db)):
+    req = db.query(models.WorkPackageSplitRequest).filter(models.WorkPackageSplitRequest.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="拆分申请不存在")
+
+    editor = db.query(models.User).filter(models.User.id == body.editor_id).first()
+    if not editor:
+        raise HTTPException(status_code=404, detail="操作人不存在")
+    editor_role = str(editor.role).upper()
+
+    if not body.split_items or not any((it.name or "").strip() for it in body.split_items):
+        raise HTTPException(status_code=400, detail="请至少保留一个有名的工作项")
+    reason = (body.reason or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="请填写拆分原因")
+
+    if editor_role == "EMPLOYEE":
+    # 只能改自己的、且必须是被驳回的
+        if str(req.applicant_id) != str(editor.id):
+            raise HTTPException(status_code=403, detail="只能修改自己发起的申请")
+        if req.status != "REJECTED":
+            raise HTTPException(status_code=400, detail="只有被驳回的申请才能修改并重新提交")
+
+        req.split_items = _split_items_payload(body.split_items)   # 存 JSON 字符串
+        req.reason = reason
+        req.status = "PENDING"                    # 重置为待科室审核（重新提交）
+        req.reviewer_id = None                     # 清空上次的审核记录
+        req.reviewed_at = None
+        req.review_comment = None
+        message = "已修改并重新提交，等待科室审核"
+
+    elif editor_role in ["LEADER"]:
+        # 领导只能改提交到领导这级的申请
+        if req.status != "SUBMITTED":
+            raise HTTPException(status_code=400, detail="只有提交到领导审核的申请才能修改")
+
+        req.split_items = _split_items_payload(body.split_items)
+        req.reason = reason
+        # 状态保持 SUBMITTED，改完由领导再点“通过”生效
+        message = "内容已更新，可继续审核"
+
+    elif editor_role == "DEPARTMENT":
+        # 可选：科室主任在待审(PENDING)时也能直接改内容
+        if req.status != "PENDING":
+            raise HTTPException(status_code=400, detail="当前状态不允许修改")
+        req.split_items = _split_items_payload(body.split_items)
+        req.reason = reason
+        message = "内容已更新"
+
+    else:
+        raise HTTPException(status_code=403, detail="当前角色没有编辑权限")
+
+    db.commit()
+    db.refresh(req)
+    return {"code": 200, "message": message,
+            "data": {"id": req.id, "status": req.status}}

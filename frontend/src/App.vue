@@ -129,24 +129,102 @@ body {
   background-color: #f0f2f5; 
   font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', '微软雅黑', Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
+  
+  /* 1. 锁死屏幕整体高度，禁止整个网页出现外层滚动条 */
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden; 
 }
 
 .main-body { 
   margin-left: 240px;
-  padding-top: 64px;
-  min-height: 100vh;
+  height: 100vh;
+  /* 顶部50px给顶部栏占位;左右/底部空隙统一由各页面根 div 的 padding(20px)控制 */
+  padding: 64px 0 0;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
 }
 
 .page-container {
-  padding: 24px;
+  padding: 0; /* 空隙统一由各页面根 div 的 padding 控制 */
+  flex: 1;       /* 自动占满 header 下方的剩余屏幕高度 */
+  overflow: hidden; 
+  display: flex;
+  flex-direction: column;
 }
 
 .login-body {
   min-height: 100vh;
 }
 
-/* ================= 左侧导航栏整体布局 ================= */
+/* ================= 页面内部卡片自适应容器 (已修复登录页拉伸) ================= */
+/* 1. 只针对进入系统后的主区域生效，放过登录页 */
+/* .main-body .page-container {
+  padding: 16px; 
+  flex: 1;       
+  overflow: hidden; 
+  display: flex;
+  flex-direction: column;
+} */
+
+/* 2. 强制主界面内的 el-card 自适应高度 */
+/* .main-body .page-container > div, 
+.main-body .page-container .el-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 8px; 
+}
+
+.main-body .page-container .el-card__body {
+  flex: 1;
+  overflow: hidden; 
+  display: flex;
+  flex-direction: column;
+  padding: 12px 16px; 
+} */
+
+/* 3. 让登录页的容器恢复居中并且取消拉伸 */
+.login-body {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.login-body .page-container {
+  padding: 0;
+  display: block; /* 彻底取消登录页的 Flex 纵向拉伸 */
+}
+
+
+/* ================= 全局表格紧凑化 (缩小表格) ================= */
+/* 缩小全局表格字体 */
+.el-table {
+  font-size: 13px !important; 
+  flex: 1; /* 让表格自动撑满卡片的高度 */
+}
+
+/* 压缩表格行高 */
+.el-table .el-table__cell {
+  padding: 6px 0 !important; 
+}
+
+/* 表格内部按钮也跟着稍微缩小 */
+.el-table .el-button--small {
+  padding: 4px 8px !important;
+  font-size: 12px !important;
+}
+
+/* 分页条靠底压缩留白 */
+.pagination-bar {
+  padding-top: 8px !important;
+  padding-bottom: 4px !important;
+}
+
+/* ================= 左侧导航栏整体布局 (原样保留) ================= */
 .header-layout {
   position: fixed;
   left: 0;
@@ -205,7 +283,7 @@ body {
   background-color: #f5f7fa !important;
 }
 
-/* ================= 右侧顶部栏 ================= */
+/* ================= 右侧顶部栏 (原样保留) ================= */
 .right-profile {
   position: fixed;
   top: 0;

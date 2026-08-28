@@ -1,17 +1,9 @@
 ﻿<!-- xiangmu/frontend/src/views/PersonnelManagement.vue -->
 <template>
   <div class="personnel-management-container">
-    <el-card shadow="hover">
-      <template #header>
-        <div class="card-header">
-          <span>人员管理</span>
-          <el-button type="primary" size="small" @click="fetchAllData" icon="Refresh">刷新数据</el-button>
-        </div>
-      </template>
         
         <!-- 1. 人员列表与新增 -->
-        <!-- <el-tab-pane label="人员管理" name="users"> -->
-        <el-row :gutter="20">
+        <el-row :gutter="32">
           <!-- 左侧：新增表单 -->
           <el-col :span="8">
             <el-card header="新增人员" shadow="never">
@@ -53,7 +45,7 @@
           <!-- 右侧：现有人员表格 -->
           <el-col :span="16">
             <el-card header="现有人员名册" shadow="never">
-              <el-table :data="allUsers" border stripe style="width: 100%">
+              <el-table :data="allUsers" border stripe style="width: 100%" height="calc(100vh - 340px)">
                 <el-table-column prop="id" label="工号" width="90" sortable />
                 <el-table-column prop="username" label="姓名" width="100">
                   <template #default="{ row }">
@@ -63,13 +55,13 @@
                 </el-table-column>
                 <el-table-column prop="role" label="角色" width="140">
                   <template #default="{ row }">
-                    <el-select v-if="row.isEditing" v-model="row.role" size="small" style="width: 130px">
+                    <el-select v-if="row.isEditing" v-model="row.role" size="small" width="130">
                       <el-option v-for="r in roleOptions" :key="r.value" :label="r.label" :value="r.value" />
                     </el-select>
                     <span v-else>{{ roleLabel(row.role) }}</span>
                   </template>
                 </el-table-column>
-                <el-table-column prop="job_grade" label="职级">
+                <el-table-column prop="job_grade" label="职级" width="100">
                   <template #default="{ row }">
                     <el-select v-if="row.isEditing" v-model="row.job_grade" size="small" style="width: 40px">
                       <el-option v-for="g in jobGradeOptions" :key="g" :label="g" :value="g" />
@@ -78,7 +70,7 @@
                   </template>
                 </el-table-column>
                 <el-table-column prop="password" label="密码" width="120" />
-                <el-table-column label="操作" width="100" align="center" >
+                <el-table-column label="操作" width="140" align="center" >
                   <template #default="{ row }">
                     <template v-if="!row.isEditing">
                       <el-button type="primary" link size="small" @click="startEditRow(row)">编辑</el-button>
@@ -95,7 +87,6 @@
           </el-col>
 
         </el-row>
-    </el-card>
   </div>
 </template>
 
@@ -114,14 +105,9 @@ const activeTab = ref('users')
 
 // 数据源
 const allUsers = ref([])
-const allProjects = ref([])
-const allWorkPackages = ref([])
 
 // 表单响应式绑定
 const userForm = reactive({ id: '', username: '', password: '123456', job_grade: '', role: 'EMPLOYEE' })
-const projectList = ref([])
-const workPackageList = ref([])
-const categoryOptions = ref(['类型1', '类型2', '类型3', '类型4'])
 const employeeOptions = ref([])
 const jobGradeOptions = ref([])
 
@@ -150,6 +136,7 @@ const fetchAllData = async () => {
     console.error('拉取后台数据失败:', err)
   }
 }
+defineExpose({ fetchAllData })
 
 const fetchJobGrades = async () => {
   try{
@@ -258,12 +245,79 @@ onMounted(() => {
   fetchEmployees()
   fetchJobGrades()
 })
-
-
 </script>
 
 <style scoped>
-.personnel-management-container { padding: 20px; }
-.card-header { display: flex; justify-content: space-between; align-items: center; font-weight: bold; font-size: 16px; }
+/* 整个组件占据 100% 高度并且内部使用 flex 进行限制 */
+.personnel-management-container { 
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-top: 8px;
+  padding-bottom: 24px; /* 增加这行：给底部留出一定空间，表格不再死死贴边 */
+}
+
+.page-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding: 0 4px;
+}
+
+.section-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #334155;
+  border-left: 4px solid #409EFF;
+  padding-left: 10px;
+}
+
+/* Row 铺满剩余高度 */
+.full-height-row {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  margin-bottom: 0 !important;
+}
+
+/* 左侧栏超出允许滚动 */
+.left-col {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px dashed #e2e8f0;
+}
+
+.form-body {
+  overflow-y: auto;
+  padding-right: 20px;
+}
+
+/* 右侧栏完全使用弹性布局给表格让出空间 */
+.right-col {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-header {
+  font-weight: 600;
+  font-size: 14px;
+  color: #475569;
+  margin-bottom: 16px;
+}
+
+.panel-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.table-body {
+  overflow: hidden;
+  /* 移除原有的 padding-bottom，统一由外层 container 的 padding-bottom 控制留白 */
+}
 </style>
 

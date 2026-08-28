@@ -13,6 +13,7 @@
       border
       size="small"
       style="width: 100%"
+      max-height="400"
       empty-text="该工作包下暂无工作项，点击「新增工作项」可添加"
       :row-class-name="rowClassName"
       :header-cell-style="{ background: '#f1f5f9', color: '#475569' }"
@@ -55,13 +56,6 @@
             <el-option v-for="o in levelDefs.innovation" :key="o" :label="o" :value="o" />
           </el-select>
           <span v-else>{{ row.innovation || '-' }}</span>
-        </template>
-      </el-table-column>
-
-      <el-table-column prop="category" label="类别" width="110" align="center">
-        <template #default="{ row }">
-          <el-input v-if="row.isEdit" v-model="row.category" size="small" placeholder="如:类别1" />
-          <span v-else>{{ row.category || '-' }}</span>
         </template>
       </el-table-column>
 
@@ -239,7 +233,7 @@ const stagedCount = computed(() => workItems.value.filter(w => w.isStaged).lengt
 // 管理权限：管理员 / 领导 / 该工作包负责人 可以新增、编辑、删除工作项
 const canManage = computed(() => {
   if (!userStore.isLoggedIn) return false
-  if (userStore.isAdmin || userStore.isLEADER) return true
+  if (userStore.isAdmin || userStore.isLEADER || userStore.isDEPARTMENT) return true
   return workPackage.value && String(workPackage.value.owner_id) === String(userStore.userInfo?.id)
 })
 
@@ -288,7 +282,6 @@ const handleAddWorkItem = () => {
     innovation: '',
     deadline: '',
     score: 0,
-    category: '',
     work_package_id: props.workPackageId,
     isEdit: true,
     isNew: true,
@@ -311,8 +304,7 @@ const handleSaveLocal = (row) => {
     importance: row.importance,
     innovation: row.innovation,
     deadline: row.deadline,
-    score: row.score,
-    category: row.category
+    score: row.score
   }
   ElMessage.success('已保存，点击「提交」可一起提交审核')
 }
@@ -350,8 +342,7 @@ const confirmBatchSubmit = async () => {
         importance: row.importance,
         innovation: row.innovation,
         deadline: row.deadline || '',
-        score: row.score,
-        category: row.category
+        score: row.score
       }))
     })
     if (res.data?.code === 200) {

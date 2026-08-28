@@ -2,32 +2,53 @@
 <template>
   <div class="review-page">
     <el-card class="box-card" shadow="never">
-      <!-- 头部 -->
       <template #header>
-        <div class="card-header">
-          <div class="header-left">
-            <span class="header-title">审批查阅</span>
+        <!-- 新增：搜索栏和控制按钮区域 -->
+        <div class="action-bar">
+          <div class="search-area">
+            <el-input 
+              v-model="searchKeyword" 
+              placeholder="输入申请人进行搜索..." 
+              clearable 
+              prefix-icon="Search"
+              style="width: 180px;" 
+            />
+            <el-select 
+              v-model="searchStatus" 
+              placeholder="根据状态进行筛选..." 
+              clearable 
+              style="width: 160px;"
+            >
+              <el-option label="待科室审核" value="PENDING" />
+              <el-option label="待领导审核" value="SUBMITTED" />
+              <el-option label="已通过" value="APPROVED" />
+              <el-option label="已驳回" value="REJECTED" />
+            </el-select>
           </div>
-          <div class="header-right">
-            <el-button type="primary" plain size="default" @click="handleRefresh">
-              🔄 刷新列表
-            </el-button>
-          </div>
+          <el-button type="primary" plain size="default" @click="handleRefresh">
+            刷新
+          </el-button>
         </div>
       </template>
-      
+
       <!-- 标签页：审批查阅 / 工作包转办 -->
       <el-tabs v-model="activeTab" class="custom-tabs">
-        <el-tab-pane label="审批查阅" name="review">
-      <div class="table-container">
-        <el-table 
-          :data="requests" 
-          v-loading="loading" 
-          style="width: 100%" 
-          empty-text="当前没有需要处理的申请"
-          :header-cell-style="{ background: '#f8fafc', color: '#1e293b', fontWeight: '600', height: '48px' }"
-          :row-style="{ height: '56px' }"
-        >
+      <el-tab-pane label="审批查阅" name="review">
+
+        <div class="table-container">
+          <el-table 
+            ref="tableRef"
+            :data="filteredRequests" 
+            v-loading="loading"
+            shadow="never" 
+            border
+            row-key="id"
+            style="width: 100%" 
+            height="calc(100vh - 300px)"
+            empty-text="当前没有需要处理的申请"
+            :header-cell-style="{ background: '#f8fafc', color: '#1e293b', fontWeight: '600', height: '48px' }"
+            :row-style="{ height: '56px' }"
+          >
           
           <!-- 1. 内层表格：美化展开行 -->
           <el-table-column type="expand">
@@ -42,56 +63,97 @@
                   :data="row.split_items" 
                   border 
                   size="small" 
-                  style="width: 100%; margin-bottom: 20px;"
-                  :header-cell-style="{ background: '#f1f5f9', color: '#475569', fontWeight: '500' }"
+                  style="width: 100%; margin-bottom: 20px;""
                 >
-                  <el-table-column prop="name" label="工作项名称" min-width="140" />
-                  <el-table-column prop="standard" label="完成标准" min-width="180" show-overflow-tooltip>
-                    <template #default="{ row }">
-                      <span class="standard-text">{{ row.standard || '-' }}</span>
-                    </template>
-                  </el-table-column>
-                  <el-table-column prop="difficulty" label="难度" width="80" align="center">
-                    <template #default="{ row }">{{ row.difficulty || '-' }}</template>
-                  </el-table-column>
-                  <el-table-column prop="importance" label="重要度" width="80" align="center">
-                    <template #default="{ row }">{{ row.importance || '-' }}</template>
-                  </el-table-column>
-                  <el-table-column prop="innovation" label="创新度" width="80" align="center">
-                    <template #default="{ row }">{{ row.innovation || '-' }}</template>
-                  </el-table-column>
-                  <el-table-column prop="category" label="工作类型" width="80" align="center">
-                    <template #default="{ row }">{{ row.category || '-' }}</template>
-                  </el-table-column>
-                  <el-table-column prop="deadline" label="截止日期" width="120" align="center">
-                    <template #default="{ row }">
-                      <span class="date-text">{{ row.deadline || '-' }}</span>
-                    </template>
-                  </el-table-column>
-                  <el-table-column prop="score" label="分值" width="90" align="center">
-                    <template #default="{ row }">
-                      <span class="score-text">{{ row.score ?? 0 }}</span>
-                    </template>
-                  </el-table-column>
+                <el-table-column prop="name" label="工作项名称" min-width="150">
+                  <template #default="{ row: itemRow }">
+                    <el-input v-if="canEditRequest(row) && row.isEditing" v-model="itemRow.name" size="small" />
+                    <span v-else>{{ itemRow.name || '-' }}</span>
+                  </template>
+                </el-table-column>
+
+                <el-table-column prop="standard" label="完成标准" min-width="180">
+                  <template #default="{ row: itemRow }">
+                    <el-input v-if="canEditRequest(row) && row.isEditing" v-model="itemRow.standard" size="small" />
+                    <span v-else class="standard-text">{{ itemRow.standard || '-' }}</span>
+                  </template>
+                </el-table-column>
+
+                <el-table-column prop="difficulty" label="难度" width="90" align="center">
+                  <template #default="{ row: itemRow }">
+                    <el-select v-if="canEditRequest(row) && row.isEditing" v-model="itemRow.difficulty" size="small">
+                      <el-option v-for="o in levelDefs.difficulty" :key="o" :label="o" :value="o" />
+                    </el-select>
+                    <el-tag v-else size="small">{{ itemRow.difficulty || '-' }}</el-tag>
+                  </template>
+                </el-table-column>
+
+                <el-table-column prop="importance" label="重要度" width="90" align="center">
+                  <template #default="{ row: itemRow }">
+                    <el-select v-if="canEditRequest(row) && row.isEditing" v-model="itemRow.importance" size="small">
+                      <el-option v-for="o in levelDefs.importance" :key="o" :label="o" :value="o" />
+                    </el-select>
+                    <el-tag v-else size="small">{{ itemRow.importance || '-' }}</el-tag>
+                  </template>
+                </el-table-column>
+
+                <el-table-column prop="innovation" label="创新度" width="90" align="center">
+                  <template #default="{ row: itemRow }">
+                    <el-select v-if="canEditRequest(row) && row.isEditing" v-model="itemRow.innovation" size="small">
+                      <el-option v-for="o in levelDefs.innovation" :key="o" :label="o" :value="o" />
+                    </el-select>
+                    <span v-else>{{ itemRow.innovation || '-' }}</span>
+                  </template>
+                </el-table-column>
+
+                <el-table-column prop="deadline" label="截止时间" width="130" align="center">
+                  <template #default="{ row: itemRow }">
+                    <el-date-picker
+                      v-if="canEditRequest(row) && row.isEditing"
+                      v-model="itemRow.deadline"
+                      type="date"
+                      value-format="YYYY-MM-DD"
+                      size="small"
+                      style="width: 100%"
+                      placeholder="选择日期"
+                    />
+                    <el-tag v-else-if="itemRow.deadline" type="danger" effect="plain">{{ itemRow.deadline }}</el-tag>
+                    <span v-else>-</span>
+                  </template>
+                </el-table-column>
+
+                <el-table-column prop="score" label="基础总分值" width="90" align="center">
+                  <template #default="{ row: itemRow }">
+                    <el-input-number v-if="canEditRequest(row) && row.isEditing" v-model="itemRow.score" :min="0" :step="0.5" size="small" style="width: 100%" controls-position="right" />
+                    <span v-else class="score-text">{{ itemRow.score }}</span>
+                  </template>
+                </el-table-column>
                 </el-table>
                 
                 <!-- 最下面一行：高亮修改说明 -->
                 <div class="modification-reason">
                   <div class="reason-label">修改说明：</div>
-                  <div class="reason-content">{{ row.reason || '申请人未填写说明信息' }}</div>
+                  <el-input v-if="canEditRequest(row) && row.isEditing" v-model="row.reason" type="textarea" :rows="2" size="small" placeholder="填写修改说明" style="margin-top: 8px" />
+                  <div v-else class="reason-content">{{ row.reason || '申请人未填写说明信息' }}</div>
+                </div>
+
+                <!-- 编辑模式下的保存/取消 -->
+                <div v-if="canEditRequest(row) && row.isEditing" class="edit-actions">
+                  <el-button type="success" size="small" :loading="savingEdit" @click="handleSaveEdit(row)">保存修改</el-button>
+                  <el-button type="info" size="small" @click="row.isEditing = false">取消</el-button>
                 </div>
               </div>
             </template>
           </el-table-column>
 
           <!-- 2. 外层表格列 -->
-          <el-table-column prop="project_name" label="项目名称" min-width="160" show-overflow-tooltip />
-          <el-table-column label="工作包编号" min-width="120">
+          <el-table-column prop="project_name" label="项目名称" width="160" show-overflow-tooltip />
+          <el-table-column label="工作包编号" width="100">
             <template #default="{ row }">
               <span>{{ row.work_package_code }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="project_owner_name" label="项目负责人" min-width="100" />
+          <el-table-column prop="project_owner_name" label="项目负责人" width="100" />
           <el-table-column prop="applicant_name" label="申请人" width="100" />        
           <el-table-column prop="created_at" label="提交时间" width="160" align="center">
             <template #default="{ row }">
@@ -105,27 +167,37 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column v-if="canReview" label="操作" width="200" align="center" fixed="right">
+          <el-table-column label="操作" min-width="300" align="center" fixed="right">
             <template #default="{ row }">
-              <template v-if="row.status === 'PENDING'">
-                <template v-if="pendingIsEdit">
-                  <el-button type="info" size="small" plain @click="handleSubmit(row)">提交</el-button>
-                  <el-button type="success" size="small" plain @click="handlePass(row)">通过</el-button>
-                  <el-button type="danger" size="small" plain @click="openRejectDialog(row)">驳回</el-button>
-                </template>
+              <!-- 员工：被驳回的申请可以修改并重新提交 -->
+              <template v-if="isEmployee && row.status === 'REJECTED' && isApplicant(row)">
+                <el-button v-if="!row.isEditing" type="warning" size="small" plain @click="startEdit(row)">修改</el-button>
+                <span v-else class="muted-text">编辑中</span>
               </template>
-              <template v-else-if="row.status === 'SUBMITTED'">
-                <template v-if="submittedIsEdit">
-                  <el-button type="success" size="small" plain @click="handlePass(row)">通过</el-button>
-                  <el-button type="danger" size="small" plain @click="openRejectDialog(row)">驳回</el-button>
+              <template v-else-if="canReview">
+                <template v-if="row.status === 'PENDING'">
+                  <template v-if="pendingIsEdit">
+                    <el-button v-if="!row.isEditing" type="warning" size="small" plain @click="startEdit(row)">修改</el-button>
+                    <el-button type="info" size="small" plain @click="handleSubmit(row)">提交</el-button>
+                    <el-button type="success" size="small" plain @click="handlePass(row)">通过</el-button>
+                    <el-button type="danger" size="small" plain @click="openRejectDialog(row)">驳回</el-button>
+                  </template>
                 </template>
+                <template v-else-if="row.status === 'SUBMITTED'">
+                  <template v-if="submittedIsEdit">
+                    <el-button v-if="!row.isEditing" type="warning" size="small" plain @click="startEdit(row)">修改</el-button>
+                    <el-button type="success" size="small" plain @click="handlePass(row)">通过</el-button>
+                    <el-button type="danger" size="small" plain @click="openRejectDialog(row)">驳回</el-button>
+                  </template>
+                </template>
+                <span v-else class="muted-text">已处理完毕</span>
               </template>
-              <span v-else class="muted-text">已处理完毕</span>
+              <span v-else class="muted-text">-</span>
             </template>
           </el-table-column>
         </el-table>
       </div>
-        </el-tab-pane>
+      </el-tab-pane>
 
         <!-- 工作包转办标签页 -->
         <!-- <el-tab-pane label="工作包转办" name="transfers">
@@ -191,11 +263,13 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getIncomingTransfersApi, getMyOutgoingTransfersApi, getSplitRequestsApi, processTransferApi, reviewSplitRequestApi } from '../api'
+import { getIncomingTransfersApi, getMyOutgoingTransfersApi, getSplitRequestsApi, processTransferApi, reviewSplitRequestApi, editSplitRequestApi, getLevelDefsApi } from '../api'
 
 const activeTab = ref('review')
+const searchKeyword = ref('')
+const searchStatus = ref('')
 const requests = ref([])
 const loading = ref(false)
 const incomingTransfers = ref([])
@@ -223,6 +297,72 @@ const submittedIsEdit = computed(() => isLeader.value || isAdmin.value)
 const statusLabel = (s) => ({ PENDING: '待科室审核', SUBMITTED: '待领导审核', APPROVED: '已通过', REJECTED: '已驳回' }[s] || s)
 const statusTagType = (s) => ({ PENDING: 'warning', SUBMITTED: 'primary', APPROVED: 'success', REJECTED: 'danger' }[s] || 'info')
 
+// ============ 申请内容编辑（按角色×状态可改） ============
+const tableRef = ref(null)
+const savingEdit = ref(false)
+// 工作项档位选项（编辑时下拉用）
+const levelDefs = ref({ difficulty: [], importance: [], innovation: [] })
+
+// 是否为申请人本人
+const isApplicant = (row) => String(row.applicant_id || '') === String(currentUser.value.id || '')
+
+// 当前用户能否编辑该申请：员工改被驳回的；领导/管理员改 SUBMITTED；科室改 PENDING
+const canEditRequest = (row) => {
+  if (row.status === 'REJECTED' && isEmployee.value && isApplicant(row)) return true
+  if (row.status === 'SUBMITTED' && (isLeader.value || isAdmin.value)) return true
+  if (row.status === 'PENDING' && isDepartment.value) return true
+  return false
+}
+
+// 进入编辑模式（并展开该行）
+const startEdit = (row) => {
+  row.isEditing = true
+  nextTick(() => {
+    tableRef.value?.toggleRowExpansion(row, true)
+  })
+}
+
+// 保存修改后的申请内容
+const handleSaveEdit = async (row) => {
+  if (!row.split_items || !row.split_items.some(it => (it.name || '').trim())) {
+    return ElMessage.warning('请至少保留一个有名的工作项')
+  }
+  if (!(row.reason || '').trim()) {
+    return ElMessage.warning('请填写修改说明')
+  }
+  savingEdit.value = true
+  try {
+    const res = await editSplitRequestApi(row.id, {
+      editor_id: currentUser.value.id,
+      reason: row.reason,
+      split_items: row.split_items
+    })
+    if (res.data?.code === 200) {
+      ElMessage.success(res.data.message || '已保存')
+      row.isEditing = false
+      await fetchRequests()
+    }
+  } catch (err) {
+    ElMessage.error(err.response?.data?.detail || '保存失败')
+  } finally {
+    savingEdit.value = false
+  }
+}
+
+// 加载工作项档位选项
+const fetchLevelDefs = async () => {
+  try {
+    const res = await getLevelDefsApi()
+    if (res.data?.code === 200) {
+      levelDefs.value = {
+        difficulty: res.data.data.difficulty || [],
+        importance: res.data.data.importance || [],
+        innovation: res.data.data.innovation || []
+      }
+    }
+  } catch { /* 档位加载失败不影响主流程 */ }
+}
+
 const fetchRequests = async () => {
   loading.value = true
   try {
@@ -237,8 +377,21 @@ const fetchRequests = async () => {
   }
 }
 
+const filteredRequests = computed(() => {
+  return requests.value.filter(req => {
+    // 匹配申请人（如果输入框为空则全匹配，否则进行模糊包含匹配）
+    const matchKeyowrd = !searchKeyword.value || 
+      (req.applicant_name && req.applicant_name.includes(searchKeyword.value.trim()));
+      
+    // 匹配状态（如果下拉框为空则全匹配，否则进行精确匹配）
+    const matchStatus = !searchStatus.value || req.status === searchStatus.value;
+    
+    return matchKeyowrd && matchStatus;
+  });
+})
+
 const handleSubmit = (row) => {
-  ElMessageBox.confirm('确认将该申请提交给领导审核？提交后由领导最终审批。', '提交领导审核', {
+  ElMessageBox.confirm('确认将该申请提交给领导审核？提交后由上级最终审批。', '提交审核', {
     confirmButtonText: '确认提交',
     cancelButtonText: '取消',
     type: 'warning'
@@ -250,7 +403,7 @@ const handleSubmit = (row) => {
         comment: ''
       })
       if (res.data?.code === 200) {
-        ElMessage.success(res.data.message || '已提交，等待领导审核')
+        ElMessage.success(res.data.message || '已提交，等待审核')
         await fetchRequests()
       }
     } catch (err) {
@@ -384,12 +537,13 @@ onMounted(() => {
   fetchRequests()
   fetchIncomingTransfers()
   fetchOutgoingTransfers()
+  fetchLevelDefs()
 })
 </script>
 
 <style scoped>
 .review-page { 
-  padding: 24px; 
+  padding: 20px; 
   animation: fadeIn 0.4s ease; 
   background-color: #f1f5f9;
   min-height: calc(100vh - 80px);
@@ -431,6 +585,17 @@ onMounted(() => {
 .table-container {
   padding: 12px 0;
 }
+
+/* 展开行编辑操作按钮区 */
+.edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* 表格固定高度内部滚动，不受全局 flex:1 拉伸影响 */
+:deep(.el-table) { flex: none !important; }
 
 /* 工作包转办标签页 */
 .transfers-container {
@@ -474,12 +639,10 @@ onMounted(() => {
 .modification-reason {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 16px;
-  background-color: #eff6ff; /* 淡蓝色背景 */
-  border: 1px solid #bfdbfe;
-  border-left: 4px solid #3b82f6; /* 强蓝色左侧边框 */
-  border-radius: 6px;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid #b8b9b9;
+  border-radius: 4px;
 }
 .reason-label {
   font-size: 14px;
@@ -509,5 +672,19 @@ onMounted(() => {
 .muted-text { 
   color: #94a3b8; 
   font-size: 13px; 
+}
+
+/* 新增的搜索和操作栏样式 */
+.action-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1px;
+  padding: 0 4px;
+}
+
+.search-area {
+  display: flex;
+  gap: 16px; /* 两个输入框之间的间距 */
 }
 </style>
