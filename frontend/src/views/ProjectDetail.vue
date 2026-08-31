@@ -45,7 +45,7 @@
         stripe
         row-key="id"
         style="width: 100%"
-        height="100%"
+        height="calc(100vh - 360px)"
         empty-text="该项目下暂无工作包"
         :row-class-name="rowClassName"
         :header-cell-style="{ background: '#f8fafc', color: '#334155', fontWeight: 'bold' }"
@@ -53,7 +53,7 @@
         <el-table-column type="expand">
           <template #default="{ row: pkg }">
             <div class="nested-table-container">
-              <WorkItemTable :workPackageId="pkg.id" @changed="refreshAll" />
+              <WorkItemTable :workPackageId="pkg.id" :refresh-key="refreshKey" @changed="refreshAll" />
             </div>
           </template>
         </el-table-column>
@@ -180,6 +180,7 @@ const projectId = Number(route.params.id)
 const projectInfo = ref(null)
 const workPackages = ref([])
 const loading = ref(false)
+const refreshKey = ref(0) // 传给工作项表格：点「刷新」时强制拉取最新数据
 const saving = ref(false)
 const total = ref(0)
 const page = ref(1)
@@ -357,6 +358,7 @@ const cancelWpEdit = (pkg, index) => {
 }
 
 const refreshAll = () => {
+  refreshKey.value++ // 通知已展开的工作项表格强制拉取最新数据
   fetchProjectInfo()
   fetchWorkPackages(page.value)
 }
@@ -460,6 +462,8 @@ onMounted(async () => {
   justify-content: flex-end;
   padding-top: 12px;
 }
+
+:deep(.el-table) { flex: none !important; }
 
 :deep(.el-table__expanded-cell) {
   padding: 0 !important;

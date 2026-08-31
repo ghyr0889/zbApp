@@ -63,7 +63,6 @@
                 <!-- 统计项 2：计算得分 -->
                 <div class="stat-item">
                   <span class="stat-title">{{ periodLabel }}计算得分：</span>
-                  <!-- 加上 score-text 类名，让计算总分显示为显眼的绿色 -->
                   <span class="stat-value" style="color: #475569;">{{ periodCalculatedScore || 0 }}</span>
                 </div>
               </div>
@@ -100,7 +99,7 @@
                         <span>{{ item.innovation || '-' }}</span>
                       </template>
                     </el-table-column>
-                      <el-table-column prop="score" label="本月得分" width="110" align="center">
+                      <el-table-column prop="score" label="本周期得分" width="110" align="center">
                         <template #default="scope">
                           <span class="score-text" v-if="scope.row.score > 0">{{ scope.row.score }}</span>
                           <span class="muted-text" v-else>0</span>

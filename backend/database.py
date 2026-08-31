@@ -149,6 +149,12 @@ def ensure_database_schema():
                     {"c": cat, "n": name, "s": i, "a": 1},
                 )
 
+        # ---- 转办(工作包/工作项)与工作项负责人列 ----
+        add_col("work_items", "owner_id", "VARCHAR(50)")
+        add_col("task_transfers", "transfer_type", "VARCHAR(20) DEFAULT 'work_item'")
+        add_col("task_transfers", "work_item_id", "INT")
+        add_col("task_transfers", "transfer_score", "FLOAT")
+
         # ---- 大数据量性能：常用外键/查询索引（跨方言幂等创建）----
         def ensure_index(table, index_name, columns_sql):
             try:

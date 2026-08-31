@@ -6,7 +6,7 @@
           <div class="header-actions">
             <el-input
               v-model="searchKeyword"
-              placeholder="输入项目名称或项目编号搜索..."
+              placeholder="可按照项目名称、编号以及机型主管进行搜索..."
               clearable
               class="search-input"
             >
@@ -186,7 +186,7 @@
             <el-table-column type="expand">
               <template #default="{ row: pkg }">
                 <div class="nested-table-container">
-                  <WorkItemTable :workPackageId="pkg.id" @changed="refreshAll" />
+                  <WorkItemTable :workPackageId="pkg.id" :refresh-key="refreshKey" @changed="refreshAll" />
                 </div>
               </template>
             </el-table-column>            
@@ -214,6 +214,11 @@
               </template>
             </el-table-column>
             <el-table-column prop="project_code" label="所属项目编号" min-width="90" show-overflow-tooltip />
+            <el-table-column prop="package_owner_name" label="工作包负责人" width="110" align="center">
+              <template #default="{ row: pkg }">
+                <span class="employee-text">{{ pkg.package_owner_name || '-' }}</span>
+              </template>
+            </el-table-column>
             <el-table-column prop="package_tech_owner_name" label="工作包技术负责人" width="120" fixed="right"/>
             <el-table-column label="工作包进度" width="200" fixed="right">
               <template #default="{ row: pkg }">
@@ -222,7 +227,7 @@
             </el-table-column>
             <el-table-column label="操作" width="180" align="center" fixed="right">
               <template #default="{ row: pkg }">
-                <!-- <el-button type="warning" link size="small" @click="handleTransferWorkPackage(pkg)">转办</el-button> -->
+                <el-button v-if="isPkgOwner(pkg)" type="warning" link size="small" @click="handleTransferWorkPackage(pkg)">转办</el-button>
                 <el-button v-if="canConfirmPkg(pkg)" type="success" link size="small" :loading="confirming" @click="confirmPkg(pkg)">
                   {{ pkg.complete_status ? '取消完成' : '确认完成' }}
                 </el-button>
@@ -298,9 +303,9 @@ const canManageProject = (projectRow) => {
 }
 
 
-const projectTableRef = ref(null) // 用于触发表格展开
 const tableData = ref([]) // 控制行内编辑的可变表格数据源
 const loadingAllWorkPackages = ref(false)
+const refreshKey = ref(0) // 传给工作项表格：点「刷新」时强制拉取最新数据
 const saving = ref(false)
 const searchKeyword = ref('')
 const projectOptions = ref([])
@@ -421,12 +426,15 @@ watch(searchKeyword, () => {
 
 // 顶部刷新：同时刷新所有项目与我的工作
 const refreshAll = () => {
+  refreshKey.value++ // 通知已展开的工作项表格强制拉取最新数据
   fetchProjects(pagedPage.value)
   fetchMyWorkPackages(myPage.value)
 }
 
 // —— 确认完成（项目/工作包，负责人或领导/管理员）——
 const confirming = ref(false)
+// 是否为工作包负责人本人（可发起工作包转办）
+const isPkgOwner = (pkg) => String(pkg.package_owner_id || '') === currentUserId.value
 const canConfirmPkg = (pkg) => {
   if (isAdmin.value || isLeader.value || isDepartment.value) return true
   return String(pkg.package_owner_id || '') === currentUserId.value
@@ -560,7 +568,8 @@ const confirmTransfer = async () => { //确认发起函数
   transferring.value = true
   try {
     const res = await initiateTransferApi({
-      work_package_id: transferPkg.value.id, // pkg.id 就是工作包编号
+      transfer_type: 'work_package',
+      work_package_id: transferPkg.value.id, // pkg.id 就是工作包 ID
       from_user_id: currentUserId.value,
       to_user_id: transferTargetId.value
     })

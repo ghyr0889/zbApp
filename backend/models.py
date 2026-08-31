@@ -77,17 +77,19 @@ class WorkItem(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     name = Column(String(100), nullable=False)  # 工作项名称
     standard = Column(Text, nullable=True)  # 工作项标准
-    difficulty = Column(String(50), nullable=True)  # 工作项难度
-    importance = Column(String(50), nullable=True)  # 工作项重要性
-    innovation = Column(String(50), nullable=True)  # 工作项创新性
-    deadline = Column(DateTime, nullable=True)  # 工作项完成节点要求
+    difficulty = Column(String(50), nullable=False)  # 工作项难度
+    importance = Column(String(50), nullable=False)  # 工作项重要性
+    innovation = Column(String(50), nullable=False)  # 工作项创新性
+    deadline = Column(DateTime, nullable=False)  # 工作项完成节点要求
     completed_at = Column(DateTime, nullable=True) # 工作完成时间
-    score = Column(Float, default=0.00)  # 工作项分值
+    score = Column(Float, default=0.00, nullable=False)  # 工作项分值
     complete_status = Column(Boolean, default=False, nullable=True) # 完成状态
+    owner_id = Column(String(50), ForeignKey("users.id"), nullable=True) #工作项负责人
 
     work_package_id = Column(Integer, ForeignKey("work_packages.id"), nullable=False)
-
+    
     work_package = relationship("WorkPackage", back_populates="work_items")
+    owner = relationship("User", foreign_keys=[owner_id])
     monthly_scores = relationship("WorkItemMonthlyScore", back_populates="work_item", cascade="all, delete-orphan")
 
 
@@ -97,12 +99,16 @@ class TaskTransfer(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     task_assignment_id = Column(String(50), nullable=False, comment="任务分配记录 ID")
     work_package_id = Column(Integer, ForeignKey("work_packages.id"), nullable=False)
+    work_item_id = Column(Integer, ForeignKey("work_items.id"), nullable=False) 
+    transfer_score = Column(Float, default=0.00) #转移的分数
     from_user_id = Column(String(50), nullable=False, comment="发起人(原负责人)")
     to_user_id = Column(String(50), nullable=False, comment="接收人(新负责人)")
     status = Column(String(20), default="PENDING", comment="状态: PENDING/ACCEPTED/REJECTED")
     created_at = Column(DateTime, default=datetime.now)
+    transfer_type = Column(String(20), default="work_item", nullable=False, comment="转移类型")
 
     work_package = relationship("WorkPackage")
+    work_item = relationship("WorkItem")
 
 
 class WorkPackageSplitRequest(Base):

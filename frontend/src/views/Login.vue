@@ -3,7 +3,7 @@
   <div class="login-container">
     <el-card class="login-card" shadow="always">
       <div class="login-header">
-        <h2>工作内容统计系统</h2>
+        <h2>综保工作内容统计系统</h2>
       </div>
 
       <!-- 1. 新增：登录身份切换卡片 -->
@@ -41,7 +41,9 @@
           {{ activeTab === 'employee' ? '员工登录' : '管理员登录' }}
         </el-button>
       </el-form>
-      
+      <div v-if="$route.path === '/login'" class="login-footer">
+        默认密码为123456
+      </div>
     </el-card>
   </div>
 </template>
@@ -135,6 +137,12 @@ const handleLogin = async () => {
 .login-btn {
   width: 100%;
   margin-top: 10px;
+}
+.login-footer {
+  margin-top: 14px;
+  text-align: left;
+  font-size: 13px;
+  color: #858586;
 }
 .test-account-box {
   margin-top: 25px;

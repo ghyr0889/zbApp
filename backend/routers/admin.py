@@ -6,6 +6,8 @@ import traceback
 import models
 from database import get_db
 from schemas import UserCreate, ProjectCreate, WorkPackageCreate, ScoreRuleUpdate, LevelDefsUpdate, UserUpdate
+from datetime import datetime
+from routers.score_board import compute_calc_score, monthly_quality_score
 
 router = APIRouter(prefix="/api/v1/admin", tags=["Admin Management"])
 # 兼容前端历史路径：deleteUserApi 实际请求 DELETE /api/v1/users/{id}
@@ -213,10 +215,6 @@ def create_or_update_work_package(pkg_in: WorkPackageCreate, db: Session = Depen
             pkg.notes = (pkg_in.notes or "").strip()
             message = "工作包更新成功"
         else:
-            # 自动生成工作包 code（项目下递增序号）
-            existing_count = db.query(models.WorkPackage).filter(
-                models.WorkPackage.project_id == project.id
-            ).count()
             pkg = models.WorkPackage(
                 code=work_package_code,
                 project_id=project.id,
@@ -308,6 +306,19 @@ def put_computed_score_dimensions(body: ScoreRuleUpdate, db: Session = Depends(g
             ).first()
             if rec:
                 rec.factor = round(float(lv.factor or 0.0), 3)
+
+    # 系数更新后，只重算【当月】已填月度分值的计算得分（历史月份保持原快照不动）
+    this_month = datetime.now().strftime("%Y-%m")
+    for rec in db.query(models.WorkItemMonthlyScore).filter(
+            models.WorkItemMonthlyScore.month == this_month).all():
+        item = rec.work_item
+        if not item:
+            continue
+        wp = item.work_package
+        owner_job_grade = wp.owner.job_grade if (wp and wp.owner) else ""
+        q = monthly_quality_score(db, rec.work_item_id, rec.month)
+        rec.calculate_score = compute_calc_score(rec.score, item, db, owner_job_grade, q)
+
     db.commit()
     return {"code": 200, "message": "评分规则已保存"}
 

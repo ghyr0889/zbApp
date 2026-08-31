@@ -34,12 +34,6 @@ try:
                            tech_owner_id = None)
     db.add_all([proj1, proj2])
     db.commit()
-
-    # 3. 工作包类别（固定四类：类型1-4）
-    for cat_name in models.FIXED_WORK_CATEGORIES:
-        db.add(models.WorkPackageCategory(name=cat_name))
-    db.commit()
-
     # 4. 工作包：不同项目下有不同的工作包，类别固定为 类型1-4
     #    —— 项目1 下的工作包（类别：类型1、类型2）
     pkg1 = models.WorkPackage(

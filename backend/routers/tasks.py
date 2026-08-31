@@ -1,6 +1,7 @@
 # xiangmu/backend/routers/tasks.py
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 import models
 from database import get_db
@@ -15,11 +16,45 @@ def user_label(user):
     return user.username or user.id
 
 
+def item_remaining_score(db, item):
+    """工作项剩余分数 = 基础总分值 - 已填月度分值之和。"""
+    total = item.score or 0.0
+    filled = db.query(func.coalesce(func.sum(models.WorkItemMonthlyScore.score), 0.0)).filter(
+        models.WorkItemMonthlyScore.work_item_id == item.id
+    ).scalar() or 0.0
+    return round(total - filled, 2)
+
+
+def _transfer_view(item, users_by_id=None):
+    """把一条转办记录展开为前端需要的结构（工作包/工作项通用）。"""
+    users_by_id = users_by_id or {}
+    pkg = item.work_package
+    wi = item.work_item
+    return {
+        "id": item.id,
+        "task_assignment_id": item.task_assignment_id,
+        "transfer_type": item.transfer_type or "work_item",
+        "work_package_id": item.work_package_id,
+        "work_package_code": pkg.code if pkg else "-",
+        "work_item_id": item.work_item_id,
+        "work_item_name": wi.name if wi else "-",
+        "transfer_score": item.transfer_score or 0.0,
+        "project_id": pkg.project_id if pkg else None,
+        "project_name": pkg.project.name if (pkg and pkg.project) else "-",
+        "from_user_id": item.from_user_id,
+        "from_username": user_label(users_by_id.get(item.from_user_id)),
+        "to_user_id": item.to_user_id,
+        "to_username": user_label(users_by_id.get(item.to_user_id)),
+        "status": item.status,
+        "created_at": item.created_at.strftime("%Y-%m-%d %H:%M") if item.created_at else "-",
+    }
+
+
 # ---------------------------------------------------------------- 发起转办
 @router.post("/initiate")
 def initiate_transfer(payload: TransferCreate, db: Session = Depends(get_db)):
     if payload.from_user_id == payload.to_user_id:
-        raise HTTPException(status_code=400, detail="不能将工作包转办给自己")
+        raise HTTPException(status_code=400, detail="不能转办给自己")
 
     from_user = db.query(models.User).filter(models.User.id == payload.from_user_id).first()
     to_user = db.query(models.User).filter(models.User.id == payload.to_user_id).first()
@@ -28,29 +63,74 @@ def initiate_transfer(payload: TransferCreate, db: Session = Depends(get_db)):
     if not to_user:
         raise HTTPException(status_code=404, detail="接收人不存在")
 
-    pkg = db.query(models.WorkPackage).filter(
-        models.WorkPackage.id == payload.work_package_id
-    ).first()
-    if not pkg:
-        raise HTTPException(status_code=404, detail="工作包不存在")
-    if pkg.owner_id != payload.from_user_id:
-        raise HTTPException(status_code=403, detail="只能转办当前由自己负责的工作包")
+    transfer_type = (payload.transfer_type or "work_package").lower()
 
-    duplicate = db.query(models.TaskTransfer).filter(
-        models.TaskTransfer.work_package_id == payload.work_package_id,
-        models.TaskTransfer.from_user_id == payload.from_user_id,
-        models.TaskTransfer.status == "PENDING"
-    ).first()
-    if duplicate:
-        raise HTTPException(status_code=400, detail="该工作包已有待处理的转办申请")
+    if transfer_type == "work_package":
+        # ---- 工作包转办：整体转办，负责人直接变更 ----
+        pkg = db.query(models.WorkPackage).filter(
+            models.WorkPackage.id == payload.work_package_id
+        ).first()
+        if not pkg:
+            raise HTTPException(status_code=404, detail="工作包不存在")
+        if from_user.role not in ["LEADER", "DEPARTMENT", "ADMIN"] and  pkg.owner_id != payload.from_user_id:
+            raise HTTPException(status_code=403, detail="只有管理员、科室、领导和该工作包负责人可以转包")
 
-    transfer = models.TaskTransfer(
-        task_assignment_id=payload.task_id or pkg.id,
-        work_package_id=pkg.id,
-        from_user_id=payload.from_user_id,
-        to_user_id=payload.to_user_id,
-        status="PENDING"
-    )
+        duplicate = db.query(models.TaskTransfer).filter(
+            models.TaskTransfer.work_package_id == payload.work_package_id,
+            models.TaskTransfer.from_user_id == payload.from_user_id,
+            models.TaskTransfer.status == "PENDING"
+        ).first()
+        if duplicate:
+            raise HTTPException(status_code=400, detail="该工作包已有待处理的转办申请")
+
+        transfer = models.TaskTransfer(
+            task_assignment_id=str(pkg.id),
+            work_package_id=pkg.id,
+            from_user_id=payload.from_user_id,
+            to_user_id=payload.to_user_id,
+            status="PENDING",
+            transfer_type="work_package",
+        )
+
+    elif transfer_type == "work_item":
+        # ---- 工作项转办：可选择转出分数（不能超过该工作项剩余分数）----
+        item = db.query(models.WorkItem).filter(models.WorkItem.id == payload.work_item_id).first()
+        if not item:
+            raise HTTPException(status_code=404, detail="工作项不存在")
+        if from_user.role not in ["LEADER", "DEPARTMENT", "ADMIN"] and item.owner_id != payload.from_user_id:
+            raise HTTPException(status_code=403, detail="只有管理员、科室、领导和该工作项负责人可以转包")
+
+        remaining = item_remaining_score(db, item)
+        score = round(float(payload.transfer_score or 0.0), 2)
+        if score <= 0:
+            raise HTTPException(status_code=400, detail="转出分值必须大于 0")
+        if score > remaining:
+            raise HTTPException(status_code=400, detail=f"转出分值不能超过剩余分值（剩余 {remaining} 分）")
+
+        # 已有待处理转办占用的分数要扣除
+        pending_used = db.query(func.coalesce(func.sum(models.TaskTransfer.transfer_score), 0.0)).filter(
+            models.TaskTransfer.work_item_id == item.id,
+            models.TaskTransfer.status == "PENDING"
+        ).scalar() or 0.0
+        available = round(remaining - pending_used, 2)
+        if score > available:
+            raise HTTPException(status_code=400,
+                                detail=f"转出分值不能超过可用分值（剩余 {remaining}，待处理占用 {pending_used}，可用 {available}）")
+
+        transfer = models.TaskTransfer(
+            task_assignment_id=str(item.id),
+            work_package_id=item.work_package_id,
+            work_item_id=item.id,
+            transfer_score=score,
+            from_user_id=payload.from_user_id,
+            to_user_id=payload.to_user_id,
+            status="PENDING",
+            transfer_type="work_item",
+        )
+
+    else:
+        raise HTTPException(status_code=400, detail="transfer_type 只能是 work_package / work_item")
+
     db.add(transfer)
     db.commit()
     db.refresh(transfer)
@@ -70,30 +150,12 @@ def get_incoming_transfers(user_id: str = Query(...), db: Session = Depends(get_
         .all()
     )
 
-    from_user_ids = {item.from_user_id for item in transfers}
+    user_ids = {t.from_user_id for t in transfers} | {t.to_user_id for t in transfers}
     users_by_id = {}
-    if from_user_ids:
-        users_by_id = {u.id: u for u in db.query(models.User).filter(models.User.id.in_(from_user_ids)).all()}
+    if user_ids:
+        users_by_id = {u.id: u for u in db.query(models.User).filter(models.User.id.in_(user_ids)).all()}
 
-    data = []
-    for item in transfers:
-        from_user = users_by_id.get(item.from_user_id)
-        pkg = item.work_package
-        data.append({
-            "id": item.id,
-            "task_assignment_id": item.task_assignment_id,
-            "work_package_id": item.work_package_id,
-            "work_package_code": item_package_code,
-            "project_id": pkg.project_id if pkg else None,
-            "project_name": pkg.project.name if (pkg and pkg.project) else "-",
-            "from_user_id": item.from_user_id,
-            "from_username": user_label(from_user),
-            "to_user_id": item.to_user_id,
-            "status": item.status,
-            "created_at": item.created_at.strftime("%Y-%m-%d %H:%M") if item.created_at else "-",
-        })
-
-    return {"code": 200, "data": data}
+    return {"code": 200, "data": [_transfer_view(t, users_by_id) for t in transfers]}
 
 
 # ---------------------------------------------------------------- 我发起的转办
@@ -106,30 +168,12 @@ def get_outgoing_transfers(user_id: str = Query(...), db: Session = Depends(get_
         .all()
     )
 
-    to_user_ids = {item.to_user_id for item in transfers}
+    user_ids = {t.from_user_id for t in transfers} | {t.to_user_id for t in transfers}
     users_by_id = {}
-    if to_user_ids:
-        users_by_id = {u.id: u for u in db.query(models.User).filter(models.User.id.in_(to_user_ids)).all()}
+    if user_ids:
+        users_by_id = {u.id: u for u in db.query(models.User).filter(models.User.id.in_(user_ids)).all()}
 
-    data = []
-    for item in transfers:
-        to_user = users_by_id.get(item.to_user_id)
-        pkg = item.work_package
-        data.append({
-            "id": item.id,
-            "task_assignment_id": item.task_assignment_id,
-            "work_package_id": item.work_package_id,
-            "work_package_code": item.work_package_code,
-            "project_id": pkg.project_id if pkg else None,
-            "project_name": pkg.project.name if (pkg and pkg.project) else "-",
-            "from_user_id": item.from_user_id,
-            "to_user_id": item.to_user_id,
-            "to_username": user_label(to_user),
-            "status": item.status,
-            "created_at": item.created_at.strftime("%Y-%m-%d %H:%M") if item.created_at else "-",
-        })
-
-    return {"code": 200, "data": data}
+    return {"code": 200, "data": [_transfer_view(t, users_by_id) for t in transfers]}
 
 
 # ---------------------------------------------------------------- 处理转办
@@ -156,13 +200,53 @@ def process_transfer(
         db.commit()
         return {"code": 200, "message": "已拒绝该转办申请"}
 
+    transfer_type = (transfer.transfer_type or "work_item").lower()
+
+    if transfer_type == "work_item":
+        # ---- 工作项转办：接受时拆分 / 全量转出直接变更负责人 ----
+        item = db.query(models.WorkItem).filter(
+            models.WorkItem.id == transfer.work_item_id
+        ).first()
+        if not item:
+            raise HTTPException(status_code=400, detail="工作项不存在，无法接受")
+
+        score = round(float(transfer.transfer_score or 0.0), 2)
+        remaining = item_remaining_score(db, item)
+        # 接受前再次校验剩余分数（期间原负责人可能又填写了分值）
+        if score > remaining:
+            raise HTTPException(status_code=400, detail=f"该工作项剩余分值不足，无法接受（剩余 {remaining} 分）")
+
+        if score >= (item.score or 0.0):
+            # 全量转出：直接变更工作项负责人，不拆分
+            item.owner_id = transfer.to_user_id
+        else:
+            # 部分转出：原工作项减分保留（已填月度分值留在原工作项），新建一个工作项给接收人
+            item.score = round((item.score or 0.0) - score, 2)
+            new_item = models.WorkItem(
+                work_package_id=item.work_package_id,
+                name=item.name,
+                standard=item.standard,
+                difficulty=item.difficulty,
+                importance=item.importance,
+                innovation=item.innovation,
+                deadline=item.deadline,
+                score=score,
+                owner_id=transfer.to_user_id,
+                complete_status=False,
+            )
+            db.add(new_item)
+
+        transfer.status = "ACCEPTED"
+        db.commit()
+        return {"code": 200, "message": "已接受转办申请，工作项已更新"}
+
+    # ---- 工作包转办：负责人整体变更 ----
     pkg = db.query(models.WorkPackage).filter(
         models.WorkPackage.id == transfer.work_package_id
     ).first()
     if not pkg:
         raise HTTPException(status_code=400, detail="工作包不存在，无法接受")
 
-    # 变更工作包负责人
     pkg.owner_id = transfer.to_user_id
     transfer.status = "ACCEPTED"
 

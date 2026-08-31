@@ -59,9 +59,32 @@ def _split_items_payload(items):
             "innovation": it.innovation,
             "deadline": it.deadline,
             "score": it.score,
+            "owner_id": it.owner_id
         }
         for it in items
     ], ensure_ascii=False)
+
+# 除 name 外，还要必填的字段
+REQUIRED_ITEM_FIELDS = ["difficulty", "importance", "innovation", "deadline"]
+
+def require_work_item_fields(items, label="工作项"):
+    for idx, it in enumerate(items or [], 1):
+        missing = []
+        # 兼容 Pydantic 对象 和 dict
+        for f in REQUIRED_ITEM_FIELDS:
+            v = it.get(f) if isinstance(it, dict) else getattr(it, f, None)
+            if v is None or str(v).strip() == "":
+                missing.append(f)
+        score = it.get("score") if isinstance(it, dict) else getattr(it, "score", None)
+        if score is None or float(score or 0) <= 0:
+            missing.append("score")
+        if missing:
+            raise HTTPException(status_code=400,
+                                detail=f"第 {idx} 个工作项缺少必填项：{', '.join(missing)}")
+        # 截止时间格式校验（可并入）
+        dl = it.get("deadline") if isinstance(it, dict) else (it.deadline or "")
+        if parse_deadline(dl) is None:
+            raise HTTPException(status_code=400, detail=f"第 {idx} 个工作项截止时间格式不正确")
 
 
 @router.post("/split-requests")
@@ -87,6 +110,8 @@ def create_split_request(req: SplitRequestCreate, db: Session = Depends(get_db))
     role = str(applicant.role).upper()
     if role == "EMPLOYEE" and work_package.owner_id != applicant.id:
         raise HTTPException(status_code=403, detail="只能申请拆分自己负责的工作包")
+
+    require_work_item_fields(req.split_items)
 
     new_req = models.WorkPackageSplitRequest(
         work_package_id=req.work_package_id,
@@ -181,6 +206,8 @@ def review_split_request(request_id: int, body: SplitRequestReview, db: Session 
             if not items:
                 raise HTTPException(status_code=400, detail="变更内容为空，无法处理")
 
+            require_work_item_fields(items)
+
             for it in items:
                 # 带 work_item_id → 编辑已有工作项；否则 → 新增
                 if it.get("work_item_id"):
@@ -190,7 +217,8 @@ def review_split_request(request_id: int, body: SplitRequestReview, db: Session 
                     if not item or str(item.work_package_id) != str(work_package.id):
                         raise HTTPException(status_code=400, detail="待编辑的工作项不存在或不属于该工作包")
                 else:
-                    item = models.WorkItem(work_package_id=work_package.id)
+                    # 新建的工作项默认归属工作包负责人，便于转办/后续负责人展示
+                    item = models.WorkItem(work_package_id=work_package.id, owner_id=work_package.owner_id)
                     db.add(item)
 
                 item.name = (it.get("name") or "").strip() or "未命名工作项"
@@ -200,7 +228,7 @@ def review_split_request(request_id: int, body: SplitRequestReview, db: Session 
                 item.innovation = it.get("innovation")
                 item.deadline = parse_deadline(it.get("deadline")) if it.get("deadline") else None
                 item.score = it.get("score") or 0.0
-                item.category = it.get("category")
+                item.owner_id = it.get("owner_id") or work_package.owner_id
             req.status = "APPROVED"
             req.review_comment = (body.comment or "").strip() or "审核通过"
 
@@ -234,6 +262,9 @@ def edit_split_request(request_id: int, body: SplitRequestEdit, db:Session = Dep
 
     if not body.split_items or not any((it.name or "").strip() for it in body.split_items):
         raise HTTPException(status_code=400, detail="请至少保留一个有名的工作项")
+
+    require_work_item_fields(body.split_items)
+
     reason = (body.reason or "").strip()
     if not reason:
         raise HTTPException(status_code=400, detail="请填写拆分原因")

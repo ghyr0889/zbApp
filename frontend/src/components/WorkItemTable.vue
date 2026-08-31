@@ -88,6 +88,15 @@
         </template>
       </el-table-column>
 
+      <el-table-column label="负责人" width="120" align="center">
+        <template #default="{ row }">
+          <el-select v-if="row.isEdit" v-model="row.owner_id" filterable placeholder="选择负责人" size="small" style="width: 100%">
+            <el-option v-for="u in userOptions" :key="u.id" :label="`${u.username}（${u.id}）`" :value="u.id" />
+          </el-select>
+          <span v-else class="employee-text">{{ row.owner_name || '-' }}</span>
+        </template>
+      </el-table-column>
+
       <el-table-column label="进度" width="130" align="center">
         <template #default="{ row }">
           <el-progress :percentage="row.progress || 0" :stroke-width="8" />
@@ -105,7 +114,7 @@
           </template>
           <template v-else>
             <span class="score-text">{{ row.month_score ?? 0 }}</span>
-            <el-button v-if="canManage && row.id " type="primary" link size="small" @click="row.isEditMonth = true">填写</el-button>
+            <el-button v-if="canManageRow(row) && row.id " type="primary" link size="small" @click="row.isEditMonth = true">填写</el-button>
             <el-tag v-if="row.complete_status" size="small" type="success" effect="plain">已完成</el-tag>
           </template>
         </template>
@@ -127,7 +136,7 @@
         </template>
       </el-table-column>
 
-      <el-table-column v-if="canManage" label="操作" width="180" align="center" fixed="right">
+      <el-table-column v-if="hasManage" label="操作" width="140" align="center" fixed="right">
         <template #default="{ row, $index }">
           <template v-if="row.isPending">
             <el-tag size="small" type="warning" effect="plain">待审核</el-tag>
@@ -138,10 +147,11 @@
           </template>
           <template v-else>
             <el-tag v-if="row.isStaged" size="small" type="info" effect="plain" class="staged-tag">已暂存</el-tag>
-            <el-button v-if="!row.complete_status && row.id" type="success" link size="small" :loading="confirming" @click="confirmComplete(row)">确认完成</el-button>
-            <el-button v-if="row.complete_status" type="warning" link size="small" @click="cancelComplete(row)">取消完成</el-button>
-            <el-button type="primary" link size="small" @click="row.isEdit = true">编辑</el-button>
-            <el-popconfirm v-if="!row.complete_status" title="确定删除该工作项？" confirm-button-type="danger" @confirm="removeItem(row)">
+            <el-button v-if="canManageRow(row) && !row.complete_status && row.id" type="success" link size="small" :loading="confirming" @click="confirmComplete(row)">确认完成</el-button>
+            <el-button v-if="canManageRow(row) && row.complete_status" type="warning" link size="small" @click="cancelComplete(row)">取消完成</el-button>
+            <el-button v-if="canManageRow(row)" type="primary" link size="small" @click="row.isEdit = true">编辑</el-button>
+            <el-button v-if="isItemOwner(row) && row.id " type="warning" link size="small" @click="openTransfer(row)">转办</el-button>
+            <el-popconfirm v-if="canManageRow(row) && !row.complete_status" title="确定删除该工作项？" confirm-button-type="danger" @confirm="removeItem(row)">
               <template #reference>
                 <el-button type="danger" link size="small">删除</el-button>
               </template>
@@ -184,6 +194,36 @@
         <el-button type="success" :loading="saving" @click="confirmBatchSubmit">确认提交</el-button>
       </template>
     </el-dialog>
+
+    <!-- 工作项转办弹窗：选择接收人 + 转出分数（不能超过剩余分值） -->
+    <el-dialog v-model="transferDialogVisible" title="工作项转办" width="480px" draggable append-to-body>
+      <el-form label-width="90px">
+        <el-form-item label="工作项">
+          <el-tag>{{ transferRow?.name }}</el-tag>
+          <span style="margin-left: 8px; color: #909399;">剩余 {{ transferRow?.remaining_score }} 分</span>
+        </el-form-item>
+        <el-form-item label="接收人" required>
+          <el-select v-model="transferTargetId" filterable placeholder="选择接收人" style="width: 100%">
+            <el-option v-for="u in transferTargets" :key="u.id" :label="`${u.username}（${u.id}）`" :value="u.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="转出分数" required>
+          <el-input-number
+            v-model="transferScore"
+            :min="0.01"
+            :max="transferRow?.remaining_score || 0"
+            :step="0.5"
+            :precision="2"
+            style="width: 100%"
+            controls-position="right"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="transferDialogVisible = false">取消</el-button>
+        <el-button type="warning" :loading="transferring" @click="confirmTransfer">发送转办</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -194,6 +234,8 @@ import {
   createSplitRequestApi,
   deleteWorkItemApi,
   getWorkItemsApi,
+  getAllUsersApi,
+  initiateTransferApi,
   saveMonthScoreApi,
   saveQualityScoreApi,
   confirmCompletionApi
@@ -201,13 +243,19 @@ import {
 import { useUserStore } from '../stores/user'
 import { useLevelDefs } from '../comosables/useLevelDefs'
 
+// 模块级缓存：展开行收起再展开时不重新请求后端（方案A），避免本地暂存/待审核行丢失
+const workItemCache = new Map()
+
 const props = defineProps({
-  workPackageId: { type: String, required: true }
+  workPackageId: { type: String, required: true },
+  // 父级「刷新」时递增该值，强制工作项表格拉取最新数据
+  refreshKey: { type: Number, default: 0 }
 })
 const emit = defineEmits(['changed'])
 
 const userStore = useUserStore()
 
+const userOptions = ref([])   // 负责人下拉选项
 const workPackage = ref(null)
 const workItems = ref([])
 const loading = ref(false)
@@ -237,21 +285,151 @@ const canManage = computed(() => {
   return workPackage.value && String(workPackage.value.owner_id) === String(userStore.userInfo?.id)
 })
 
+const loadUsers = async () => {
+  try {
+    const res = await getAllUsersApi()
+    userOptions.value = res.data?.data || []
+  } catch (err) {
+    ElMessage.error(err.response?.data?.detail || '获取用户列表失败')
+  }
+}
+
 // 只有领导可以编辑质量分
 const canManageQuality = computed(() => userStore.isLEADER)
+
+// 当前用户是否是某个工作项的负责人（转办拆分后各自负责人不同）
+const currentUserId = computed(() => String(userStore.userInfo?.id || ''))
+const isItemOwner = (row) => {
+  if (String(row.owner_id || '') === currentUserId.value ) return true
+  if (userStore.isAdmin || userStore.isLEADER || userStore.isDEPARTMENT) return true
+}
+// 行级管理权限：包级权限（管理员/领导/科室/工作包负责人）或本人负责的工作项
+const canManageRow = (row) => canManage.value || isItemOwner(row)
+// 是否展示「操作」列：包级可管理，或存在本人负责的工作项
+const hasManage = computed(() => canManage.value || workItems.value.some(isItemOwner))
+
+// ---- 工作项转办 ----
+const transferDialogVisible = ref(false)
+const transferRow = ref(null)
+const transferTargetId = ref('')
+const transferScore = ref(0)
+const transferTargets = ref([])
+const transferring = ref(false)
+
+const openTransfer = async (row) => {
+  transferRow.value = row
+  transferTargetId.value = ''
+  transferScore.value = Number(row.remaining_score || 0)
+  try {
+    const res = await getAllUsersApi()
+    transferTargets.value = (res.data?.data || []).filter(u => String(u.id) !== currentUserId.value)
+  } catch (err) {
+    return ElMessage.error('获取用户列表失败')
+  }
+  transferDialogVisible.value = true
+}
+
+const confirmTransfer = async () => {
+  if (!transferTargetId.value) return ElMessage.warning('请选择接收人')
+  if (!transferScore.value || transferScore.value <= 0) return ElMessage.warning('请填写转出分数')
+  if (transferScore.value > (transferRow.value?.remaining_score || 0)) {
+    return ElMessage.warning('转出分数不能超过剩余分值')
+  }
+  transferring.value = true
+  try {
+    const res = await initiateTransferApi({
+      transfer_type: 'work_item',
+      work_item_id: transferRow.value.id,
+      transfer_score: transferScore.value,
+      from_user_id: userStore.userInfo?.id,
+      to_user_id: transferTargetId.value
+    })
+    if (res.data?.code === 200) {
+      ElMessage.success('转办申请已发送，等待接收人处理')
+      transferDialogVisible.value = false
+      await fetchData()
+      notifyChanged()
+    }
+  } catch (err) {
+    ElMessage.error(err.response?.data?.detail || '发起转办失败')
+  } finally {
+    transferring.value = false
+  }
+}
 
 // 已完成工作项整行灰显
 const rowClassName = ({ row }) => (row.complete_status ? 'completed-row' : '')
 
 const notifyChanged = () => emit('changed')
 
-const fetchData = async () => {
+// 缓存 key：按登录用户 + 工作包隔离，避免跨用户串数据
+const cacheKey = () => `work_item_cache_${userStore.userInfo?.id || 'anon'}_${props.workPackageId}`
+
+// 从 sessionStorage 读取缓存（页面刷新 / Vite 热更新后仍可恢复）
+const loadCacheFromStorage = () => {
+  try {
+    const raw = sessionStorage.getItem(cacheKey())
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+// 同步当前状态到缓存（本地暂存/新增/待审核行都会保留；模块 Map + sessionStorage 双写）
+const syncCache = () => {
+  const data = {
+    workPackage: workPackage.value,
+    workItems: workItems.value.map(w => ({ ...w }))
+  }
+  workItemCache.set(props.workPackageId, data)
+  try {
+    sessionStorage.setItem(cacheKey(), JSON.stringify(data))
+  } catch {
+    /* 存储失败不影响主流程 */
+  }
+}
+
+// 强制刷新后，把本地暂存/待审核行合并回服务器列表，避免被覆盖丢失
+const mergeLocalRows = (serverItems) => {
+  const cached = loadCacheFromStorage()
+  const local = (cached?.workItems || []).filter(w => w.isStaged || w.isPending || w.isNew)
+  if (!local.length) return serverItems
+  const serverIds = new Set(serverItems.map(i => String(i.id)))
+  const merged = serverItems.map(i => ({ ...i }))
+  local.forEach(l => {
+    const row = { ...l }
+    // 已暂存（未提交）→ 始终保留（服务器上还是旧数据）
+    if (row.isStaged) { merged.unshift(row); return }
+    // 待审核且服务器已存在同 id → 已生效，去掉本地记录
+    if (row.id && serverIds.has(String(row.id))) return
+    // 其余（新增未落库 / 待审核）→ 放回表格最前
+    merged.unshift(row)
+  })
+  return merged
+}
+
+const fetchData = async (force = false) => {
   loading.value = true
   try {
+    // 非强制：优先用模块缓存，其次 sessionStorage，命中即恢复，不请求后端（保留本地暂存/待审核状态）
+    if (!force) {
+      const cached = workItemCache.get(props.workPackageId) || loadCacheFromStorage()
+      if (cached) {
+        workPackage.value = cached.workPackage
+        workItems.value = (cached.workItems || []).map(item => ({
+          ...item,
+          isEdit: false,
+          isEditMonth: false,
+          isEditQuality: false
+        }))
+        return
+      }
+    }
+
     const res = await getWorkItemsApi(props.workPackageId)
     if (res.data?.code === 200) {
       workPackage.value = res.data.data.work_package
-      workItems.value = (res.data.data.work_items || []).map(item => ({
+      const serverItems = (res.data.data.work_items || []).map(item => ({
         ...item,
         isEdit: false,
         isNew: false,
@@ -261,6 +439,9 @@ const fetchData = async () => {
         isEditQuality: false,
         _original: JSON.parse(JSON.stringify(item))
       }))
+      // 强制刷新时合并回本地暂存/待审核行，避免被后端数据覆盖掉
+      workItems.value = force ? mergeLocalRows(serverItems) : serverItems
+      syncCache()
     }
   } catch (err) {
     ElMessage.error(err.response?.data?.detail || '获取工作项失败')
@@ -271,6 +452,8 @@ const fetchData = async () => {
 
 // 工作项 ID 变化（展开不同工作包）时重新加载
 watch(() => props.workPackageId, () => fetchData())
+// 父级「刷新」时强制拉取最新数据
+watch(() => props.refreshKey, () => fetchData(true))
 
 const handleAddWorkItem = () => {
   workItems.value.unshift({
@@ -283,6 +466,7 @@ const handleAddWorkItem = () => {
     deadline: '',
     score: 0,
     work_package_id: props.workPackageId,
+    owner_id: workPackage.value?.owner_id || '',
     isEdit: true,
     isNew: true,
     isPending: false,
@@ -290,11 +474,24 @@ const handleAddWorkItem = () => {
     isEditMonth: false,
     isEditQuality: false
   })
+  syncCache()
+}
+
+// 必填校验：名称 / 难度 / 重要度 / 创新度 / 截止时间 / 分值
+const validateWorkItemFields = (row) => {
+  if (!row.name || !row.name.trim()) return '请填写工作项名称'
+  if (!row.difficulty) return '请选择难度'
+  if (!row.importance) return '请选择重要度'
+  if (!row.innovation) return '请选择创新度'
+  if (!row.deadline) return '请选择截止时间'
+  if (!row.score || Number(row.score) <= 0) return '请填写基础总分值（需大于 0）'
+  return ''
 }
 
 // 行内「保存」：校验并暂存到本地（不提交审核，等待「提交」一起提交）
 const handleSaveLocal = (row) => {
-  if (!row.name || !row.name.trim()) return ElMessage.warning('请输入工作项名称')
+  const msg = validateWorkItemFields(row)
+  if (msg) return ElMessage.warning(msg)
   row.isEdit = false
   row.isStaged = true
   row._original = {
@@ -306,6 +503,7 @@ const handleSaveLocal = (row) => {
     deadline: row.deadline,
     score: row.score
   }
+  syncCache()
   ElMessage.success('已保存，点击「提交」可一起提交审核')
 }
 
@@ -313,8 +511,9 @@ const handleSaveLocal = (row) => {
 const handleOpenBatchSubmit = () => {
   const staged = workItems.value.filter(w => w.isStaged)
   if (!staged.length) return ElMessage.warning('暂无可提交的修改，请先保存')
-  if (staged.some(w => !w.name || !w.name.trim())) {
-    return ElMessage.warning('存在未填写名称的工作项，请先保存')
+  for (const w of staged) {
+    const msg = validateWorkItemFields(w)
+    if (msg) return ElMessage.warning(`「${w.name || '未命名'}」：${msg}，请先保存`)
   }
   batchSubmitItems.value = staged
   submitReason.value = ''
@@ -342,7 +541,8 @@ const confirmBatchSubmit = async () => {
         importance: row.importance,
         innovation: row.innovation,
         deadline: row.deadline || '',
-        score: row.score
+        score: row.score,
+        owner_id: row.owner_id,
       }))
     })
     if (res.data?.code === 200) {
@@ -353,6 +553,7 @@ const confirmBatchSubmit = async () => {
       })
       batchSubmitItems.value = []
       submitDialogVisible.value = false
+      syncCache()
       notifyChanged()
     }
   } catch (err) {
@@ -375,7 +576,7 @@ const saveMonthScore = async (row) => {
     if (res.data?.code === 200) {
       ElMessage.success('本月分值已保存')
       row.isEditMonth = false
-      await fetchData()
+      await fetchData(true)
       notifyChanged()
     }
   } catch (err) {
@@ -399,7 +600,7 @@ const saveQualityScore = async (row) => {
       row.isEditQuality = false
       const saved = Number(res.data?.data?.quality_score)
       row.quality_score = Number.isFinite(saved) ? saved : row.quality_score
-      await fetchData()
+      await fetchData(true)
       notifyChanged()
     }
   } catch (err) {
@@ -423,7 +624,7 @@ const removeItem = async (row) => {
     const res = await deleteWorkItemApi(row.id)
     if (res.data?.code === 200) {
       ElMessage.success('工作项已删除')
-      await fetchData()
+      await fetchData(true)
       notifyChanged()
     }
   } catch (err) {
@@ -444,7 +645,7 @@ const confirmComplete = async (row) => {
     })
     if (res.data?.code === 200) {
       ElMessage.success('已确认完成')
-      await fetchData()
+      await fetchData(true)
       notifyChanged()
     }
   } catch (err) {
@@ -465,7 +666,7 @@ const cancelComplete = async (row) => {
     })
     if (res.data?.code === 200) {
       ElMessage.success('已取消完成')
-      await fetchData()
+      await fetchData(true)
       notifyChanged()
     }
   } catch (err) {
@@ -473,7 +674,10 @@ const cancelComplete = async (row) => {
   }
 }
 
-onMounted(fetchData)
+onMounted(() => {
+  fetchData()
+  loadUsers()
+})
 </script>
 
 <style scoped>
@@ -495,6 +699,11 @@ onMounted(fetchData)
 
 .staged-tag {
   margin-right: 4px;
+}
+
+.employee-text {
+  color: #0f766e;
+  font-weight: 500;
 }
 
 .score-actions {

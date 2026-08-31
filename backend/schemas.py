@@ -68,7 +68,7 @@ class WorkItemCreate(BaseModel):
     difficulty: Optional[str] = Field(None, description="工作项难度")
     importance: Optional[str] = Field(None, description="工作项重要性")
     innovation: Optional[str] = Field(None, description="工作项创新性")
-    deadline: Optional[str] = Field(None, description="完成节点要求（YYYY-MM-DD）")
+    deadline: Optional[str] = Field(..., description="完成节点要求（YYYY-MM-DD）")
     score: Optional[float] = Field(0.0, description="分值（可选，若不传则按默认分值计算）")
 
 
@@ -110,8 +110,9 @@ class SplitItemIn(BaseModel):
     difficulty: Optional[str] = Field(None, description="难度")
     importance: Optional[str] = Field(None, description="重要性")
     innovation: Optional[str] = Field(None, description="创新性")
-    deadline: Optional[str] = Field(None, description="截止节点（YYYY-MM-DD）")
-    score: Optional[float] = Field(0.0, description="分值")
+    deadline: Optional[str] = Field(..., description="截止节点（YYYY-MM-DD）")
+    score: Optional[float] = Field(None, description="分值")
+    owner_id: Optional[str] = Field(None, description="工作项负责人 ID")
 
 class SplitRequestCreate(BaseModel):
     """提交工作包拆分申请。"""
@@ -136,9 +137,13 @@ class SplitRequestEdit(BaseModel):
 
 class TransferCreate(BaseModel):
     task_id: Optional[str] = Field(None, description="任务分配记录 ID（兼容，可空）")
-    work_package_id: int = Field(..., description="工作包 ID")
+    transfer_type: str = Field(...,description="要转移的类型（工作包/工作项）")
+    work_package_id: int = Field(None, description="工作包 ID")
+    work_item_id: int = Field(None, description="工作项id")
+    transfer_score: Optional[float] = Field(None, description="要转移的分数")
     from_user_id: str = Field(..., description="发起人 ID（当前负责人）")
     to_user_id: str = Field(..., description="接收人 ID（新负责人）")
+
 
 
 class TaskAssignCreate(BaseModel):

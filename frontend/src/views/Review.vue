@@ -106,6 +106,15 @@
                   </template>
                 </el-table-column>
 
+                <el-table-column label="负责人" width="120" align="center">
+                  <template #default="{ row: itemRow }">
+                    <el-select v-if="canEditRequest(row) && row.isEditing" v-model="itemRow.owner_id" filterable placeholder="选择负责人" size="small" style="width: 100%">
+                      <el-option v-for="u in userOptions" :key="u.id" :label="`${u.username}（${u.id}）`" :value="u.id" />
+                    </el-select>
+                    <span v-else class="employee-text">{{ ownerName(itemRow.owner_id) || '-' }}</span>
+                  </template>
+                </el-table-column>
+
                 <el-table-column prop="deadline" label="截止时间" width="130" align="center">
                   <template #default="{ row: itemRow }">
                     <el-date-picker
@@ -199,32 +208,66 @@
       </div>
       </el-tab-pane>
 
-        <!-- 工作包转办标签页 -->
-        <!-- <el-tab-pane label="工作包转办" name="transfers">
-          <div class="transfers-container"> -->
+        <!-- 工作包转办标签页：收件箱（接收/拒绝）+ 发件箱（状态） -->
+        <el-tab-pane label="工作包转办" name="transfers">
+          <div class="transfers-container">
             <!-- 收到的转办申请 -->
-            <!-- <div class="transfer-section">
+            <div class="transfer-section">
               <div class="section-title">收到给我的转办申请</div>
               <el-table :data="incomingTransfers" v-loading="loadingIncoming" border style="width: 100%" empty-text="暂无待处理的转办申请" :header-cell-style="{ background: '#f8fafc', color: '#1e293b', fontWeight: '600' }">
-                <el-table-column prop="from_username" label="发起人" width="110" align="center" />
-                <el-table-column prop="work_package_id" label="工作包编号" width="130" align="center" />
-                <el-table-column prop="project_code" label="所属项目" min-width="140" show-overflow-tooltip />
+                <el-table-column label="类型" width="90" align="center">
+                  <template #default="{ row }">
+                    <el-tag size="small" :type="row.transfer_type === 'work_package' ? 'warning' : 'primary'" effect="plain">{{ transferTypeLabel(row.transfer_type) }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="work_package_code" label="工作包编号" width="120" align="center" />
+                <el-table-column prop="work_item_name" label="工作项" min-width="130" show-overflow-tooltip>
+                  <template #default="{ row }">
+                    <span v-if="row.transfer_type === 'work_item'">{{ row.work_item_name || '-' }}</span>
+                    <span v-else class="muted-text">-</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="转出分数" width="90" align="center">
+                  <template #default="{ row }">
+                    <span v-if="row.transfer_type === 'work_item'" class="score-text">{{ row.transfer_score }}</span>
+                    <span v-else class="muted-text">-</span>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="from_username" label="发起人" width="100" align="center" />
+                <el-table-column prop="project_name" label="所属项目" min-width="140" show-overflow-tooltip />
                 <el-table-column prop="created_at" label="发起时间" width="160" align="center" />
-                <el-table-column label="操作" width="160" align="center" fixed="right">
+                <el-table-column label="操作" width="150" align="center" fixed="right">
                   <template #default="{ row }">
                     <el-button type="success" size="small" plain @click="handleAcceptTransfer(row)">接受</el-button>
                     <el-button type="danger" size="small" plain @click="handleRejectTransfer(row)">拒绝</el-button>
                   </template>
                 </el-table-column>
               </el-table>
-            </div> -->
+            </div>
 
             <!-- 我发起的转办申请 -->
-            <!-- <div class="transfer-section">
+            <div class="transfer-section">
               <div class="section-title">我发起的转办申请</div>
               <el-table :data="outgoingTransfers" v-loading="loadingOutgoing" border style="width: 100%" empty-text="暂无发起的转办申请" :header-cell-style="{ background: '#f8fafc', color: '#1e293b', fontWeight: '600' }">
-                <el-table-column prop="to_username" label="接收人" width="110" align="center" />
-                <el-table-column prop="work_package_id" label="工作包编号" width="130" align="center" />
+                <el-table-column label="类型" width="90" align="center">
+                  <template #default="{ row }">
+                    <el-tag size="small" :type="row.transfer_type === 'work_package' ? 'warning' : 'primary'" effect="plain">{{ transferTypeLabel(row.transfer_type) }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="work_package_code" label="工作包编号" width="120" align="center" />
+                <el-table-column prop="work_item_name" label="工作项" min-width="130" show-overflow-tooltip>
+                  <template #default="{ row }">
+                    <span v-if="row.transfer_type === 'work_item'">{{ row.work_item_name || '-' }}</span>
+                    <span v-else class="muted-text">-</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="转出分数" width="90" align="center">
+                  <template #default="{ row }">
+                    <span v-if="row.transfer_type === 'work_item'" class="score-text">{{ row.transfer_score }}</span>
+                    <span v-else class="muted-text">-</span>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="to_username" label="接收人" width="100" align="center" />
                 <el-table-column prop="project_name" label="所属项目" min-width="140" show-overflow-tooltip />
                 <el-table-column label="状态" width="110" align="center">
                   <template #default="{ row }">
@@ -235,7 +278,7 @@
               </el-table>
             </div>
           </div>
-        </el-tab-pane> -->
+        </el-tab-pane>
       </el-tabs>
     </el-card>
 
@@ -265,7 +308,7 @@
 <script setup>
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getIncomingTransfersApi, getMyOutgoingTransfersApi, getSplitRequestsApi, processTransferApi, reviewSplitRequestApi, editSplitRequestApi, getLevelDefsApi } from '../api'
+import { getIncomingTransfersApi, getMyOutgoingTransfersApi, getSplitRequestsApi, processTransferApi, reviewSplitRequestApi, editSplitRequestApi, getLevelDefsApi, getAllUsersApi } from '../api'
 
 const activeTab = ref('review')
 const searchKeyword = ref('')
@@ -280,6 +323,11 @@ const submitting = ref(false)
 const rejectDialogVisible = ref(false)
 const rejectComment = ref('')
 const currentRejectId = ref(null)
+const userOptions = ref([])   // 负责人下拉选项
+const ownerName = (id) => {
+  const u = userOptions.value.find(x => String(x.id) === String(id))
+  return u ? u.username : ''
+}
 
 const currentUser = ref(JSON.parse(localStorage.getItem('user_info') || '{}'))
 const role = computed(() => String(currentUser.value.role || '').toUpperCase())
@@ -324,6 +372,14 @@ const startEdit = (row) => {
 
 // 保存修改后的申请内容
 const handleSaveEdit = async (row) => {
+  for (const it of row.split_items || []) {
+    if (!it.name || !it.name.trim()) return ElMessage.warning('请填写工作项名称')
+    if (!it.difficulty) return ElMessage.warning('请选择难度')
+    if (!it.importance) return ElMessage.warning('请选择重要度')
+    if (!it.innovation) return ElMessage.warning('请选择创新度')
+    if (!it.deadline) return ElMessage.warning('请选择截止时间')
+    if (!it.score || Number(it.score) <= 0) return ElMessage.warning('请填写基础总分值（需大于 0）')
+  }
   if (!row.split_items || !row.split_items.some(it => (it.name || '').trim())) {
     return ElMessage.warning('请至少保留一个有名的工作项')
   }
@@ -346,6 +402,14 @@ const handleSaveEdit = async (row) => {
     ElMessage.error(err.response?.data?.detail || '保存失败')
   } finally {
     savingEdit.value = false
+  }
+}
+const loadUsers = async () => {
+  try {
+    const res = await getAllUsersApi()
+    userOptions.value = res.data?.data || []
+  } catch (err) {
+    ElMessage.error(err.response?.data?.detail || '获取用户列表失败')
   }
 }
 
@@ -462,6 +526,7 @@ const confirmReject = async () => {
 }
 
 // ============ 工作包转办 ============
+const transferTypeLabel = (t) => (t === 'work_package' ? '工作包' : '工作项')
 const transferStatusLabel = (s) => ({ PENDING: '待接收', ACCEPTED: '已被接受', REJECTED: '已被拒绝' }[s] || s)
 const transferStatusTagType = (s) => ({ PENDING: 'warning', ACCEPTED: 'success', REJECTED: 'danger' }[s] || 'info')
 
@@ -490,7 +555,10 @@ const fetchOutgoingTransfers = async () => {
 }
 
 const handleAcceptTransfer = (row) => {
-  ElMessageBox.confirm(`确认接受「${row.work_package_id}」的转办？接受后该工作包及全部工作项将归你负责。`, '接受转办', {
+  const desc = row.transfer_type === 'work_item'
+    ? `工作项「${row.work_item_name}」${row.transfer_score} 分`
+    : `工作包「${row.work_package_code}」`
+  ElMessageBox.confirm(`确认接受${desc}的转办？接受后该工作项将归你负责。`, '接受转办', {
     confirmButtonText: '确认接受',
     cancelButtonText: '取消',
     type: 'warning'
@@ -509,7 +577,10 @@ const handleAcceptTransfer = (row) => {
 }
 
 const handleRejectTransfer = (row) => {
-  ElMessageBox.confirm(`确认拒绝「${row.work_package_id}」的转办？`, '拒绝转办', {
+  const desc = row.transfer_type === 'work_item'
+    ? `工作项「${row.work_item_name}」${row.transfer_score} 分`
+    : `工作包「${row.work_package_code}」`
+  ElMessageBox.confirm(`确认拒绝${desc}的转办？`, '拒绝转办', {
     confirmButtonText: '确认拒绝',
     cancelButtonText: '取消',
     type: 'warning'
@@ -538,6 +609,7 @@ onMounted(() => {
   fetchIncomingTransfers()
   fetchOutgoingTransfers()
   fetchLevelDefs()
+  loadUsers()
 })
 </script>
 

@@ -4,7 +4,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, selectinload
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, exists
 
 import models
 from database import get_db
@@ -86,7 +86,11 @@ def get_paged_projects(page: int = 1,
     q = db.query(models.Project)
     if keyword and str(keyword).strip():
         kw = f"%{str(keyword).strip()}%"
-        q = q.filter(or_(models.Project.code.like(kw), models.Project.name.like(kw)))
+        q = q.filter(or_(models.Project.code.like(kw), 
+                         models.Project.name.like(kw),
+                         models.Project.tech_owner.has(models.User.username.like(kw)),
+                        )
+                    )
     if owner_id:
         q = q.filter(models.Project.owner_id == owner_id)
     if level:
@@ -220,7 +224,14 @@ def get_my_work_packages_paged(user_id: str,
     page = max(int(page or 1), 1)
     page_size = min(max(int(page_size or 20), 1), 100)
 
-    q = db.query(models.WorkPackage).filter(models.WorkPackage.owner_id == user_id)
+    # 我负责的工作包 + 我负责的工作项所属的工作包（转办接收后能看到自己的工作项）
+    q = db.query(models.WorkPackage).filter(or_(
+        models.WorkPackage.owner_id == user_id,
+        exists().where(
+            models.WorkItem.work_package_id == models.WorkPackage.id,
+            models.WorkItem.owner_id == user_id,
+        )
+    ))
     total = q.count()
     pkgs = q.options(
         selectinload(models.WorkPackage.owner),
@@ -263,6 +274,8 @@ def _work_item_view(item):
         "score": item.score or 0.0,
         "completed_at": deadline_str(item.completed_at),
         "complete_status": item.complete_status or "",
+        "owner_id": item.owner_id or "",
+        "owner_name": item.owner.username if item.owner else "",
         "work_package_id": item.work_package_id,
         "work_package_code": item.work_package.code
     }
@@ -382,7 +395,8 @@ def confirm_completion(data: ConfirmCompletionIn, db: Session = Depends(get_db))
                 models.WorkItem.id == int(data.target_id)
             ).first()
             if target:
-                owner_id = target.work_package.owner_id if target.work_package else None
+                # 工作项负责人优先，其次工作包负责人
+                owner_id = target.owner_id or (target.work_package.owner_id if target.work_package else None)
         elif data.target_type == "work_package":
             target = db.query(models.WorkPackage).filter(
                 models.WorkPackage.id == data.target_id

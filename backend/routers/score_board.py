@@ -93,7 +93,7 @@ def compute_calc_score(month_score, item, db, owner_job_grade, quality_score=Non
 
     factor_map = {}
     for lv in db.query(models.ScoreDimensionLevel).all():
-        factor_map.setdefault((lv.variable, lv.job_grade or "", lv.level), lv.factor or 1.0)
+        factor_map.setdefault((lv.variable, lv.job_grade or "", lv.level), lv.factor or 0)
 
     owner_grade = owner_job_grade or ""
     difficulty_f = round(factor_map.get(("difficulty", owner_grade, item.difficulty), 0), 3)
@@ -343,11 +343,13 @@ def save_month_score(work_item_id: int, body: MonthScoreIn, db: Session = Depend
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
 
-    # 权限：该工作包负责人本人
+    # 权限：工作包/工作项负责人本人，或领导/管理员
     role = str(user.role).upper()
     work_package = item.work_package
-    if role not in["LEADER","ADMIN"] and (not work_package or work_package.owner_id != user.id):
-        raise HTTPException(status_code=403, detail="只有工作包负责人本人、领导和管理员可以填写本月分值")
+    is_pkg_owner = bool(work_package and work_package.owner_id == user.id)
+    is_item_owner = bool(item.owner_id and item.owner_id == user.id)
+    if role not in ["LEADER", "ADMIN"] and not (is_pkg_owner or is_item_owner):
+        raise HTTPException(status_code=403, detail="只有工作包/工作项负责人本人、领导和管理员可以填写本月分值")
 
     month = (body.month or "").strip()
     if not month:
@@ -365,8 +367,14 @@ def save_month_score(work_item_id: int, body: MonthScoreIn, db: Session = Depend
         models.WorkItemMonthlyScore.work_item_id == work_item_id,
         models.WorkItemMonthlyScore.month == month
     ).first()
-    # 积分归属：记给工作包负责人（领导/管理员代填也不改变归属）；无负责人时兜底记给填写人
-    owner_id = work_package.owner_id if (work_package and work_package.owner_id) else user.id
+    # 积分归属：优先记给工作项负责人（转办拆分后接收人负责的工作项归接收人），
+    # 其次记给工作包负责人（领导/管理员代填也不改变归属）；都没有再兜底记给填写人
+    if item.owner_id:
+        owner_id = item.owner_id
+    elif work_package and work_package.owner_id:
+        owner_id = work_package.owner_id
+    else:
+        owner_id = user.id
     if rec:
         rec.score = score
         rec.user_id = owner_id
