@@ -1,0 +1,13 @@
+填写的月度分值 9月份加到8月份
+
+-- 先把 9 月的 score/quality/calculate 累加到已存在的 8 月记录上
+UPDATE work_item_monthly_scores AS t
+JOIN work_item_monthly_scores AS s
+  ON s.work_item_id = t.work_item_id AND s.month = '2026-09'
+SET t.score           = ROUND((t.score           OR 0) + (s.score           OR 0), 3),
+    t.quality_score   = COALESCE(s.quality_score, t.quality_score),
+    t.calculate_score = ROUND((t.calculate_score OR 0) + (s.calculate_score OR 0), 3)
+WHERE t.month = '2026-08';
+
+-- 再删除原来的 9 月记录（已并入 8 月）
+DELETE FROM work_item_monthly_scores WHERE month = '2026-09';

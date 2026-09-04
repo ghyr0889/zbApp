@@ -12,7 +12,7 @@ from schemas import (
     SplitRequestReview,
     SplitRequestEdit
 )
-from utils import work_package_summary, deadline_str, parse_deadline
+from utils import work_package_summary, deadline_str, parse_deadline, ensure_open
 
 router = APIRouter(prefix="/api/v1/review", tags=["Owner Review"])
 
@@ -30,6 +30,8 @@ def _split_request_view(req):
         "id": req.id,
         "work_package_id": req.work_package_id,
         "work_package_code": work_package.code if work_package else "-",
+        "work_package_name": work_package.name if work_package else "-",
+        "work_package_objective": work_package.objective if work_package else "-",
         "project_id": work_package.project_id if work_package else None,
         "project_name": project.name if project else "-",
         "project_owner_id": project.owner_id,
@@ -59,7 +61,8 @@ def _split_items_payload(items):
             "innovation": it.innovation,
             "deadline": it.deadline,
             "score": it.score,
-            "owner_id": it.owner_id
+            "owner_id": it.owner_id,
+            "notes": it.notes
         }
         for it in items
     ], ensure_ascii=False)
@@ -75,9 +78,6 @@ def require_work_item_fields(items, label="工作项"):
             v = it.get(f) if isinstance(it, dict) else getattr(it, f, None)
             if v is None or str(v).strip() == "":
                 missing.append(f)
-        score = it.get("score") if isinstance(it, dict) else getattr(it, "score", None)
-        if score is None or float(score or 0) <= 0:
-            missing.append("score")
         if missing:
             raise HTTPException(status_code=400,
                                 detail=f"第 {idx} 个工作项缺少必填项：{', '.join(missing)}")
@@ -99,6 +99,7 @@ def create_split_request(req: SplitRequestCreate, db: Session = Depends(get_db))
     ).first()
     if not work_package:
         raise HTTPException(status_code=404, detail="工作包不存在")
+    ensure_open(work_package, work_package.project)  # 已关闭的工作包/项目不能再提交变更
 
     reason = (req.reason or "").strip()
     if not reason:
@@ -201,6 +202,7 @@ def review_split_request(request_id: int, body: SplitRequestReview, db: Session 
             ).first()
             if not work_package:
                 raise HTTPException(status_code=400, detail="工作包不存在，无法拆分")
+            ensure_open(work_package, work_package.project)  # 已关闭的工作包/项目不能再审批生效
 
             items = json.loads(req.split_items or "[]")
             if not items:
@@ -216,6 +218,7 @@ def review_split_request(request_id: int, body: SplitRequestReview, db: Session 
                     ).first()
                     if not item or str(item.work_package_id) != str(work_package.id):
                         raise HTTPException(status_code=400, detail="待编辑的工作项不存在或不属于该工作包")
+                    ensure_open(item)  # 已关闭的工作项不能再被审批修改
                 else:
                     # 新建的工作项默认归属工作包负责人，便于转办/后续负责人展示
                     item = models.WorkItem(work_package_id=work_package.id, owner_id=work_package.owner_id)
@@ -229,6 +232,7 @@ def review_split_request(request_id: int, body: SplitRequestReview, db: Session 
                 item.deadline = parse_deadline(it.get("deadline")) if it.get("deadline") else None
                 item.score = it.get("score") or 0.0
                 item.owner_id = it.get("owner_id") or work_package.owner_id
+                item.notes = it.get("notes") if it.get("notes") else "-"
             req.status = "APPROVED"
             req.review_comment = (body.comment or "").strip() or "审核通过"
 
@@ -259,6 +263,9 @@ def edit_split_request(request_id: int, body: SplitRequestEdit, db:Session = Dep
     if not editor:
         raise HTTPException(status_code=404, detail="操作人不存在")
     editor_role = str(editor.role).upper()
+
+    ensure_open(req.work_package,
+                req.work_package.project if req.work_package else None)  # 已关闭不能再改申请
 
     if not body.split_items or not any((it.name or "").strip() for it in body.split_items):
         raise HTTPException(status_code=400, detail="请至少保留一个有名的工作项")
@@ -309,3 +316,4 @@ def edit_split_request(request_id: int, body: SplitRequestEdit, db:Session = Dep
     db.refresh(req)
     return {"code": 200, "message": message,
             "data": {"id": req.id, "status": req.status}}
+

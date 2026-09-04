@@ -6,6 +6,18 @@ from datetime import datetime
 import models
 
 
+def ensure_open(*objs):
+    """校验给定的 项目/工作包/工作项 未被“关闭”；任一已关闭即抛 403。
+
+    供各写操作入口调用：对象关闭后不允许再编辑；
+    项目关闭会连带锁住其下工作包/工作项（调用时把整条链的对象都传入即可）。
+    """
+    from fastapi import HTTPException
+    for o in objs:
+        if o is not None and getattr(o, "isclosed", False):
+            raise HTTPException(status_code=403, detail="该对象已关闭，不能进行此操作")
+
+
 def parse_deadline(date_str):
     """把 '2026.7.29' / '2026-08-15' / '2026/8/1' 等字符串解析为 datetime；解析失败返回 None。"""
     if not date_str:
@@ -16,7 +28,7 @@ def parse_deadline(date_str):
         return None
     y, m, d = (int(x) for x in match.groups())
     try:
-        return datetime(y, m, d)
+        return datetime(y, m, d, 23, 59, 59)
     except ValueError:
         return None
 

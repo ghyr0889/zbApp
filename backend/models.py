@@ -31,6 +31,7 @@ class Project(Base):
     complete_status = Column(Boolean, default=False, nullable=True) # 完成状态
     category = Column(String(100), default=False,nullable=True)  # 项目类别
     tech_owner_id = Column(String(50),ForeignKey("users.id"),nullable=True) #机型主管/责任人
+    isclosed = Column(Boolean, default=False, nullable=True) # 是否关闭
 
     owner = relationship("User", foreign_keys=[owner_id])
     tech_owner = relationship("User", foreign_keys=[tech_owner_id])
@@ -52,11 +53,12 @@ class WorkPackage(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     code = Column(String(50), nullable=False)  # 工作包ID为字符串，由业务方指定，不可自增
+    name = Column(String(100),  nullable=True)
     owner_id = Column(String(50), ForeignKey("users.id"), nullable=True)  # 工作包负责人
     objective = Column(Text, nullable=True)  # 工作目标
     complete_status = Column(Boolean, default=False, nullable=True) # 完成状态
     tech_owner_id = Column(String(50),ForeignKey("users.id"),nullable=True) #技术负责人
-    notes = Column(Text, nullable=True) # 备注
+    isclosed = Column(Boolean, default=False, nullable=True) # 是否关闭
 
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     category_name = Column(String(100), ForeignKey("work_package_categories.name"), nullable=False)
@@ -85,6 +87,8 @@ class WorkItem(Base):
     score = Column(Float, default=0.00, nullable=False)  # 工作项分值
     complete_status = Column(Boolean, default=False, nullable=True) # 完成状态
     owner_id = Column(String(50), ForeignKey("users.id"), nullable=True) #工作项负责人
+    notes = Column(Text, nullable=True) # 备注
+    isclosed = Column(Boolean, default=False, nullable=True) # 是否关闭
 
     work_package_id = Column(Integer, ForeignKey("work_packages.id"), nullable=False)
     

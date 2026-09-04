@@ -7,6 +7,7 @@ import models
 from database import get_db
 from schemas import UserCreate, ProjectCreate, WorkPackageCreate, ScoreRuleUpdate, LevelDefsUpdate, UserUpdate
 from datetime import datetime
+from utils import ensure_open
 from routers.score_board import compute_calc_score, monthly_quality_score
 
 router = APIRouter(prefix="/api/v1/admin", tags=["Admin Management"])
@@ -58,12 +59,32 @@ def update_user(userId: str, data: UserUpdate, db:Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=400, detail="数据库中没有这个人")
 
+    old_grade = user.job_grade
     user.username = data.username or user.username
     user.role = data.role or user.role
     user.job_grade = data.job_grade or user.job_grade
+    grade_changed = (user.job_grade or "") != (old_grade or "")
+
+    # 职级变化 → 重算该人员作为“工作项负责人”的【当月】已填月度分值计算得分
+    # （难度/重要度系数按工作项负责人职级查；历史月份保持原快照不动）
+    if grade_changed:
+        this_month = datetime.now().strftime("%Y-%m")
+        rows = (db.query(models.WorkItemMonthlyScore)
+                .join(models.WorkItem, models.WorkItem.id == models.WorkItemMonthlyScore.work_item_id)
+                .filter(models.WorkItem.owner_id == user.id,
+                        models.WorkItemMonthlyScore.month == this_month)
+                .all())
+        for rec in rows:
+            item = rec.work_item
+            if not item:
+                continue
+            q = monthly_quality_score(db, rec.work_item_id, rec.month)
+            rec.calculate_score = compute_calc_score(rec.score or 0.0, item, db,
+                                                     user.job_grade or "", q)
+
     db.commit()
     return{"code":200,
-           "message":"人员信息已更新"
+           "message":"人员信息已更新" + ("，当月计算得分已按新职级重算" if grade_changed else "")
            }
 
 @router.delete("/users/{userId}")
@@ -115,6 +136,7 @@ def create_or_update_project(project_in: ProjectCreate, db: Session = Depends(ge
             ).first()
             if not project:
                 raise HTTPException(status_code=404, detail="项目不存在")
+            ensure_open(project)  # 已关闭的项目不能再编辑
             project.name = project_in.name
             project.code = project_in.code
             project.owner_id = project_in.owner_id or None
@@ -158,6 +180,8 @@ def delete_project(project_id: int, user_id: str, db: Session = Depends(get_db))
         raise HTTPException(status_code=405, detail="只有项目负责人和部门领导、科室主任、管理员可以删除项目")
     if project.complete_status:
         raise HTTPException(status_code=400, detail="项目已完成，不能删除")
+    if project.isclosed:
+        raise HTTPException(status_code=403, detail="项目已关闭，不能删除")
 
     db.delete(project)  
     db.commit()
@@ -195,6 +219,7 @@ def create_or_update_work_package(pkg_in: WorkPackageCreate, db: Session = Depen
         ).first()
     if not project:
         raise HTTPException(status_code=400, detail="所属项目不存在，请先选择正确的项目")
+    ensure_open(project)  # 已关闭的项目不能再新增/修改工作包
 
     try:
         if pkg_in.id:
@@ -203,6 +228,7 @@ def create_or_update_work_package(pkg_in: WorkPackageCreate, db: Session = Depen
             ).first()
             if not pkg:
                 raise HTTPException(status_code=404, detail="未找到要修改的工作包")
+            ensure_open(pkg)  # 已关闭的工作包不能再编辑
 
             pkg.project_id = project.id
             pkg.code = pkg_in.work_package_code
@@ -212,7 +238,7 @@ def create_or_update_work_package(pkg_in: WorkPackageCreate, db: Session = Depen
             new_tech_owner = pkg_in.tech_owner_id
             pkg.tech_owner_id = new_tech_owner or None
             pkg.objective = (pkg_in.objective or "").strip()
-            pkg.notes = (pkg_in.notes or "").strip()
+            pkg.name = (pkg_in.name or "-").strip()
             message = "工作包更新成功"
         else:
             pkg = models.WorkPackage(
@@ -222,7 +248,7 @@ def create_or_update_work_package(pkg_in: WorkPackageCreate, db: Session = Depen
                 owner_id=pkg_in.owner_id or None,
                 tech_owner_id=pkg_in.tech_owner_id or None,
                 objective=pkg_in.objective or "",
-                notes=pkg_in.notes or ""
+                name=pkg_in.name or "-"
             )
             db.add(pkg)
             message = "工作包创建成功"
@@ -255,6 +281,8 @@ def delete_work_package(work_package_id: int, user_id: str, db: Session = Depend
         raise HTTPException(status_code=405, detail="只有改工作包负责人和部门领导、科室主任、管理员可以删除项目")
     if work_package.complete_status:
         raise HTTPException(status_code=400, detail="工作包已完成，不能删除")
+    if work_package.isclosed or (work_package.project and work_package.project.isclosed):
+        raise HTTPException(status_code=403, detail="工作包或所属项目已关闭，不能删除")
 
     db.delete(work_package)
     db.commit()
@@ -314,8 +342,7 @@ def put_computed_score_dimensions(body: ScoreRuleUpdate, db: Session = Depends(g
         item = rec.work_item
         if not item:
             continue
-        wp = item.work_package
-        owner_job_grade = wp.owner.job_grade if (wp and wp.owner) else ""
+        owner_job_grade = item.owner.job_grade if (item and item.owner) else ""
         q = monthly_quality_score(db, rec.work_item_id, rec.month)
         rec.calculate_score = compute_calc_score(rec.score, item, db, owner_job_grade, q)
 

@@ -6,9 +6,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 import sys
+import logging, os
 
 from database import engine, Base, ensure_database_schema
 from routers import auth, work_logs, review, admin, tasks, score_board
+
+log_file = os.path.join(os.path.dirname(sys.executable), 'calculate_score.log')
+logging.basicConfig(level=logging.DEBUG,
+                    format='%(asctime)s - %(levelname)s - %(message)s',
+                    handlers=[logging.FileHandler(log_file), logging.StreamHandler()])
 
 # 建表 + 轻量迁移（为旧库补列，如 projects.level）
 Base.metadata.create_all(bind=engine)

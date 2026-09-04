@@ -15,7 +15,7 @@
               </template>
             </el-input>
             <!-- 只保留新增项目在顶部，新增工作包移至每一行内 -->
-            <el-button v-if="canManageProject" type="success" plain @click="handleAddProject">
+            <el-button v-if="activeTab === 'all' && canAddProject" type="success" plain @click="handleAddProject">
               <i class="el-icon-folder-add"></i> 新增项目
             </el-button>
             <el-button type="primary" plain size="default" @click="refreshAll">
@@ -26,9 +26,108 @@
       </template>
 
       <el-tabs v-model="activeTab">
+        <el-tab-pane label="我的工作" name="mine">
+          <!-- 外层主表格，展示工作包 -->
+          <el-table
+            v-if="activeTab === 'mine'"
+            :data="myWorkPackages"
+            border
+            style="width: 100%"
+            height="calc(100vh - 280px)"
+            empty-text="您暂未负责任何工作包"
+            row-key="id"
+            :row-class-name="tableRowClassName"
+            :header-cell-style="{ background: '#f8fafc', color: '#334155', fontWeight: 'bold' }"
+          >
+            <!-- 展开列：展示该工作包下的工作项（可编辑/删除/填分值） -->
+            <el-table-column type="expand">
+              <template #default="{ row: pkg }">
+                <div class="nested-table-container">
+                  <WorkItemTable :workPackageId="pkg.id" :refresh-key="refreshKey" @changed="refreshAll" />
+                </div>
+              </template>
+            </el-table-column>            
+            <el-table-column prop="id" label="工作包编号" min-width="140" align="center">
+              <template #default="{ row: pkg }">
+                <span class="code-text">{{ pkg.code }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="category_name" label="工作包类别" min-width="120" align="center">
+              <template #default="{ row: pkg }">
+                <span v-if="pkg.category_name" size="small" type="info">{{ pkg.category_name }}</span>
+                <span v-else class="tip-text">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="objective" label="目标" min-width="120" align="center">
+              <template #default="{ row: pkg }">
+                <span v-if="pkg.objective">{{ pkg.objective }}</span>
+                <span v-else class="tip-text">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="name" label="名称" min-width="150" align="center">
+              <template #default="{ row: pkg }">
+                <span v-if="pkg.name">{{ pkg.name }}</span>
+                <span v-else class="tip-text">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="project_code" label="所属项目编号" min-width="110" show-overflow-tooltip />
+            <el-table-column prop="package_owner_name" label="工作包负责人" min-width="110" align="center"/>
+              
+            <el-table-column prop="package_tech_owner_name" label="工作包技术负责人" min-width="130" align="center" >
+              <template #default="{ row: pkg }">
+                <span>{{ pkg.package_tech_owner_name || '-' }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="工作包进度" min-width="130" align="center" fixed="right">
+              <template #default="{ row }">
+                <div class="progress-wrapper">
+                  <span class="progress-text">{{ row.package_progress || 0 }}%</span>
+                  <el-progress 
+                    type="circle" 
+                    :percentage="row.package_progress || 0" 
+                    :width="20" 
+                    :stroke-width="4"
+                    :show-text="false"
+                  />
+                </div>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="状态" width="230" align="center" fixed="right">
+              <template #default="{ row: pkg }">
+                <el-button v-if="canConfirmPkg(pkg) && !pkg.closed_status && !pkg.project_closed" type="success" link size="small" :loading="confirming" @click="confirmPkg(pkg)">
+                  {{ pkg.complete_status ? '取消完成' : '确认完成' }}
+                </el-button>
+                <el-button v-if="canClosed && pkg.id" type="danger" link size="small" :loading="confirming" @click="confirmClosed(pkg)">
+                  {{ pkg.closed_status ? '取消关闭' : '确认关闭' }}
+                </el-button>
+                <el-tag v-if="pkg.closed_status || pkg.project_closed" size="small" type="danger" effect="plain">{{ pkg.project_closed ? '所属项目已关闭' : '已关闭' }}</el-tag>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="操作" min-width="100" align="center" fixed="right">
+              <template #default="{ row: pkg }">
+                <el-button v-if="isPkgOwner(pkg) && !pkg.closed_status && !pkg.project_closed" type="warning" link size="small" @click="handleTransferWorkPackage(pkg)">转办</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <div class="pagination-bar">
+            <el-pagination
+              background
+              layout="total, prev, pager, next"
+              :total="myTotal"
+              :current-page="myPage"
+              :page-size="myPageSize"
+              @current-change="fetchMyWorkPackages"
+            />
+          </div>
+        </el-tab-pane>
+
+      
         <el-tab-pane label="所有项目" name="all">
           <!-- 外层主表格：显示项目信息 -->
           <el-table
+            v-if="activeTab === 'all'"
             ref="projectTableRef"
             :data="tableData"
             border
@@ -70,9 +169,9 @@
 
             <el-table-column prop="category" label="项目类别" min-width="100" align="center">
               <template #default="{ row }">
-                <el-input v-if="row.isEdit" v-model="row.category" size="small" placeholder="如:研发" />
+                <el-input v-if="row.isEdit" v-model="row.category" size="small" placeholder="请输入项目类别" />
                 <template v-else>
-                  <el-tag v-if="row.category" type="info" effect="plain">{{ row.category }}</el-tag>
+                  <span v-if="row.category" class="project-code" type="info" effect="plain">{{ row.category }}</span>
                   <span v-else class="tip-text">-</span>
                 </template>
               </template>
@@ -123,25 +222,37 @@
               </template>
             </el-table-column>
 
-            <el-table-column label="进度" min-width="170" align="center">
+            <el-table-column label="进度" min-width="100" align="center" fixed="right">
               <template #default="{ row }">
-                <el-progress :percentage="row.progress || 0" :stroke-width="12" />
-              </template>
-            </el-table-column>
-
-            <el-table-column label="完成情况" min-width="120" align="center" fixed="right">
-              <template #default="{ row }">
-                <el-tag v-if="row.complete_status" type="success" size="small">已完成</el-tag>
-                <el-tag v-else type="info" effect="plain" size="small">进行中</el-tag>
-                <div style="margin-top: 4px">
-                  <el-button v-if="canManageProject(row)" type="success" link size="small" :loading="confirming" @click="confirmProject(row)">
-                    {{ row.complete_status ? '取消完成' : '确认完成' }}
-                  </el-button>
+                <div class="progress-wrapper">
+                  <span class="progress-text">{{ row.progress || 0 }}%</span>
+                  <el-progress 
+                    type="circle" 
+                    :percentage="row.progress || 0" 
+                    :width="20" 
+                    :stroke-width="4"
+                    :show-text="false"
+                  />
                 </div>
               </template>
             </el-table-column>
 
-            <el-table-column v-if="canManageProject" label="操作" min-width="120" align="center" fixed="right">
+             <el-table-column label="状态" min-width="100" align="center" fixed="right">
+              <template #default="{ row, $index }">
+                <el-tag v-if="row.complete_status" type="success" size="small">已完成</el-tag>
+                <el-tag v-if="row.closed_status" type="danger" effect="plain" size="small">已关闭</el-tag>
+                <div style="margin-top: 4px">
+                  <el-button v-if="canManageProject(row)" type="success" link size="small" :disabled="row.closed_status" :loading="confirming" @click="confirmProject(row)">
+                    {{ row.complete_status ? '取消完成' : '确认完成' }}
+                  </el-button>
+                </div>
+                <el-button v-if="canClosed" type="danger" link size="small" :loading="confirming" @click="confirmClosedProject(row)">
+                  {{ row.closed_status ? '取消关闭' : '确认关闭' }}
+                </el-button>
+              </template>
+            </el-table-column>
+
+            <el-table-column v-if="canManageProject" label="操作" min-width="200" align="center" fixed="right">
               <template #default="{ row, $index }">
                 <template v-if="canManageProject(row)">
                   <template v-if="row.isEdit">
@@ -149,8 +260,8 @@
                     <el-button type="info" link size="small" @click="cancelProjectEdit(row, $index)">取消</el-button>
                   </template>
                   <template v-else>
-                    <el-button type="primary" link size="small" @click="removeProject(row)">删除</el-button>
-                    <el-button type="primary" link size="small" @click="row.isEdit = true">编辑</el-button>
+                    <el-button type="primary" link size="small" :disabled="row.closed_status" @click="removeProject(row)">删除</el-button>
+                    <el-button type="primary" link size="small" :disabled="row.closed_status" @click="row.isEdit = true">编辑</el-button>
                   </template>
                 </template>
               </template>
@@ -166,82 +277,6 @@
               :page-sizes="[10, 20, 50]"
               @current-change="fetchProjects"
               @size-change="(s) => { pagedPageSize = s; fetchProjects(1) }"
-            />
-          </div>
-        </el-tab-pane>
-
-        <el-tab-pane label="我的工作" name="mine">
-          <!-- 外层主表格，展示工作包 -->
-          <el-table
-            :data="myWorkPackages"
-            border
-            style="width: 100%"
-            height="calc(100vh - 280px)"
-            empty-text="您暂未负责任何工作包"
-            row-key="id"
-            :row-class-name="tableRowClassName"
-            :header-cell-style="{ background: '#f8fafc', color: '#334155', fontWeight: 'bold' }"
-          >
-            <!-- 展开列：展示该工作包下的工作项（可编辑/删除/填分值） -->
-            <el-table-column type="expand">
-              <template #default="{ row: pkg }">
-                <div class="nested-table-container">
-                  <WorkItemTable :workPackageId="pkg.id" :refresh-key="refreshKey" @changed="refreshAll" />
-                </div>
-              </template>
-            </el-table-column>            
-            <el-table-column prop="id" label="工作包编号" width="140" align="center">
-              <template #default="{ row: pkg }">
-                <span class="code-text">{{ pkg.code }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column prop="category_name" label="工作包类别" width="120" align="center">
-              <template #default="{ row: pkg }">
-                <el-tag v-if="pkg.category_name" size="small" type="info">{{ pkg.category_name }}</el-tag>
-                <span v-else class="tip-text">-</span>
-              </template>
-            </el-table-column>
-                        <el-table-column prop="objective" label="目标" width="120" align="center">
-              <template #default="{ row: pkg }">
-                <el-tag v-if="pkg.objective" size="small" type="info">{{ pkg.objective }}</el-tag>
-                <span v-else class="tip-text">-</span>
-              </template>
-            </el-table-column>
-            <el-table-column prop="notes" label="备注" width="150" align="center">
-              <template #default="{ row: pkg }">
-                <el-tag v-if="pkg.notes" size="small" type="info">{{ pkg.notes }}</el-tag>
-                <span v-else class="tip-text">-</span>
-              </template>
-            </el-table-column>
-            <el-table-column prop="project_code" label="所属项目编号" min-width="90" show-overflow-tooltip />
-            <el-table-column prop="package_owner_name" label="工作包负责人" width="110" align="center">
-              <template #default="{ row: pkg }">
-                <span class="employee-text">{{ pkg.package_owner_name || '-' }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column prop="package_tech_owner_name" label="工作包技术负责人" width="120" fixed="right"/>
-            <el-table-column label="工作包进度" width="200" fixed="right">
-              <template #default="{ row: pkg }">
-                <el-progress :percentage="pkg.package_progress || 0" :stroke-width="10" />
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="180" align="center" fixed="right">
-              <template #default="{ row: pkg }">
-                <el-button v-if="isPkgOwner(pkg)" type="warning" link size="small" @click="handleTransferWorkPackage(pkg)">转办</el-button>
-                <el-button v-if="canConfirmPkg(pkg)" type="success" link size="small" :loading="confirming" @click="confirmPkg(pkg)">
-                  {{ pkg.complete_status ? '取消完成' : '确认完成' }}
-                </el-button>
-              </template>
-            </el-table-column>               
-          </el-table>
-          <div class="pagination-bar">
-            <el-pagination
-              background
-              layout="total, prev, pager, next"
-              :total="myTotal"
-              :current-page="myPage"
-              :page-size="myPageSize"
-              @current-change="fetchMyWorkPackages"
             />
           </div>
         </el-tab-pane>
@@ -280,7 +315,8 @@ import {
   getPagedProjectsApi,
   getMyWorkPackagesPagedApi,
   initiateTransferApi,
-  confirmCompletionApi
+  confirmCompletionApi,
+  confirmClosedApi
 } from '../api'
 import { useUserStore } from '../stores/user'
 import { useRouter } from 'vue-router'
@@ -292,9 +328,12 @@ const isAdmin = computed(() => userStore.isAdmin)
 const isLeader = computed(() => userStore.isLEADER)
 const isDepartment = computed(() => userStore.isDEPARTMENT)
 const currentUserId = computed(() => String(userStore.userInfo?.id || ''))
-const activeTab = ref('all')   // 默认显示“所有项目”
-// 已完成行灰显
-const tableRowClassName = ({ row }) => (row.complete_status ? 'completed-row' : '')
+const activeTab = ref('mine')   // 默认显示“所有项目”
+// 已完成/已关闭行灰显
+const tableRowClassName = ({ row }) => (row.complete_status || row.closed_status ? 'completed-row' : '')
+
+//是否有权新增项目
+const canAddProject = computed(() => isAdmin.value || isLeader.value || isDepartment.value)
 
 // 是否有权管理某个项目：系统管理员 / 领导 / 该项目负责人
 const canManageProject = (projectRow) => {
@@ -332,7 +371,7 @@ const transferring = ref(false)          // 提交中 loading
 
 // 获取配置项
 const fetchAdminOptions = async () => {
-  if (!isAdmin.value && !isLeader.value) return
+  if (!isAdmin.value && !isLeader.value && !isDepartment) return
   try {
     const [projectsRes, usersRes] = await Promise.all([
       getAllProjectsApi(),
@@ -369,6 +408,7 @@ const fetchProjects = async (page = 1) => {
         tech_owner_name: p.tech_owner_name === '未指定机型主管' ? '' : p.tech_owner_name,
         progress: p.project_progress || 0,
         complete_status: p.complete_status,
+        closed_status: p.closed_status || false,
         work_package_count: p.work_package_count || 0,
         work_packages: [],
         isEdit: false,
@@ -460,6 +500,47 @@ const doConfirm = async (target_type, target_id, confirmed) => {
 }
 const confirmProject = (row) => doConfirm('project', row.project_id, !row.complete_status)
 const confirmPkg = (pkg) => doConfirm('work_package', pkg.id, !pkg.complete_status)
+
+// —— 确认/取消关闭（工作包/项目，只有领导/管理员，后端会校验）——
+const canClosed = computed(() => isAdmin.value || isLeader.value)
+const confirmClosed = async (pkg) => {
+  confirming.value = true
+  try {
+    const res = await confirmClosedApi({
+      target_type: 'work_package',
+      target_id: pkg.id,
+      user_id: currentUserId.value,
+      confirmed: !pkg.closed_status
+    })
+    if (res.data?.code === 200) {
+      ElMessage.success(pkg.closed_status ? '已取消关闭' : '已确认关闭')
+      refreshAll()
+    }
+  } catch (err) {
+    ElMessage.error(err.response?.data?.detail || '操作失败')
+  } finally {
+    confirming.value = false
+  }
+}
+const confirmClosedProject = async (row) => {
+  confirming.value = true
+  try {
+    const res = await confirmClosedApi({
+      target_type: 'project',
+      target_id: row.project_id,
+      user_id: currentUserId.value,
+      confirmed: !row.closed_status
+    })
+    if (res.data?.code === 200) {
+      ElMessage.success(row.closed_status ? '已取消关闭' : '已确认关闭')
+      refreshAll()
+    }
+  } catch (err) {
+    ElMessage.error(err.response?.data?.detail || '操作失败')
+  } finally {
+    confirming.value = false
+  }
+}
 
 /* =============== 行内编辑相关方法 =============== */
 //删除项目
@@ -612,7 +693,7 @@ onMounted(async () => {
 }
 
 /* 表格固定高度内部滚动，不受全局 flex:1 拉伸影响 */
-:deep(.el-table) { flex: none !important; }
+:deep(.el-table) {flex: none !important; }
 
 .card-header {
   display: flex;
@@ -650,14 +731,7 @@ onMounted(async () => {
   color: #334155;
   font-size: 14px;
 }
-.code-text {
-  font-family: monospace;
-  font-weight: bold;
-  color: #64748b;
-  background: #f1f5f9;
-  padding: 2px 6px;
-  border-radius: 4px;
-}
+
 .employee-text {
   color: #0f766e;
   font-weight: 500;
@@ -744,5 +818,19 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* 进度圆环样式 */
+.progress-wrapper {
+  display:flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px; /* 圆环和文字之间的间距 */
+}
+
+.progress-text {
+  font-size: 13px;
+  color: #606266;
+  font-weight: 500;
 }
 </style>

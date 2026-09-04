@@ -63,7 +63,7 @@
                   :data="row.split_items" 
                   border 
                   size="small" 
-                  style="width: 100%; margin-bottom: 20px;""
+                  style="width: 100%; margin-bottom: 20px;"
                 >
                 <el-table-column prop="name" label="工作项名称" min-width="150">
                   <template #default="{ row: itemRow }">
@@ -79,7 +79,7 @@
                   </template>
                 </el-table-column>
 
-                <el-table-column prop="difficulty" label="难度" width="90" align="center">
+                <el-table-column prop="difficulty" label="难度" min-width="90" align="center">
                   <template #default="{ row: itemRow }">
                     <el-select v-if="canEditRequest(row) && row.isEditing" v-model="itemRow.difficulty" size="small">
                       <el-option v-for="o in levelDefs.difficulty" :key="o" :label="o" :value="o" />
@@ -88,7 +88,7 @@
                   </template>
                 </el-table-column>
 
-                <el-table-column prop="importance" label="重要度" width="90" align="center">
+                <el-table-column prop="importance" label="重要度" min-width="90" align="center">
                   <template #default="{ row: itemRow }">
                     <el-select v-if="canEditRequest(row) && row.isEditing" v-model="itemRow.importance" size="small">
                       <el-option v-for="o in levelDefs.importance" :key="o" :label="o" :value="o" />
@@ -97,7 +97,7 @@
                   </template>
                 </el-table-column>
 
-                <el-table-column prop="innovation" label="创新度" width="90" align="center">
+                <el-table-column prop="innovation" label="创新度" min-width="90" align="center">
                   <template #default="{ row: itemRow }">
                     <el-select v-if="canEditRequest(row) && row.isEditing" v-model="itemRow.innovation" size="small">
                       <el-option v-for="o in levelDefs.innovation" :key="o" :label="o" :value="o" />
@@ -106,7 +106,7 @@
                   </template>
                 </el-table-column>
 
-                <el-table-column label="负责人" width="120" align="center">
+                <el-table-column label="负责人" min-width="120" align="center">
                   <template #default="{ row: itemRow }">
                     <el-select v-if="canEditRequest(row) && row.isEditing" v-model="itemRow.owner_id" filterable placeholder="选择负责人" size="small" style="width: 100%">
                       <el-option v-for="u in userOptions" :key="u.id" :label="`${u.username}（${u.id}）`" :value="u.id" />
@@ -115,7 +115,7 @@
                   </template>
                 </el-table-column>
 
-                <el-table-column prop="deadline" label="截止时间" width="130" align="center">
+                <el-table-column prop="deadline" label="截止时间" min-width="130" align="center">
                   <template #default="{ row: itemRow }">
                     <el-date-picker
                       v-if="canEditRequest(row) && row.isEditing"
@@ -131,12 +131,20 @@
                   </template>
                 </el-table-column>
 
-                <el-table-column prop="score" label="基础总分值" width="90" align="center">
+                <el-table-column prop="score" label="基础总分值" min-width="90" align="center">
                   <template #default="{ row: itemRow }">
                     <el-input-number v-if="canEditRequest(row) && row.isEditing" v-model="itemRow.score" :min="0" :step="0.5" size="small" style="width: 100%" controls-position="right" />
                     <span v-else class="score-text">{{ itemRow.score }}</span>
                   </template>
                 </el-table-column>
+
+                <el-table-column prop="notes" label="备注" min-width="150">
+                  <template #default="{ row: itemRow }">
+                    <el-input v-if="canEditRequest(row) && row.isEditing" v-model="itemRow.notes" size="small" />
+                    <span v-else>{{ itemRow.notes || '暂无备注' }}</span>
+                  </template>
+                </el-table-column>
+
                 </el-table>
                 
                 <!-- 最下面一行：高亮修改说明 -->
@@ -156,27 +164,37 @@
           </el-table-column>
 
           <!-- 2. 外层表格列 -->
-          <el-table-column prop="project_name" label="项目名称" width="160" show-overflow-tooltip />
-          <el-table-column label="工作包编号" width="100">
+          <el-table-column prop="project_name" label="项目名称" min-width="160" show-overflow-tooltip />
+          <el-table-column label="工作包编号" min-width="100">
             <template #default="{ row }">
               <span>{{ row.work_package_code }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="project_owner_name" label="项目负责人" width="100" />
-          <el-table-column prop="applicant_name" label="申请人" width="100" />        
-          <el-table-column prop="created_at" label="提交时间" width="160" align="center">
+          <el-table-column label="工作包名称" min-width="100">
+            <template #default="{ row }">
+              <span>{{ row.work_package_name }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="工作包目标" min-width="100">
+            <template #default="{ row }">
+              <span>{{ row.work_package_objective }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="project_owner_name" label="项目负责人" min-width="100" />
+          <el-table-column prop="applicant_name" label="申请人" min-width="100" />        
+          <el-table-column prop="created_at" label="提交时间" min-width="160" align="center">
             <template #default="{ row }">
               <span class="date-text">{{ row.created_at }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="状态" width="110" align="center">
+          <el-table-column label="状态" min-width="110" align="center" fixed="right">
             <template #default="{ row }">
               <el-tag :type="statusTagType(row.status)" effect="light" round>
                 {{ statusLabel(row.status) }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="操作" min-width="300" align="center" fixed="right">
+          <el-table-column label="操作" min-width="280" align="center" fixed="right">
             <template #default="{ row }">
               <!-- 员工：被驳回的申请可以修改并重新提交 -->
               <template v-if="isEmployee && row.status === 'REJECTED' && isApplicant(row)">
@@ -214,7 +232,13 @@
             <!-- 收到的转办申请 -->
             <div class="transfer-section">
               <div class="section-title">收到给我的转办申请</div>
-              <el-table :data="incomingTransfers" v-loading="loadingIncoming" border style="width: 100%" empty-text="暂无待处理的转办申请" :header-cell-style="{ background: '#f8fafc', color: '#1e293b', fontWeight: '600' }">
+              <el-table :data="incomingTransfers" 
+              v-loading="loadingIncoming" 
+              border 
+              style="width: 100%" 
+              empty-text="暂无待处理的转办申请" 
+              :header-cell-style="{ background: '#f8fafc', color: '#1e293b', fontWeight: '600' }"
+              >
                 <el-table-column label="类型" width="90" align="center">
                   <template #default="{ row }">
                     <el-tag size="small" :type="row.transfer_type === 'work_package' ? 'warning' : 'primary'" effect="plain">{{ transferTypeLabel(row.transfer_type) }}</el-tag>
@@ -378,7 +402,6 @@ const handleSaveEdit = async (row) => {
     if (!it.importance) return ElMessage.warning('请选择重要度')
     if (!it.innovation) return ElMessage.warning('请选择创新度')
     if (!it.deadline) return ElMessage.warning('请选择截止时间')
-    if (!it.score || Number(it.score) <= 0) return ElMessage.warning('请填写基础总分值（需大于 0）')
   }
   if (!row.split_items || !row.split_items.some(it => (it.name || '').trim())) {
     return ElMessage.warning('请至少保留一个有名的工作项')

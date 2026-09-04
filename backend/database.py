@@ -87,9 +87,12 @@ def ensure_database_schema():
         # 项目级别列：列名必须与 models.Project.level 一致
         add_col("projects", "level", "VARCHAR(10) DEFAULT 'C'")
 
+        # ---- 关闭标记列（项目 / 工作包 / 工作项）----
+        add_col("projects", "isclosed", "BOOLEAN DEFAULT 0")
+        add_col("work_packages", "isclosed", "BOOLEAN DEFAULT 0")
+        add_col("work_items", "isclosed", "BOOLEAN DEFAULT 0")
+
         # ---- work_items 补全质量分 / 计算得分 / 完成时间 ----
-        add_col("work_items", "quality_score", "FLOAT DEFAULT 0.0")
-        add_col("work_items", "calculate_score", "FLOAT DEFAULT 0.0")
         add_col("work_items", "completed_at", "DATETIME")
 
         # ---- work_item_monthly_scores 补全计算得分 / 质量分 ----

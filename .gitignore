@@ -2,5 +2,7 @@ node_models/
 __pycache__/
 *.pyc
 workstat-backend/
-workstat-backend.rar
-*.env
+*.rar
+.env
+部署文件/
+*.sql

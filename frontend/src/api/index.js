@@ -38,12 +38,16 @@ export const adminLoginApi = (data) => api.post('/auth/admin-login', data)
 
 
 // 工作项管理（工作包 → 工作项）
-export const getWorkItemsApi = (workPackageId) => api.get(`/work-logs/work-packages/${workPackageId}/work-items`)
+export const getWorkItemsApi = (workPackageId, params) =>
+  api.get(`/work-logs/work-packages/${workPackageId}/work-items`, { params })
 export const deleteWorkPackageApi = (workPackageId, userId) => api.delete(`/admin/work-packages/${workPackageId}`,{params: { user_id: userId}})
 export const deleteWorkItemApi = (workItemId) => api.delete(`/work-logs/work-items/${workItemId}`)
 
 // 确认/取消完成（负责人手动标记）
 export const confirmCompletionApi = (data) => api.put('/work-logs/confirm-completion', data)
+
+// 确认/取消关闭（负责人手动标记）
+export const confirmClosedApi = (data) => api.put('/work-logs/confirm-closed', data)
 
 // 项目总览分页/筛选（大数据量）
 export const getPagedProjectsApi = (params) => api.get('/work-logs/projects', { params })

@@ -8,7 +8,7 @@
             <span class="page-title">项目详情</span>
           </div>
           <div class="header-actions">
-            <el-button v-if="canManage" type="success" plain @click="handleAddWorkPackage">新增工作包</el-button>
+            <el-button v-if="canManage" type="success" plain :disabled="projectInfo?.closed_status" @click="handleAddWorkPackage">新增工作包</el-button>
             <el-button type="primary" @click="refreshAll"><i class="el-icon-refresh"></i> 刷新</el-button>
           </div>
         </div>
@@ -35,20 +35,21 @@
           <el-tag v-if="projectInfo.complete_status" type="success">已完成</el-tag>
           <el-tag v-else type="info" effect="plain">进行中</el-tag>
         </el-descriptions-item>
+        <el-descriptions-item label="关闭状态">
+          <el-tag v-if="projectInfo.closed_status" type="danger">已关闭</el-tag>
+          <el-tag v-else type="info" effect="plain">开启</el-tag>
+        </el-descriptions-item>
       </el-descriptions>
 
       <!-- 工作包表格 -->
       <el-table
         :data="workPackages"
         v-loading="loading"
-        border
-        stripe
         row-key="id"
         style="width: 100%"
         height="calc(100vh - 360px)"
         empty-text="该项目下暂无工作包"
         :row-class-name="rowClassName"
-        :header-cell-style="{ background: '#f8fafc', color: '#334155', fontWeight: 'bold' }"
       >
         <el-table-column type="expand">
           <template #default="{ row: pkg }">
@@ -70,7 +71,16 @@
             <el-select v-if="pkg.isEdit" v-model="pkg.category_name" size="small">
               <el-option v-for="cat in categoryOptions" :key="cat" :label="cat" :value="cat" />
             </el-select>
-            <el-tag v-else size="small" type="info">{{ pkg.category_name }}</el-tag>
+            <span v-else size="small" type="info">{{ pkg.category_name }}</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="name" label="名称" min-width="160">
+          <template #default="{ row: pkg }">
+            <el-input v-if="pkg.isEdit" type="textarea" autosize v-model="pkg.name" size="small" placeholder="填写名称" />
+            <span v-else-if="!pkg.name" class="muted-text">暂无设定</span>
+            <span v-else>{{ pkg.name }}</span>
+            <el-tag v-if="pkg.closed_status || pkg.project_closed" size="small" type="danger" effect="plain" style="margin-left: 6px">已关闭</el-tag>
           </template>
         </el-table-column>
 
@@ -79,14 +89,6 @@
             <el-input v-if="pkg.isEdit" type="textarea" autosize v-model="pkg.objective" size="small" placeholder="设定工作目标" />
             <span v-else-if="!pkg.objective" class="muted-text">暂无设定</span>
             <span v-else>{{ pkg.objective }}</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="notes" label="备注" min-width="160">
-          <template #default="{ row: pkg }">
-            <el-input v-if="pkg.isEdit" type="textarea" autosize v-model="pkg.notes" size="small" placeholder="填写备注" />
-            <span v-else-if="!pkg.notes" class="muted-text">暂无设定</span>
-            <span v-else>{{ pkg.notes }}</span>
           </template>
         </el-table-column>
         
@@ -115,8 +117,30 @@
         </el-table-column>
 
         <el-table-column label="进度" width="150" align="center">
-          <template #default="{ row: pkg }">
-            <el-progress :percentage="pkg.package_progress || 0" :stroke-width="10" />
+          <template #default="{ row }">
+          <div class="progress-wrapper">
+            <span class="progress-text">{{ row.progress || 0 }}%</span>
+            <el-progress 
+              type="circle" 
+              :percentage="row.progress || 0" 
+              :width="20" 
+              :stroke-width="4"
+              :show-text="false"
+            />
+          </div>
+        </template>
+        </el-table-column>
+
+        <el-table-column label="状态" width="180" align="center" fixed="right">
+          <template #default="{ row: pkg, $index }">
+            <el-tag v-if="pkg.closed_status" size="small" type="danger" effect="plain">已关闭</el-tag>
+            <el-tag v-else-if="pkg.complete_status" size="small" type="success" effect="plain">已完成</el-tag>
+            <el-button v-if="canConfirmPkg(pkg) && !pkg.closed_status && !projectInfo?.closed_status" type="success" link size="small" :loading="confirming" @click="confirmPkg(pkg)">
+              {{ pkg.complete_status ? '取消完成' : '确认完成' }}
+            </el-button>
+            <el-button v-if="canConfirmClosed(pkg)" type="danger" link size="small" :loading="confirming" @click="confirmClosed(pkg)">
+              {{ pkg.closed_status ? '取消关闭' : '确认关闭' }}
+            </el-button>
           </template>
         </el-table-column>
 
@@ -127,12 +151,8 @@
               <el-button type="info" link size="small" @click="cancelWpEdit(pkg, $index)">取消</el-button>
             </template>
             <template v-else>
-              <el-button type="primary" link size="small" @click="removeWorkPackage(pkg)">删除</el-button>
-              <el-button type="primary" link size="small" @click="pkg.isEdit = true">编辑</el-button>
-              <!-- <el-button type="warning" link size="small" @click="handleTransferWorkPackage(pkg)">转办</el-button> -->
-              <el-button v-if="canConfirmPkg(pkg)" type="success" link size="small" :loading="confirming" @click="confirmPkg(pkg)">
-                {{ pkg.complete_status ? '取消完成' : '确认完成' }}
-              </el-button>
+              <el-button v-if="!pkg.closed_status && !projectInfo?.closed_status" type="danger" link size="small" @click="removeWorkPackage(pkg)">删除</el-button>
+              <el-button v-if="!pkg.closed_status && !projectInfo?.closed_status" type="primary" link size="small" @click="pkg.isEdit = true">编辑</el-button>
             </template>
           </template>
         </el-table-column>
@@ -165,8 +185,8 @@ import {
   getAllUsersApi,
   createWorkPackageApi,
   deleteWorkPackageApi,
-  initiateTransferApi,
   confirmCompletionApi,
+  confirmClosedApi,
   getWorkCategoriesApi
 } from '../api'
 import WorkItemTable from '../components/WorkItemTable.vue'
@@ -199,8 +219,8 @@ const canManage = computed(() => {
   return String(projectInfo.value?.owner_id || '') === currentUserId.value
 })
 
-// 已完成行灰显
-const rowClassName = ({ row }) => (row.complete_status ? 'completed-row' : '')
+// 已完成/已关闭行灰显
+const rowClassName = ({ row }) => (row.complete_status || row.closed_status ? 'completed-row' : '')
 
 // —— 确认完成（工作包/项目，负责人或领导/管理员）——
 const confirming = ref(false)
@@ -231,6 +251,29 @@ const doConfirm = async (target_type, target_id, confirmed) => {
 const confirmPkg = (pkg) => doConfirm('work_package', pkg.id, !pkg.complete_status)
 const confirmProject = () => doConfirm('project', projectId, !projectInfo.value?.complete_status)
 
+// —— 确认/取消关闭（只有领导/管理员，后端会校验）——
+const canConfirmClosed = () => isAdmin.value || isLeader.value
+const confirmClosed = async (pkg) => {
+  confirming.value = true
+  try {
+    const res = await confirmClosedApi({
+      target_type: 'work_package',
+      target_id: pkg.id,
+      user_id: currentUserId.value,
+      confirmed: !pkg.closed_status
+    })
+    if (res.data?.code === 200) {
+      ElMessage.success(pkg.closed_status ? '已取消关闭' : '已确认关闭')
+      await fetchWorkPackages(page.value)
+      await fetchProjectInfo()
+    }
+  } catch (err) {
+    ElMessage.error(err.response?.data?.detail || '操作失败')
+  } finally {
+    confirming.value = false
+  }
+}
+
 const goBack = () => router.push('/project-overview')
 
 const fetchProjectInfo = async () => {
@@ -256,6 +299,8 @@ const fetchWorkPackages = async (p = 1) => {
         code: wp.code,
         owner_id: wp.package_owner_id || '',
         tech_owner_id: wp.package_tech_owner_id || '',
+        name: wp.name || '-',
+        progress: wp.package_progress || 0,
         isEdit: false,
         isNew: false,
         _original: null
@@ -302,6 +347,7 @@ const removeWorkPackage = async (row) => {
 
 // 新增工作包（表格顶部插入一条编辑行）
 const handleAddWorkPackage = () => {
+  if (projectInfo.value?.closed_status) return ElMessage.warning('项目已关闭，不能新增工作包')
   workPackages.value.unshift({
     work_package_code:"",
     project_id: projectId,
@@ -309,7 +355,7 @@ const handleAddWorkPackage = () => {
     objective: '',
     owner_id: '',
     tech_owner_id:'',
-    notes:'',
+    name:'',
     isEdit: true,
     isNew: true,
     _original: null
@@ -332,7 +378,7 @@ const handleSaveWorkPackage = async (pkg) => {
       objective: pkg.objective ? pkg.objective.trim() : '',
       owner_id: pkg.owner_id || null,
       tech_owner_id: pkg.tech_owner_id || null,
-      notes: pkg.notes ? pkg.notes.trim() : ''
+      name: pkg.name ? pkg.name.trim() : ''
     })
     if (res.data?.code === 200) {
       ElMessage.success('工作包保存成功')
@@ -373,7 +419,7 @@ onMounted(async () => {
   } catch {
     /* 类别加载失败不影响主流程 */
   }
-  if (isAdmin.value || isLeader.value) {
+  if (isAdmin.value || isLeader.value || isDepartment.value) {
     try {
       const res = await getAllUsersApi()
       userOptions.value = res.data?.data || []
@@ -477,5 +523,80 @@ onMounted(async () => {
 
 :deep(.completed-row td) {
   background: #f3f4f6 !important;
+}
+
+/* 进度圆环样式 */
+.progress-wrapper {
+  display:flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px; /* 圆环和文字之间的间距 */
+}
+
+.progress-text {
+  font-size: 13px;
+  color: #606266;
+  font-weight: 500;
+}
+
+/* ==========================================
+   现代简约商务风 表格统一样式改造
+========================================== */
+
+/* 1. 表格全局变量替换：去线化、低饱和度 */
+:deep(.el-table) {
+  --el-table-border-color: #f1f5f9; /* 极浅的分割线 */
+  --el-table-header-bg-color: #ffffff; /* 表头纯白，靠底边框区分 */
+  --el-table-header-text-color: #64748b; /* 表头文字使用 slate-500 灰色，不抢戏 */
+  --el-table-row-hover-bg-color: #f8fafc; /* 极其微妙的悬浮高亮 */
+  --el-table-text-color: #334155; /* 正文深灰，比纯黑更柔和 */
+  background-color: transparent;
+}
+
+/* 2. 表头优化：去掉竖线，加粗底线，增加呼吸感 */
+:deep(.el-table__header th) {
+  font-weight: 600;
+  font-size: 13px;
+  padding: 12px 0; /* 增加表头上下留白 */
+  border-bottom: 2px solid #e2e8f0 !important; /* 加重表头底线，稳住视觉重心 */
+}
+
+/* 3. 单元格优化：增加行高，让数据不拥挤 */
+:deep(.el-table__row td.el-table__cell) {
+  padding: 14px 0; /* 增加正文单元格上下留白 */
+  font-size: 14px;
+}
+
+/* 4. 隐藏固定列的阴影线（让左右固定列更无缝衔接） */
+:deep(.el-table__fixed-right::before),
+:deep(.el-table__fixed::before) {
+  display: none;
+}
+
+/* 5. 展开行（子表格）容器美化 */
+.nested-table-container {
+  padding: 16px 24px;
+  background-color: #f8fafc; /* 浅灰底色，与主表格纯白形成层级对比 */
+  border-radius: 8px;
+  margin: 8px 16px 16px 16px;
+  border: 1px solid #e2e8f0; /* 给子表格外层加一个极细的边框包裹 */
+  box-shadow: none;
+}
+
+/* 6. 卡片整体阴影弱化（更高级的悬浮感） */
+.box-card {
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.05), 0 1px 2px -1px rgba(15, 23, 42, 0.05) !important;
+}
+
+/* 7. 优化“已完成”行的视觉呈现（更温和的灰显） */
+:deep(.completed-row td) {
+  background-color: #f9fafb !important;
+  color: #94a3b8;
+}
+:deep(.completed-row .code-text) {
+  background-color: #f1f5f9;
+  color: #94a3b8;
+  opacity: 0.7;
 }
 </style>

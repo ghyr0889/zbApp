@@ -22,6 +22,13 @@ class ConfirmCompletionIn(BaseModel):
     confirmed: bool = Field(True, description="True=确认完成，False=取消完成")
 
 
+class ConfirmClosed(BaseModel):
+    target_type: str = Field(..., description="目标类型：work_item / work_package / project")
+    target_id: int = Field(..., description="目标 ID")
+    user_id: str = Field(..., description="操作人 ID")
+    confirmed: bool = Field(True, description="True=确认关闭，False=取消关闭")
+
+
 class UserCreate(BaseModel):
     id: str = Field(..., description="工号")
     username: str = Field(..., description="姓名")
@@ -56,20 +63,21 @@ class WorkPackageCreate(BaseModel):
     owner_id: Optional[str] = Field(None, description="工作包负责人 ID")
     objective: Optional[str] = Field(None, description="工作目标")
     tech_owner_id: Optional[str] = Field(None, description="工作包技术负责人 ID")
-    notes:Optional[str] = Field(None, description="备注")
+    name: Optional[str] = Field(None, description="工作包名称")
 
 
-class WorkItemCreate(BaseModel):
-    """创建/更新工作项。"""
-    work_item_id: Optional[int] = Field(None, description="工作项 ID，新增时为空，修改时传入")
-    work_package_id: int = Field(..., description="所属工作包 ID")
-    name: str = Field(..., description="工作项名称")
-    standard: Optional[str] = Field(None, description="工作项完成标准")
-    difficulty: Optional[str] = Field(None, description="工作项难度")
-    importance: Optional[str] = Field(None, description="工作项重要性")
-    innovation: Optional[str] = Field(None, description="工作项创新性")
-    deadline: Optional[str] = Field(..., description="完成节点要求（YYYY-MM-DD）")
-    score: Optional[float] = Field(0.0, description="分值（可选，若不传则按默认分值计算）")
+# class WorkItemCreate(BaseModel):
+#     """创建/更新工作项。"""
+#     work_item_id: Optional[int] = Field(None, description="工作项 ID，新增时为空，修改时传入")
+#     work_package_id: int = Field(..., description="所属工作包 ID")
+#     name: str = Field(..., description="工作项名称")
+#     standard: Optional[str] = Field(None, description="工作项完成标准")
+#     difficulty: Optional[str] = Field(None, description="工作项难度")
+#     importance: Optional[str] = Field(None, description="工作项重要性")
+#     innovation: Optional[str] = Field(None, description="工作项创新性")
+#     deadline: Optional[str] = Field(..., description="完成节点要求（YYYY-MM-DD）")
+#     score: Optional[float] = Field(0.0, description="分值（可选，若不传则按默认分值计算）")
+#     notes:Optional[str] = Field(None, description="备注")
 
 
 class MonthScoreIn(BaseModel):
@@ -111,8 +119,9 @@ class SplitItemIn(BaseModel):
     importance: Optional[str] = Field(None, description="重要性")
     innovation: Optional[str] = Field(None, description="创新性")
     deadline: Optional[str] = Field(..., description="截止节点（YYYY-MM-DD）")
-    score: Optional[float] = Field(None, description="分值")
+    score: Optional[float] = Field(0.0, description="分值")
     owner_id: Optional[str] = Field(None, description="工作项负责人 ID")
+    notes:Optional[str] = Field(None, description="备注")
 
 class SplitRequestCreate(BaseModel):
     """提交工作包拆分申请。"""

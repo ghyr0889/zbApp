@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 import models
 from database import get_db
 from schemas import MonthScoreIn, MonthlyExtraScoreIn
+from utils import ensure_open
+import logging
 
 router = APIRouter(prefix="/api/v1/score-board", tags=["Score Board"])
 
@@ -42,6 +44,36 @@ def month_in_selection(month_str, period, year, month = None, quarter = None):
     if period == "year":
         return y == year
     return True  # all
+
+
+# ---------------------------------------------------------------- 可填写月份窗口（每月前2天可补填上月）
+def _prev_month_str(now):
+    """上个月 YYYY-MM（跨年处理）。"""
+    y, m = now.year, now.month
+    if m == 1:
+        return f"{y - 1:04d}-12"
+    return f"{y:04d}-{m - 1:02d}"
+
+
+def fillable_months(now=None):
+    """当前可填写分值的月份集合：本月；若今天是当月前2天，则还包括上个月。"""
+    now = now or datetime.now()
+    months = {now.strftime("%Y-%m")}
+    if now.day <= 2:
+        months.add(_prev_month_str(now))
+    return months
+
+
+def assert_month_fillable(month):
+    """校验填写目标月份是否在当前允许窗口内。"""
+    month = (month or "").strip()
+    if not month:
+        raise HTTPException(status_code=400, detail="月份不能为空")
+    if month not in fillable_months():
+        raise HTTPException(status_code=400,
+                            detail="只能填写本月分值；每月前2天可补填上月分值，窗口过后不可补填")
+    return month
+
 
 def compute_deducted(item):
     """扣分计算函数，超时扣1分"""
@@ -100,7 +132,11 @@ def compute_calc_score(month_score, item, db, owner_job_grade, quality_score=Non
     importance_f = round(factor_map.get(("importance", owner_grade, item.importance), 0), 3)
     innovation_f = round(factor_map.get(("innovation", "", item.innovation), 0), 3)
 
-    return round((month_score or 0.0) * (difficulty_f + innovation_f + importance_f) + (quality_score or 0.0), 3)
+    logging.debug(f"计算得分: 工作项：{item.name}, 分值={month_score}, 困难度系数={difficulty_f},  重要度系数={importance_f}, 创新度系数={innovation_f}, 质量分={quality_score}")
+    result = round((month_score or 0.0) * (difficulty_f + innovation_f + importance_f) + (quality_score or 0.0), 3)
+    logging.debug(f"结果:result = {result}")
+
+    return result
 
 
 # ---------------------------------------------------------------- 积分（数据源：工作项月度分值）
@@ -226,6 +262,7 @@ def get_public_score_board(period: str = "all",
 
         month_score_total = round(sum(month_score_map.values()), 2)
         calc_total = round(sum(calc_map.values()), 2)
+        deduct_total = round(sum(compute_deducted(r.work_item) for r in {r.work_item_id: r for r in user_records}.values()), 2) #进度扣分
         patent = round(sum(v[0] for v in extra_map.values()), 2)
         knowledge = round(sum(v[1] for v in extra_map.values()), 2)
         train = round(sum(v[2] for v in extra_map.values()), 2)
@@ -237,7 +274,7 @@ def get_public_score_board(period: str = "all",
 
         # 公式
         tech_growth_score = round(calc_total - month_score_total + tech_total, 2)  # 技术成长分
-        total_calculated = round(calc_total + tech_total + daily_total, 2)          # 计算总分
+        total_calculated = round(calc_total + tech_total + daily_total - deduct_total, 2)          # 计算总分
 
         people.append({
             "user_id": user.id,
@@ -296,13 +333,17 @@ def put_quality_score(work_item_id: int, data: MonthScoreIn, db: Session = Depen
 
     score = round(float(data.quality_score or 0.0), 2)
     item = db.query(models.WorkItem).filter(models.WorkItem.id == work_item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="工作项不存在")
+    ensure_open(item, item.work_package,
+                item.work_package.project if item.work_package else None)  # 已关闭不能再填质量分
     month = data.month or datetime.now().strftime("%Y-%m")
     rec = db.query(models.WorkItemMonthlyScore).filter(
         models.WorkItemMonthlyScore.work_item_id == work_item_id,
         models.WorkItemMonthlyScore.month == month).first()
 
     wp = item.work_package
-    owner_job_grade = wp.owner.job_grade if (wp and wp.owner) else ""
+    owner_job_grade = item.owner.job_grade if (item and item.owner) else ""
 
     if rec:
         rec.quality_score = score
@@ -338,6 +379,8 @@ def save_month_score(work_item_id: int, body: MonthScoreIn, db: Session = Depend
     item = db.query(models.WorkItem).filter(models.WorkItem.id == work_item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="工作项不存在")
+    ensure_open(item, item.work_package,
+                item.work_package.project if item.work_package else None)  # 已关闭不能再填本月分值
 
     user = db.query(models.User).filter(models.User.id == body.user_id).first()
     if not user:
@@ -346,15 +389,15 @@ def save_month_score(work_item_id: int, body: MonthScoreIn, db: Session = Depend
     # 权限：工作包/工作项负责人本人，或领导/管理员
     role = str(user.role).upper()
     work_package = item.work_package
-    is_pkg_owner = bool(work_package and work_package.owner_id == user.id)
     is_item_owner = bool(item.owner_id and item.owner_id == user.id)
-    if role not in ["LEADER", "ADMIN"] and not (is_pkg_owner or is_item_owner):
-        raise HTTPException(status_code=403, detail="只有工作包/工作项负责人本人、领导和管理员可以填写本月分值")
+    if role not in ["LEADER", "ADMIN"] and not  is_item_owner:
+        raise HTTPException(status_code=403, detail="只有工作项负责人本人、领导和管理员可以填写本月分值")
 
     month = (body.month or "").strip()
     if not month:
         raise HTTPException(status_code=400, detail="月份不能为空")
-    
+    assert_month_fillable(month) # 只能填写本月；每月前2天可补填上月（窗口校验）
+
     db.flush()
     acc = sum(r.score or 0.0 for r in db.query(models.WorkItemMonthlyScore)
                 .filter(models.WorkItemMonthlyScore.work_item_id == work_item_id).all())
@@ -389,7 +432,7 @@ def save_month_score(work_item_id: int, body: MonthScoreIn, db: Session = Depend
 
     # 按当时规则固化计算得分（改规则后不影响已保存的历史月份）
     q = monthly_quality_score(db, work_item_id, month)
-    owner_job_grade = work_package.owner.job_grade if (work_package and work_package.owner) else ""
+    owner_job_grade = item.owner.job_grade if (item.owner) else ""
     rec.calculate_score = compute_calc_score(score, item, db, owner_job_grade, q)
 
     db.commit()

@@ -11,7 +11,7 @@
  Target Server Version : 80046 (8.0.46)
  File Encoding         : 65001
 
- Date: 31/08/2026 14:20:16
+ Date: 04/09/2026 11:02:36
 */
 
 SET NAMES utf8mb4;
@@ -54,6 +54,7 @@ CREATE TABLE `projects`  (
   `complete_status` tinyint(1) NULL DEFAULT NULL,
   `category` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL,
   `tech_owner_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL,
+  `isclosed` tinyint(1) NULL DEFAULT 0,
   PRIMARY KEY (`id`) USING BTREE,
   INDEX `owner_id`(`owner_id` ASC) USING BTREE,
   INDEX `tech_owner_id`(`tech_owner_id` ASC) USING BTREE,
@@ -61,7 +62,7 @@ CREATE TABLE `projects`  (
   INDEX `ix_projects_id`(`id` ASC) USING BTREE,
   CONSTRAINT `projects_ibfk_1` FOREIGN KEY (`owner_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `projects_ibfk_2` FOREIGN KEY (`tech_owner_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 14 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 17 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for score_dimension_levels
@@ -75,7 +76,7 @@ CREATE TABLE `score_dimension_levels`  (
   `job_grade` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL,
   PRIMARY KEY (`id`) USING BTREE,
   INDEX `ix_score_dimension_levels_id`(`id` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 315 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 396 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for score_level_defs
@@ -91,7 +92,7 @@ CREATE TABLE `score_level_defs`  (
   UNIQUE INDEX `uq_def_category_name`(`category` ASC, `name` ASC) USING BTREE,
   INDEX `ix_score_level_defs_category`(`category` ASC) USING BTREE,
   INDEX `ix_score_level_defs_id`(`id` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 98 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 120 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for task_transfers
@@ -112,7 +113,7 @@ CREATE TABLE `task_transfers`  (
   INDEX `work_package_id`(`work_package_id` ASC) USING BTREE,
   INDEX `ix_task_transfers_id`(`id` ASC) USING BTREE,
   CONSTRAINT `task_transfers_ibfk_1` FOREIGN KEY (`work_package_id`) REFERENCES `work_packages` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 3 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 7 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for users
@@ -153,7 +154,7 @@ CREATE TABLE `work_item_monthly_scores`  (
   INDEX `idx_ms_month`(`month` ASC) USING BTREE,
   CONSTRAINT `work_item_monthly_scores_ibfk_1` FOREIGN KEY (`work_item_id`) REFERENCES `work_items` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `work_item_monthly_scores_ibfk_2` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 11 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 23 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for work_items
@@ -171,14 +172,14 @@ CREATE TABLE `work_items`  (
   `score` float NULL DEFAULT NULL,
   `complete_status` tinyint(1) NULL DEFAULT NULL,
   `work_package_id` int NOT NULL,
-  `quality_score` float NULL DEFAULT 0,
-  `calculate_score` float NULL DEFAULT 0,
   `owner_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL,
+  `notes` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+  `isclosed` tinyint(1) NULL DEFAULT 0,
   PRIMARY KEY (`id`) USING BTREE,
   INDEX `ix_work_items_id`(`id` ASC) USING BTREE,
   INDEX `idx_work_items_work_package_id`(`work_package_id` ASC) USING BTREE,
   CONSTRAINT `work_items_ibfk_1` FOREIGN KEY (`work_package_id`) REFERENCES `work_packages` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 31 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 47 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for work_package_categories
@@ -214,7 +215,7 @@ CREATE TABLE `work_package_split_requests`  (
   CONSTRAINT `work_package_split_requests_ibfk_1` FOREIGN KEY (`work_package_id`) REFERENCES `work_packages` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `work_package_split_requests_ibfk_2` FOREIGN KEY (`applicant_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `work_package_split_requests_ibfk_3` FOREIGN KEY (`reviewer_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 16 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 23 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for work_packages
@@ -224,12 +225,13 @@ CREATE TABLE `work_packages`  (
   `id` int NOT NULL AUTO_INCREMENT,
   `code` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `owner_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL,
-  `objective` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+  `name` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
   `complete_status` tinyint(1) NULL DEFAULT NULL,
   `tech_owner_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL,
   `project_id` int NOT NULL,
-  `category_name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
-  `notes` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+  `category_name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL,
+  `objective` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL,
+  `isclosed` tinyint(1) NULL DEFAULT 0,
   PRIMARY KEY (`id`) USING BTREE,
   INDEX `owner_id`(`owner_id` ASC) USING BTREE,
   INDEX `category_name`(`category_name` ASC) USING BTREE,
@@ -237,6 +239,6 @@ CREATE TABLE `work_packages`  (
   INDEX `idx_work_packages_project_id`(`project_id` ASC) USING BTREE,
   CONSTRAINT `work_packages_ibfk_1` FOREIGN KEY (`owner_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `work_packages_ibfk_2` FOREIGN KEY (`project_id`) REFERENCES `projects` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 18 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 22 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = DYNAMIC;
 
 SET FOREIGN_KEY_CHECKS = 1;

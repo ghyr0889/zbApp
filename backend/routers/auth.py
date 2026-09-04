@@ -33,11 +33,6 @@ def authenticate(data: LoginRequest, db: Session, allowed_roles=None):
     }
 
 
-@router.post("/login")
-def login(data: LoginRequest, db: Session = Depends(get_db)):
-    return authenticate(data, db)
-
-
 @router.post("/user-login")
 def user_login(data: LoginRequest, db: Session = Depends(get_db)):
     return authenticate(data, db, allowed_roles=["EMPLOYEE", "LEADER", "DEPARTMENT"])

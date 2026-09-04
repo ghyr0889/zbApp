@@ -6,6 +6,7 @@ from sqlalchemy import func
 import models
 from database import get_db
 from schemas import TransferCreate
+from utils import ensure_open
 
 router = APIRouter(prefix="/api/v1/transfers", tags=["Task Transfers"])
 
@@ -74,6 +75,7 @@ def initiate_transfer(payload: TransferCreate, db: Session = Depends(get_db)):
             raise HTTPException(status_code=404, detail="工作包不存在")
         if from_user.role not in ["LEADER", "DEPARTMENT", "ADMIN"] and  pkg.owner_id != payload.from_user_id:
             raise HTTPException(status_code=403, detail="只有管理员、科室、领导和该工作包负责人可以转包")
+        ensure_open(pkg, pkg.project)  # 已关闭的工作包/项目不能再转办
 
         duplicate = db.query(models.TaskTransfer).filter(
             models.TaskTransfer.work_package_id == payload.work_package_id,
@@ -99,6 +101,8 @@ def initiate_transfer(payload: TransferCreate, db: Session = Depends(get_db)):
             raise HTTPException(status_code=404, detail="工作项不存在")
         if from_user.role not in ["LEADER", "DEPARTMENT", "ADMIN"] and item.owner_id != payload.from_user_id:
             raise HTTPException(status_code=403, detail="只有管理员、科室、领导和该工作项负责人可以转包")
+        ensure_open(item, item.work_package,
+                    item.work_package.project if item.work_package else None)  # 已关闭不能再转办
 
         remaining = item_remaining_score(db, item)
         score = round(float(payload.transfer_score or 0.0), 2)
@@ -209,6 +213,8 @@ def process_transfer(
         ).first()
         if not item:
             raise HTTPException(status_code=400, detail="工作项不存在，无法接受")
+        ensure_open(item, item.work_package,
+                    item.work_package.project if item.work_package else None)  # 已关闭不能再接受转办
 
         score = round(float(transfer.transfer_score or 0.0), 2)
         remaining = item_remaining_score(db, item)
@@ -246,6 +252,7 @@ def process_transfer(
     ).first()
     if not pkg:
         raise HTTPException(status_code=400, detail="工作包不存在，无法接受")
+    ensure_open(pkg, pkg.project)  # 已关闭的工作包/项目不能再接受转办
 
     pkg.owner_id = transfer.to_user_id
     transfer.status = "ACCEPTED"
