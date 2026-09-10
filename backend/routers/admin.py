@@ -1,13 +1,14 @@
 ﻿# xiangmu/backend/routers/admin.py
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 import traceback
 
 import models
 from database import get_db
 from schemas import UserCreate, ProjectCreate, WorkPackageCreate, ScoreRuleUpdate, LevelDefsUpdate, UserUpdate
 from datetime import datetime
-from utils import ensure_open
+from utils import (ensure_open, effective_complete,
+                   package_effective_complete, project_effective_complete)
 from routers.score_board import compute_calc_score, monthly_quality_score
 
 router = APIRouter(prefix="/api/v1/admin", tags=["Admin Management"])
@@ -18,7 +19,7 @@ legacy_router = APIRouter(prefix="/api/v1", tags=["Legacy Compat"])
 # ---------------------------------------------------------------- 用户
 @router.get("/users")
 def get_all_users(db: Session = Depends(get_db)):
-    users = db.query(models.User).all()
+    users = db.query(models.User).filter(models.User.is_deleted == False).all()
     return {"code": 200, "data": [
         {"id": u.id, "username": u.username, "role": u.role, "job_grade": u.job_grade, "password": u.password} for u in users
     ]}
@@ -88,18 +89,35 @@ def update_user(userId: str, data: UserUpdate, db:Session = Depends(get_db)):
            }
 
 @router.delete("/users/{userId}")
-def delete_user(userId: str, db:Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.id == userId).first()
+def delete_user(userId: str, currentUserId: str, db:Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.id == userId, models.User.is_deleted == False).first()
     if not user:
         raise HTTPException(status_code=400, detail="数据库中没有这个人")
 
-    project = db.query(models.Project).filter(models.Project.owner_id == userId).all()
-    wp = db.query(models.WorkPackage).filter(models.WorkPackage.owner_id == userId).all()
+    project = db.query(models.Project).options(
+        selectinload(models.Project.work_packages).selectinload(
+            models.WorkPackage.work_items
+        ).selectinload(models.WorkItem.monthly_scores),
+    ).filter(models.Project.owner_id == userId).all()
+    wp = db.query(models.WorkPackage).options(
+        selectinload(models.WorkPackage.work_items).selectinload(models.WorkItem.monthly_scores),
+    ).filter(models.WorkPackage.owner_id == userId).all()
+    item = db.query(models.WorkItem).options(
+        selectinload(models.WorkItem.monthly_scores),
+    ).filter(models.WorkItem.owner_id == userId).all()
 
-    if (project and project.complete_status) or (wp and wp.complete_status):
+    # 完成判定采用合成口径：手动确认完成，或进度已满（含满分 0）
+    has_uncompleted_project = any(not project_effective_complete(p) for p in project)
+    has_uncompleted_wp = any(not package_effective_complete(w) for w in wp)
+    has_uncompleted_item = any(not effective_complete(i) for i in item)
+
+    if has_uncompleted_project or has_uncompleted_wp or has_uncompleted_item:
         raise HTTPException(status_code=402, detail="该员工有未完成的工作")
-        
-    db.delete(user)
+
+    user.is_deleted = True
+    user.deleted_at = datetime.now()
+    user.deleted_by = currentUserId  # 记录谁删除的
+    # db.delete(user)
     db.commit()
     return {"code": 200, "message": "删除用户成功"}
 
@@ -170,7 +188,11 @@ def create_or_update_project(project_in: ProjectCreate, db: Session = Depends(ge
 @router.delete("/projects/{project_id}")
 def delete_project(project_id: int, user_id: str, db: Session = Depends(get_db)):
     """删除项目"""
-    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    project = db.query(models.Project).options(
+        selectinload(models.Project.work_packages).selectinload(
+            models.WorkPackage.work_items
+        ).selectinload(models.WorkItem.monthly_scores),
+    ).filter(models.Project.id == project_id).first()
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
@@ -178,7 +200,7 @@ def delete_project(project_id: int, user_id: str, db: Session = Depends(get_db))
         raise HTTPException(status_code=404, detail=f"查不到对应的用户 (接收到的 user_id: {user_id})")
     if user.role not in ["LEADER", "DEPARTMENT", "ADMIN"] and (not project or project.owner_id != user.id):
         raise HTTPException(status_code=405, detail="只有项目负责人和部门领导、科室主任、管理员可以删除项目")
-    if project.complete_status:
+    if project_effective_complete(project):
         raise HTTPException(status_code=400, detail="项目已完成，不能删除")
     if project.isclosed:
         raise HTTPException(status_code=403, detail="项目已关闭，不能删除")
@@ -271,7 +293,9 @@ def create_or_update_work_package(pkg_in: WorkPackageCreate, db: Session = Depen
 @router.delete("/work-packages/{work_package_id}")
 def delete_work_package(work_package_id: int, user_id: str, db: Session = Depends(get_db)):
     """删除工作包"""
-    work_package = db.query(models.WorkPackage).filter(models.WorkPackage.id == work_package_id).first()
+    work_package = db.query(models.WorkPackage).options(
+        selectinload(models.WorkPackage.work_items).selectinload(models.WorkItem.monthly_scores),
+    ).filter(models.WorkPackage.id == work_package_id).first()
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not work_package:
         raise HTTPException(status_code=404, detail="工作包不存在")
@@ -279,7 +303,7 @@ def delete_work_package(work_package_id: int, user_id: str, db: Session = Depend
         raise HTTPException(status_code=404, detail=f"查不到对应的用户 (接收到的 user_id: {user_id})")
     if user.role not in ["LEADER", "DEPARTMENT", "ADMIN"] and (not work_package or work_package.owner_id != user.id):
         raise HTTPException(status_code=405, detail="只有改工作包负责人和部门领导、科室主任、管理员可以删除项目")
-    if work_package.complete_status:
+    if package_effective_complete(work_package):
         raise HTTPException(status_code=400, detail="工作包已完成，不能删除")
     if work_package.isclosed or (work_package.project and work_package.project.isclosed):
         raise HTTPException(status_code=403, detail="工作包或所属项目已关闭，不能删除")

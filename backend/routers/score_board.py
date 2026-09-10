@@ -3,12 +3,13 @@ import re
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 import models
 from database import get_db
 from schemas import MonthScoreIn, MonthlyExtraScoreIn
-from utils import ensure_open
+from utils import ensure_open, item_filled_score, sync_item_completed_at
 import logging
 
 router = APIRouter(prefix="/api/v1/score-board", tags=["Score Board"])
@@ -46,6 +47,27 @@ def month_in_selection(month_str, period, year, month = None, quarter = None):
     return True  # all
 
 
+def months_of_period(period, year, month=None, quarter=None):
+    """某个周期包含的月份列表（YYYY-MM）；period=all 返回 None（表示不限月份）。
+
+    month → 该月；quarter → 该季度 3 个月；year → 12 个月。
+    """
+    period = str(period or "all").lower()
+    now = datetime.now()
+    y = year or now.year
+
+    if period == "month":
+        m = int(month or now.month)
+        return [f"{y:04d}-{m:02d}"]
+    if period == "quarter":
+        q = int(quarter or ((now.month - 1) // 3 + 1))
+        base = (q - 1) * 3 + 1
+        return [f"{y:04d}-{mm:02d}" for mm in (base, base + 1, base + 2)]
+    if period == "year":
+        return [f"{y:04d}-{mm:02d}" for mm in range(1, 13)]
+    return None  # all
+
+
 # ---------------------------------------------------------------- 可填写月份窗口（每月前2天可补填上月）
 def _prev_month_str(now):
     """上个月 YYYY-MM（跨年处理）。"""
@@ -70,8 +92,7 @@ def assert_month_fillable(month):
     if not month:
         raise HTTPException(status_code=400, detail="月份不能为空")
     if month not in fillable_months():
-        raise HTTPException(status_code=400,
-                            detail="只能填写本月分值；每月前2天可补填上月分值，窗口过后不可补填")
+        raise HTTPException(status_code=400, detail="只能填写本月分值；每月前2天可补填上月分值，窗口过后不可补填")
     return month
 
 
@@ -100,6 +121,7 @@ def monthly_score_detail(rec, db):
     return {
         "work_item_id": item.id if item else None,
         "work_item_name": item.name if item else "-",
+        "work_item_standard": item.standard if item else "-",
         "work_item_difficulty": item.difficulty if item else "-",
         "work_item_importance": item.importance if item else "-",
         "work_item_innovation": item.innovation if item else "-",
@@ -194,20 +216,10 @@ def get_public_score_board(period: str = "all",
     now = datetime.now()
     y = year or now.year
 
-    # 周期内月份集合
-    if period == "month":
-        m = int(month or now.month)
-        months = [f"{y:04d}-{m:02d}"]
-    elif period == "quarter":
-        q = int(quarter or ((now.month - 1) // 3 + 1))
-        base = (q - 1) * 3 + 1
-        months = [f"{y:04d}-{mm:02d}" for mm in (base, base + 1, base + 2)]
-    elif period == "year":
-        months = [f"{y:04d}-{mm:02d}" for mm in range(1, 13)]
-    else:  # all
-        months = None
+    # 周期内月份集合（month / quarter / year / all）
+    months = months_of_period(period, y, month, quarter)
 
-    users = db.query(models.User).all()
+    users = db.query(models.User).filter(models.User.role.notin_(["LEADER", "ADMIN"])).all()
     all_records = db.query(models.WorkItemMonthlyScore).all()
 
     # 周期内的月度附加分（技术提升 / 日常管理）
@@ -292,7 +304,7 @@ def get_public_score_board(period: str = "all",
             "daily_manage": daily_total,
             "tech_growth_score": tech_growth_score,
             "total_calculated": total_calculated,
-            "total_score": total_calculated,   # 得分（季度/年度=各月计算总分之和）
+            "total_score": total_calculated,   # 计算总分（季度/年度=各月计算总分之和）
             "converted_score": 0.0,            # 折算得分（月度），下方计算
             "final_calculated": 0.0,           # 计算得分（季度/年度），下方计算
             "grade": "-",
@@ -342,7 +354,6 @@ def put_quality_score(work_item_id: int, data: MonthScoreIn, db: Session = Depen
         models.WorkItemMonthlyScore.work_item_id == work_item_id,
         models.WorkItemMonthlyScore.month == month).first()
 
-    wp = item.work_package
     owner_job_grade = item.owner.job_grade if (item and item.owner) else ""
 
     if rec:
@@ -390,7 +401,7 @@ def save_month_score(work_item_id: int, body: MonthScoreIn, db: Session = Depend
     role = str(user.role).upper()
     work_package = item.work_package
     is_item_owner = bool(item.owner_id and item.owner_id == user.id)
-    if role not in ["LEADER", "ADMIN"] and not  is_item_owner:
+    if role not in ["LEADER", "ADMIN"] and not is_item_owner:
         raise HTTPException(status_code=403, detail="只有工作项负责人本人、领导和管理员可以填写本月分值")
 
     month = (body.month or "").strip()
@@ -399,17 +410,22 @@ def save_month_score(work_item_id: int, body: MonthScoreIn, db: Session = Depend
     assert_month_fillable(month) # 只能填写本月；每月前2天可补填上月（窗口校验）
 
     db.flush()
-    acc = sum(r.score or 0.0 for r in db.query(models.WorkItemMonthlyScore)
-                .filter(models.WorkItemMonthlyScore.work_item_id == work_item_id).all())
-    remain = item.score - acc
-
-    score = round(float(body.score or 0.0), 3)
-    if score > (remain or 0.0):
-        raise HTTPException(status_code=400, detail=f"本月分值不能超过剩余分值 {remain or 0.0}")
     rec = db.query(models.WorkItemMonthlyScore).filter(
         models.WorkItemMonthlyScore.work_item_id == work_item_id,
         models.WorkItemMonthlyScore.month == month
     ).first()
+
+    old_score = rec.score if rec else 0.0
+
+    acc_all = item_filled_score(db, work_item_id)
+
+    acc_other = acc_all - (old_score or 0.0)
+    remain = (item.score or 0.0) - acc_other
+
+    score = round(float(body.score or 0.0), 3)
+    if score > remain + 1e-6:
+        raise HTTPException(status_code=400, detail=f"本月分值不能超过剩余分值 {remain}")
+
     # 积分归属：优先记给工作项负责人（转办拆分后接收人负责的工作项归接收人），
     # 其次记给工作包负责人（领导/管理员代填也不改变归属）；都没有再兜底记给填写人
     if item.owner_id:
@@ -434,6 +450,9 @@ def save_month_score(work_item_id: int, body: MonthScoreIn, db: Session = Depend
     q = monthly_quality_score(db, work_item_id, month)
     owner_job_grade = item.owner.job_grade if (item.owner) else ""
     rec.calculate_score = compute_calc_score(score, item, db, owner_job_grade, q)
+
+    db.flush()  # 确保上面的 rec 新增/修改已经反映到查询里
+    sync_item_completed_at(db, item)  # 同步工作项完成时间（如果累计分值已达满分）
 
     db.commit()
     return {
@@ -501,8 +520,8 @@ def get_monthly_extra_scores(user_id: str = None, month: str = None, db: Session
     data = []
     for r in rows:
         u = r.user
-        tech = round((r.patent_score or 0.0) + (r.knowledge_score or 0.0) + (r.train_score or 0.0), 2)
-        daily = round((r.deduct_score or 0.0) + (r.quality_event_score or 0.0) + (r.carrier_inspection_score or 0.0), 2)
+        tech = round((r.patent_score or 0.0) + (r.knowledge_score or 0.0) + (r.train_score or 0.0), 3)
+        daily = round((r.deduct_score or 0.0) + (r.quality_event_score or 0.0) + (r.carrier_inspection_score or 0.0), 3)
         data.append({
             "id": r.id,
             "user_id": r.user_id,
@@ -519,3 +538,216 @@ def get_monthly_extra_scores(user_id: str = None, month: str = None, db: Session
             "updated_by_id": r.updated_by_id,
         })
     return {"code": 200, "data": data}
+
+# ---------------------------------------------------------------- 工作完成情况
+@router.get("/completed-situation")
+def get_completed_situation(target_type: str = "project",
+                            currentUserId: str = None,
+                            target_id: int = None,
+                            category_name: str = None,
+                            month: str = None,
+                            db: Session = Depends(get_db)):
+    """按 项目 / 工作包类别 查看该对象下每位工作人员的完成情况（分值口径）：
+    total_score    = 其负责工作项的基础总分值之和
+    filled_score   = 这些工作项已填月度分值之和（传 month 只算该月，缺省累计全部月份）
+    unfilled_score = total_score - filled_score（还没填的分）
+    仅领导/管理员可查看。"""
+    user = db.query(models.User).filter(models.User.id == currentUserId).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    if str(user.role).upper() not in ["LEADER", "ADMIN"]:
+        raise HTTPException(status_code=403, detail="只有领导和管理员可以查看完成情况")
+
+    target_type = (target_type or "project").lower()
+    if target_type not in ("project", "category"):
+        raise HTTPException(status_code=400, detail="target_type 只能是 project / category")
+
+    # ----  定位目标对象并取其下工作项 ----
+    q = (db.query(models.WorkItem, models.WorkPackage)
+         .join(models.WorkPackage, models.WorkPackage.id == models.WorkItem.work_package_id))
+
+    if target_type == "project":
+        if not target_id:
+            raise HTTPException(status_code=400, detail="target_type=project 时必须传 target_id")
+        project = db.query(models.Project).filter(models.Project.id == target_id).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="项目不存在")
+        rows = q.filter(models.WorkPackage.project_id == target_id).all()
+        target_name = project.name
+    else:
+        category_name = (category_name or "").strip()
+        if not category_name:
+            raise HTTPException(status_code=400, detail="target_type=category 时必须传 category_name")
+        rows = q.filter(models.WorkPackage.category_name == category_name).all()
+        target_name = category_name
+
+    # ---- 按负责人聚合基础总分，并记录每个工作项所属负责人 ----
+    owner_of = {}          # work_item_id -> owner_id
+    total_by_owner = {}    # owner_id -> sum(item.score)
+    for wi, _wp in rows:
+        if not wi.owner_id:
+            continue
+        owner_of[wi.id] = wi.owner_id
+        total_by_owner[wi.owner_id] = total_by_owner.get(wi.owner_id, 0.0) + (wi.score or 0.0)
+
+    # ---- 已填分：这些工作项上的月度分值（可选月份）合计 → 归到所属负责人 ----
+    filled_by_owner = {}
+    if owner_of:
+        fq = db.query(models.WorkItemMonthlyScore).filter(
+            models.WorkItemMonthlyScore.work_item_id.in_(list(owner_of.keys())))
+        if month:
+            fq = fq.filter(models.WorkItemMonthlyScore.month == month)
+        for m in fq.all():
+            owner_id = owner_of.get(m.work_item_id)
+            if owner_id:
+                filled_by_owner[owner_id] = filled_by_owner.get(owner_id, 0.0) + (m.score or 0.0)
+
+    # ----组装人员 ----
+    owner_ids = sorted(total_by_owner.keys())
+    user_map = {}
+    if owner_ids:
+        user_map = {u.id: u for u in db.query(models.User).filter(models.User.id.in_(owner_ids)).all()}
+
+    people = []
+    for owner_id in owner_ids:
+        u = user_map.get(owner_id)
+        total_score = round(total_by_owner.get(owner_id, 0.0), 3)
+        filled_score = round(filled_by_owner.get(owner_id, 0.0), 3)
+        people.append({
+            "user_id": owner_id,
+            "username": u.username if u else owner_id,
+            "role": u.role if u else "",
+            "total_score": total_score,
+            "filled_score": filled_score,
+            "unfilled_score": round(total_score - filled_score, 3),
+        })
+    people.sort(key=lambda p: p["total_score"], reverse=True)
+
+    return {
+        "code": 200,
+        "data": {
+            "target_type": target_type,
+            "target_name": target_name,
+            "month": month or None,
+            "people": people,
+        }
+    }
+
+# ---------------------------------------------------------------- 项目/工作包汇总
+@router.get("/project-summary")
+def get_project_summary(currentUserId: str = None,
+                        period: str = "all",
+                        year: int = None,
+                        month: int = None,
+                        quarter: int = None,
+                        target_type: str = "project",
+                        db: Session = Depends(get_db)):
+    """按项目汇总分值（可按 月 / 季 / 年 / 全部 统计）。仅领导、管理员可查看。
+    - total_score    = 项目下所有工作项满分之和（不随周期变化）
+    - filled_score   = 这些工作项在周期内已填的月度基础分值之和
+    - unfilled_score = total_score - filled_score
+    """
+    user = db.query(models.User).filter(models.User.id == currentUserId).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    if str(user.role).upper() not in ["LEADER", "ADMIN"]:
+        raise HTTPException(status_code=403, detail="只有领导和管理员可以查看项目汇总")
+
+    target_type = (target_type or "project").lower()
+    if target_type not in ("project", "work_package"):
+        raise HTTPException(status_code=400, detail="查看类型只能是项目/工作包")
+
+    period = str(period or "all").lower()
+    now = datetime.now()
+    y = int(year or now.year)
+    months = months_of_period(period, y, month, quarter)
+
+    # 每个工作包：工作项个数 + 满分合计 
+    total_rows = (db.query(
+        models.WorkPackage.id.label("wp_id"),
+        models.WorkPackage.project_id.label("project_id"),
+        func.count(models.WorkItem.id).label("item_count"),
+        func.coalesce(func.sum(models.WorkItem.score), 0.0).label("total_score"),
+    ).outerjoin(models.WorkItem, models.WorkItem.work_package_id == models.WorkPackage.id)
+        .group_by(models.WorkPackage.id, models.WorkPackage.project_id).all())
+
+    # ---- 每个工作包：周期内已填分 ----
+    filled_q = (db.query(
+        models.WorkItem.work_package_id.label("wp_id"),
+        func.coalesce(func.sum(models.WorkItemMonthlyScore.score), 0.0).label("filled_score"),
+    ).join(models.WorkItem, models.WorkItem.id == models.WorkItemMonthlyScore.work_item_id)
+        .group_by(models.WorkItem.work_package_id))
+    if months is not None:
+        filled_q = filled_q.filter(models.WorkItemMonthlyScore.month.in_(months))
+    filled_pkg = {r.wp_id: float(r.filled_score or 0.0) for r in filled_q.all()}
+
+    proj_map = {p.id: p for p in db.query(models.Project).order_by(models.Project.id).all()}
+    items = []
+
+    if target_type == "project":
+        agg = {}                                    # pid -> 累计
+        for p in proj_map.values():                 # 先铺满所有项目（空项目也在）
+            agg[p.id] = {"wp": 0, "item": 0, "total": 0.0, "filled": 0.0}
+        for r in total_rows:
+            if r.project_id is None:
+                continue
+            s = agg[r.project_id]
+            s["wp"] += 1
+            s["item"] += int(r.item_count or 0)     # ← 补上这一行
+            s["total"] += float(r.total_score or 0.0)
+            s["filled"] += filled_pkg.get(r.wp_id, 0.0)
+        for pid, s in agg.items():
+            p = proj_map[pid]
+            items.append({
+                "id": pid, "type": "project",
+                "code": p.code, "name": p.name,
+                "parent_name": "",
+                "child_count": s["wp"],             # 所含工作包个数
+                "child_label": "工作包",
+                "work_item_count": s["item"],
+                "total_score": round(s["total"], 3),
+                "filled_score": round(s["filled"], 3),
+                "unfilled_score": round(s["total"] - s["filled"], 3),
+                "closed_status": bool(p.isclosed),
+                "complete_status": bool(p.complete_status),
+            })
+
+    else:  # work_package
+        wp_map = {wp.id: wp for wp in db.query(models.WorkPackage).all()}
+        for r in total_rows:                        # 已含"没有工作项的工作包"
+            wp = wp_map.get(r.wp_id)
+            if not wp:
+                continue
+            total = float(r.total_score or 0.0)
+            filled = filled_pkg.get(r.wp_id, 0.0)
+            items.append({
+                "id": wp.id, "type": "work_package",
+                "code": wp.code, "name": wp.name or "-",
+                "parent_name": proj_map[wp.project_id].name if wp.project_id in proj_map else "-",
+                "category_name": wp.category_name or "-",
+                "child_count": int(r.item_count or 0),   # 所含工作项个数
+                "child_label": "工作项",
+                "work_item_count": int(r.item_count or 0),
+                "total_score": round(total, 3),
+                "filled_score": round(filled, 3),
+                "unfilled_score": round(total - filled, 3),
+                "closed_status": bool(wp.isclosed),
+                "complete_status": bool(wp.complete_status),
+            })
+
+    items.sort(key=lambda r: r["total_score"], reverse=True)
+
+    return {"code": 200, "data": {
+    "target_type": target_type,          # 前端知道当前是什么模式
+    "period": period, "year": y, "month": month, "quarter": quarter, "months": months,
+    "totals": {
+        "count": len(items),                                        # 当前模式下的"共多少个"
+        "work_package_count": sum(r["child_count"] for r in items) if target_type == "project" else len(items),
+        "work_item_count": sum(r["work_item_count"] for r in items),
+        "total_score": round(sum(r["total_score"] for r in items), 3),
+        "filled_score": round(sum(r["filled_score"] for r in items), 3),
+        "unfilled_score": round(sum(r["unfilled_score"] for r in items), 3),
+    },
+    "items": items,                       # ← 建议改名：叫 projects 但装工作包会很误导
+}}
+

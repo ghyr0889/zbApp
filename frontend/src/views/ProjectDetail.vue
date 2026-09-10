@@ -54,7 +54,7 @@
         <el-table-column type="expand">
           <template #default="{ row: pkg }">
             <div class="nested-table-container">
-              <WorkItemTable :workPackageId="pkg.id" :refresh-key="refreshKey" @changed="refreshAll" />
+              <WorkItemTable_improved :workPackageId="pkg.id" :refresh-key="refreshKey" @changed="refreshAll" />
             </div>
           </template>
         </el-table-column>
@@ -62,7 +62,7 @@
         <el-table-column prop="code" label="工作包编号" width="120" align="center">
           <template #default="{ row: pkg }">
             <el-input v-if="pkg.isEdit" v-model="pkg.code" size="small"/>
-            <span v-else class="code-text">{{ pkg.code }}</span>
+            <span v-else>{{ pkg.code }}</span>
           </template>
         </el-table-column>
 
@@ -131,29 +131,60 @@
         </template>
         </el-table-column>
 
-        <el-table-column label="状态" width="180" align="center" fixed="right">
-          <template #default="{ row: pkg, $index }">
-            <el-tag v-if="pkg.closed_status" size="small" type="danger" effect="plain">已关闭</el-tag>
-            <el-tag v-else-if="pkg.complete_status" size="small" type="success" effect="plain">已完成</el-tag>
-            <el-button v-if="canConfirmPkg(pkg) && !pkg.closed_status && !projectInfo?.closed_status" type="success" link size="small" :loading="confirming" @click="confirmPkg(pkg)">
-              {{ pkg.complete_status ? '取消完成' : '确认完成' }}
-            </el-button>
-            <el-button v-if="canConfirmClosed(pkg)" type="danger" link size="small" :loading="confirming" @click="confirmClosed(pkg)">
-              {{ pkg.closed_status ? '取消关闭' : '确认关闭' }}
-            </el-button>
+        <el-table-column label="状态" min-width="100" align="center" fixed="right">
+          <template #default="{ row: pkg }">
+            <div class="status-cell">
+            <div class="status-dot-wrapper">
+              <span class="status-dot" :style="{ backgroundColor: getStatusConfig(pkg).color }" ></span>
+              <span class="status-text" :style="{ color: getStatusConfig(pkg).color }">{{ getStatusConfig(pkg).label }}</span>
+            </div>
+          </div>
           </template>
         </el-table-column>
 
-        <el-table-column v-if="canManage" label="操作" width="180" align="center" fixed="right">
+        <el-table-column v-if="canManage" label="操作" min-width="140" align="center" fixed="right">
           <template #default="{ row: pkg, $index }">
             <template v-if="pkg.isEdit">
               <el-button type="success" link size="small" :loading="saving" @click="handleSaveWorkPackage(pkg)">保存</el-button>
               <el-button type="info" link size="small" @click="cancelWpEdit(pkg, $index)">取消</el-button>
             </template>
             <template v-else>
-              <el-button v-if="!pkg.closed_status && !projectInfo?.closed_status" type="danger" link size="small" @click="removeWorkPackage(pkg)">删除</el-button>
               <el-button v-if="!pkg.closed_status && !projectInfo?.closed_status" type="primary" link size="small" @click="pkg.isEdit = true">编辑</el-button>
             </template>
+            <el-dropdown trigger="click" @command="(command) => handleMoreCommand(command, pkg)">
+              <el-button type="info" link size="small">更多
+                <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item
+                    v-if="!pkg.closed_status && !projectInfo?.closed_status" command="delete" divided >
+                    <span class="danger-menu-item">删除</span>
+                  </el-dropdown-item>
+
+                  <!-- 完成/取消完成：按手动原始状态 -->
+                  <el-dropdown-item
+                    v-if="canConfirmPkg(pkg) && !pkg.closed_status && !projectInfo.closed_status && !pkg.manual_complete_status" command="confirmComplete" divided> 确认完成
+                  </el-dropdown-item>
+
+                  <el-dropdown-item
+                    v-if="canConfirmPkg(pkg) && !pkg.closed_status && !projectInfo.closed_status && pkg.manual_complete_status" command="cancelComplete" >取消完成
+                  </el-dropdown-item>
+
+                  <!-- 确认关闭 -->
+                  <el-dropdown-item
+                    v-if="canConfirmClosed(pkg) && !pkg.closed_status" command="confirmClosed" divided >
+                    <span class="danger-menu-item">确认关闭</span>
+                  </el-dropdown-item>
+
+                  <!-- 取消关闭 -->
+                  <el-dropdown-item
+                    v-if=" pkg.closed_status && isAdmin " command="cancelClosed" > 取消关闭
+                  </el-dropdown-item>
+
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </template>
         </el-table-column>
       </el-table>
@@ -189,8 +220,10 @@ import {
   confirmClosedApi,
   getWorkCategoriesApi
 } from '../api'
-import WorkItemTable from '../components/WorkItemTable.vue'
+import WorkItemTable_improved from '../components/WorkItemTable_improved.vue'
 import { useUserStore } from '../stores/user'
+import { confirmClose, confirmCancelClose } from '../components/confirm'
+import { ArrowDown, Loading, CircleCheck, CircleClose, Lock } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -219,8 +252,84 @@ const canManage = computed(() => {
   return String(projectInfo.value?.owner_id || '') === currentUserId.value
 })
 
+// 工作包/所属项目是否已整体关闭（禁止其下所有工作项的编辑/填分）
+const projClosed = computed(() => !!projectInfo.value?.closed_status)
+const isLocked = (row) => projClosed.value || !!row.closed_status
 // 已完成/已关闭行灰显
 const rowClassName = ({ row }) => (row.complete_status || row.closed_status ? 'completed-row' : '')
+
+const statusConfig = {
+  '进行中': {
+    icon: Loading,
+    color: '#409EFF',
+    tagType: 'primary',
+    label: '进行中'
+  },
+  '已完成': {
+    icon: CircleCheck,
+    color: '#67C23A',
+    tagType: 'success',
+    label: '已完成'
+  },
+  '已关闭': {
+    icon: CircleClose,
+    color: '#F56C6C',
+    tagType: 'danger',
+    label: '已关闭'
+  },
+  '所属已关闭': {
+    icon: Lock,
+    color: '#909399',
+    tagType: 'info',
+    label: '所属已关闭'
+  }
+}
+// ============ 获取状态配置 ============
+const getStatusConfig = (row) => {
+  if (row.closed_status) return statusConfig['已关闭']
+  if (isLocked(row)) return statusConfig['所属已关闭']
+  if (row.complete_status) return statusConfig['已完成']
+  return statusConfig['进行中']
+}
+
+const handleMoreCommand = async (command, row) => {
+  switch (command) {
+    case 'delete':
+      try {
+        await ElMessageBox.confirm(
+          '确定删除该工作项？',
+          '删除确认',
+          {
+            confirmButtonText: '确定删除',
+            cancelButtonText: '取消',
+            type: 'warning'
+          }
+        )
+        await removeWorkPackage(row)
+      } catch (err) {
+        // 用户点击取消时不提示
+        if (err !== 'cancel' && err !== 'close') {
+          console.error(err)
+        }
+      }
+      break
+    case 'confirmComplete':
+      await confirmPkg(row)
+      break
+
+    case 'cancelComplete':
+      await confirmPkg(row)
+      break
+
+    case 'confirmClosed':
+      await handleClosedConfirm(row)
+      break
+
+    case 'cancelClosed':
+      await handleCancelClosedConfirm(row)
+      break
+  }
+}
 
 // —— 确认完成（工作包/项目，负责人或领导/管理员）——
 const confirming = ref(false)
@@ -248,8 +357,19 @@ const doConfirm = async (target_type, target_id, confirmed) => {
     confirming.value = false
   }
 }
-const confirmPkg = (pkg) => doConfirm('work_package', pkg.id, !pkg.complete_status)
-const confirmProject = () => doConfirm('project', projectId, !projectInfo.value?.complete_status)
+const confirmPkg = (pkg) => doConfirm('work_package', pkg.id, !pkg.manual_complete_status)
+const confirmProject = () => doConfirm('project', projectId, !projectInfo.value?.manual_complete_status)
+
+const handleClosedConfirm = (row) => {
+  confirmClose('工作包', () => {
+    confirmClosed(row)
+  })
+}
+
+const handleCancelClosedConfirm = (row) => {
+  confirmCancelClose('工作包', () => { confirmClosed(row) })
+}
+
 
 // —— 确认/取消关闭（只有领导/管理员，后端会校验）——
 const canConfirmClosed = () => isAdmin.value || isLeader.value
@@ -419,7 +539,7 @@ onMounted(async () => {
   } catch {
     /* 类别加载失败不影响主流程 */
   }
-  if (isAdmin.value || isLeader.value || isDepartment.value) {
+  if (canManage.value) {
     try {
       const res = await getAllUsersApi()
       userOptions.value = res.data?.data || []
@@ -428,8 +548,9 @@ onMounted(async () => {
     }
   }
 })
-</script>
 
+
+</script>
 <style scoped>
 .project-detail-page {
   padding: 20px;
@@ -474,15 +595,6 @@ onMounted(async () => {
 
 .project-info {
   margin-bottom: 16px;
-}
-
-.code-text {
-  font-family: monospace;
-  font-weight: bold;
-  color: #64748b;
-  background: #f1f5f9;
-  padding: 2px 6px;
-  border-radius: 4px;
 }
 
 .employee-text {
@@ -598,5 +710,44 @@ onMounted(async () => {
   background-color: #f1f5f9;
   color: #94a3b8;
   opacity: 0.7;
+}
+
+.danger-menu-item {
+  color: var(--el-color-danger);
+}
+
+.el-dropdown {
+  margin-left: 4px;
+}
+
+.status-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.status-dot-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+.status-text {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.project-detail-page :deep(.status-text) {
+  color: #334155 !important;  /* 统一改为深灰色 */
+  font-weight: 500;
 }
 </style>

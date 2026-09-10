@@ -19,6 +19,10 @@ class User(Base):
     role = Column(String(20), default="EMPLOYEE")  # EMPLOYEE / DEPARTMENT / LEADER / ADMIN
     job_grade = Column(String(20), nullable=False)  # 职级（必填）
 
+    is_deleted = Column(Boolean, default=False)
+    deleted_at = Column(DateTime, nullable=True)
+    deleted_by = Column(String(10), nullable=True)
+
 
 class Project(Base):
     __tablename__ = "projects"#项目表

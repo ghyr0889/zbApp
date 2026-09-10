@@ -9,7 +9,7 @@ from sqlalchemy import func, or_, exists
 import models
 from database import get_db
 from schemas import ConfirmCompletionIn, MonthScoreIn, ConfirmClosed
-from utils import work_package_summary, deadline_str, parse_deadline, calc_progress, ensure_open
+from utils import project_effective_complete, package_effective_complete, deadline_str, effective_complete, calc_progress, ensure_open, sync_item_completed_at
 from routers.score_board import compute_calc_score, compute_deducted, monthly_quality_score
 
 router = APIRouter(prefix="/api/v1/work-logs", tags=["Work Logs"])
@@ -67,6 +67,8 @@ def _public_package_view(pkg, db):
         "package_tech_owner_name": pkg_tech_owner_name,
         "level": project.level if project else "",
         "name": pkg.name or "-",
+        # 生效完成状态（由调用方追加）：手动确认 或 其下全部工作项已完成
+        "manual_complete_status": bool(pkg.complete_status),
         "closed_status": bool(pkg.isclosed),
         "project_closed": bool(project.isclosed if project else False)
     }
@@ -128,10 +130,11 @@ def get_paged_projects(page: int = 1,
             "tech_owner_name": p.tech_owner.username if p.tech_owner else "未指定机型主管",
             "level": p.level or "",
             "category": p.category or "",
-            "complete_status": bool(p.complete_status),
+            "complete_status": project_effective_complete(p),
+            "manual_complete_status": bool(p.complete_status),
             "closed_status": bool(p.isclosed),
             "work_package_count": len(wps),
-            "done_count": sum(1 for w in wps if w.complete_status),
+            "done_count": sum(1 for w in wps if package_effective_complete(w)),
             "work_item_count": sum(len(list(w.work_items or [])) for w in wps),
             "project_progress": calc_progress(done, full),
         })
@@ -141,7 +144,14 @@ def get_paged_projects(page: int = 1,
 @router.get("/projects/{project_id}")
 def get_project_detail(project_id: int, db: Session = Depends(get_db)):
     """项目详情（含聚合统计），供项目详情页标题/信息卡使用。"""
-    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    # 预加载到工作项/月度分值一级，供项目级联动判定使用（避免 N+1）
+    project = db.query(models.Project).options(
+        selectinload(models.Project.owner),
+        selectinload(models.Project.tech_owner),
+        selectinload(models.Project.work_packages).selectinload(
+            models.WorkPackage.work_items
+        ).selectinload(models.WorkItem.monthly_scores),
+    ).filter(models.Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
     wps = list(project.work_packages or [])
@@ -160,10 +170,11 @@ def get_project_detail(project_id: int, db: Session = Depends(get_db)):
         "tech_owner_name": project.tech_owner.username if project.tech_owner else "未指定机型主管",
         "level": project.level or "",
         "category": project.category or "",
-        "complete_status": bool(project.complete_status),
+        "complete_status": project_effective_complete(project),
+        "manual_complete_status": bool(project.complete_status),
         "closed_status": bool(project.isclosed),
         "work_package_count": len(wps),
-        "done_count": sum(1 for w in wps if w.complete_status),
+        "done_count": sum(1 for w in wps if package_effective_complete(w)),
         "work_item_count": sum(len(list(w.work_items or [])) for w in wps),
         "project_progress": calc_progress(done, full),
     }}
@@ -208,8 +219,8 @@ def get_paged_project_work_packages(project_id: int,
         full = sum(it.score or 0.0 for it in (pkg.work_items or []))
         view["package_progress"] = calc_progress(done, full)
         view["work_item_count"] = len(list(pkg.work_items or []))
-        view["done_count"] = sum(1 for it in (pkg.work_items or []) if it.complete_status)
-        view["complete_status"] = bool(pkg.complete_status)
+        view["done_count"] = sum(1 for it in (pkg.work_items or []) if effective_complete(it))
+        view["complete_status"] = package_effective_complete(pkg)
         items.append(view)
     return {"code": 200, "data": {
         "project_id": project_id,
@@ -254,7 +265,7 @@ def get_my_work_packages_paged(user_id: str,
         full = sum(it.score or 0.0 for it in (pkg.work_items or []))
         view["package_progress"] = calc_progress(done, full)
         view["work_item_count"] = len(list(pkg.work_items or []))
-        view["complete_status"] = bool(pkg.complete_status)
+        view["complete_status"] = package_effective_complete(pkg)
         items.append(view)
     return {"code": 200, "data": {
         "user_id": user_id,
@@ -278,7 +289,10 @@ def _work_item_view(item):
         "deadline": deadline_str(item.deadline) if item.deadline else "",
         "score": item.score or 0.0,
         "completed_at": deadline_str(item.completed_at),
-        "complete_status": item.complete_status or "",
+        # 生效完成状态：手动完成 或 累计分值已达满分
+        "complete_status": effective_complete(item),
+        # 手动原始状态，给前端按钮用
+        "manual_complete_status": bool(item.complete_status),
         "owner_id": item.owner_id or "",
         "owner_name": item.owner.username if item.owner else "",
         "notes": item.notes or "-",
@@ -298,7 +312,11 @@ def get_work_items(work_package_id: str, month: str = None, db: Session = Depend
     if not pkg:
         raise HTTPException(status_code=404, detail="工作包不存在")
 
-    items = db.query(models.WorkItem).filter(
+    # 预加载月度分值：_work_item_view 里的 effective_complete 需要累计分值
+    items = db.query(models.WorkItem).options(
+        selectinload(models.WorkItem.owner),
+        selectinload(models.WorkItem.monthly_scores),
+    ).filter(
         models.WorkItem.work_package_id == work_package_id
     ).order_by(models.WorkItem.id).all()
     project = pkg.project
@@ -374,11 +392,26 @@ def get_work_items(work_package_id: str, month: str = None, db: Session = Depend
 @router.delete("/work-items/{work_item_id}")
 def delete_work_item(work_item_id: int, db: Session = Depends(get_db)):
     """删除工作项。"""
-    item = db.query(models.WorkItem).filter(models.WorkItem.id == work_item_id).first()
+    item = db.query(models.WorkItem).options(
+        selectinload(models.WorkItem.monthly_scores),
+    ).filter(models.WorkItem.id == work_item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="工作项不存在")
-    if item.complete_status:
+    
+    pending_requests = db.query(models.WorkPackageSplitRequest).filter(
+        models.WorkPackageSplitRequest.work_package_id == item.work_package_id,
+        models.WorkPackageSplitRequest.status.in_(["PENDING", "SUBMITTED"])
+    ).all()
+
+    for req in pending_requests:
+        split_items = req.split_items or []
+        for split_item in split_items:
+             if split_item.get("work_item_id") == work_item_id:
+                raise HTTPException(status_code=400, detail="该工作项正在审核申请中，不能删除")
+            
+    if effective_complete(item):
         raise HTTPException(status_code=400, detail="工作项已完成，不能删除")
+
     ensure_open(item, item.work_package,
                 item.work_package.project if item.work_package else None)
 
@@ -391,7 +424,8 @@ def delete_work_item(work_item_id: int, db: Session = Depends(get_db)):
 @router.put("/confirm-completion")
 def confirm_completion(data: ConfirmCompletionIn, db: Session = Depends(get_db)):
     """确认/取消完成：只有负责人（或领导/管理员）可操作。
-    确认时记录完成时间（仅工作项有 completed_at）；取消时清空。
+    完成时间由 sync_item_completed_at 统一维护：手动确认完成、或累计月度分值已达满分
+    即记录（首次达成时间）；两者都不满足才清空（仅工作项有 completed_at 列）。
     """
     operator = db.query(models.User).filter(models.User.id == data.user_id).first()
     if not operator:
@@ -408,7 +442,7 @@ def confirm_completion(data: ConfirmCompletionIn, db: Session = Depends(get_db))
             ).first()
             if target:
                 # 工作项负责人优先，其次工作包负责人
-                owner_id = target.owner_id or (target.work_package.owner_id if target.work_package else None)
+                owner_id = target.owner_id
         elif data.target_type == "work_package":
             target = db.query(models.WorkPackage).filter(
                 models.WorkPackage.id == data.target_id
@@ -422,16 +456,16 @@ def confirm_completion(data: ConfirmCompletionIn, db: Session = Depends(get_db))
             if target:
                 owner_id = target.owner_id
         else:
-            raise HTTPException(status_code=400, detail="target_type 必须是 work_item / work_package / project")
+            raise HTTPException(status_code=400, detail="目标类型必须是 work_item / work_package / project")
     except ValueError:
-        raise HTTPException(status_code=400, detail="target_id 格式错误")
+        raise HTTPException(status_code=400, detail="目标 id 格式错误")
 
     if not target:
         raise HTTPException(status_code=404, detail="目标不存在")
 
     # 权限：负责人本人 / 领导 / 管理员
     if role not in ("LEADER", "ADMIN") and str(owner_id or "") != str(operator.id):
-        raise HTTPException(status_code=403, detail="只有负责人或领导可以确认完成")
+        raise HTTPException(status_code=403, detail="只有负责人、领导和管理员可以确认完成")
 
     # 关闭后不能再确认/取消完成（自身或其父级任一关闭都锁定）
     chain = [target]
@@ -444,13 +478,10 @@ def confirm_completion(data: ConfirmCompletionIn, db: Session = Depends(get_db))
     confirmed = bool(data.confirmed)
     target.complete_status = confirmed
 
-    # 完成时间：仅工作项有 completed_at 列，且只在确认完成时记录 / 取消时清空
+    # 完成时间：仅工作项有 completed_at 列。
+    # 取消完成时若累计分值仍已达满分，按口径仍算完成，此时保留原完成时间。
     if data.target_type == "work_item":
-        if confirmed:
-            if not target.completed_at:
-                target.completed_at = datetime.now()
-        else:
-            target.completed_at = None
+        target.completed_at = sync_item_completed_at(db, target)
 
     db.commit()
     return {
@@ -459,14 +490,16 @@ def confirm_completion(data: ConfirmCompletionIn, db: Session = Depends(get_db))
         "data": {
             "target_type": data.target_type,
             "target_id": data.target_id,
-            "complete_status": confirmed,
+            # 生效状态（工作项可能因进度已满而仍为完成）+ 手动原始状态
+            "complete_status": effective_complete(target) if data.target_type == "work_item" else confirmed,
+            "manual_complete_status": confirmed,
         },
     }
 
 # ---------------------------------------------------------------- 确认关闭（只有领导和管理员有权限）
 @router.put("/confirm-closed")
 def confirm_closed(data: ConfirmClosed, db: Session = Depends(get_db)):
-    """确认关闭：只有负责人（或领导/管理员）可操作。"""
+    """确认关闭：或领导/管理员可操作。"""
     operator = db.query(models.User).filter(models.User.id == data.user_id).first()
     if not operator:
         raise HTTPException(status_code=404, detail="操作人不存在")
@@ -474,31 +507,17 @@ def confirm_closed(data: ConfirmClosed, db: Session = Depends(get_db)):
 
     # 定位目标对象与负责人
     target = None
-    owner_id = None
     try:
         if data.target_type == "work_item":
-            target = db.query(models.WorkItem).filter(
-                models.WorkItem.id == int(data.target_id)
-            ).first()
-            if target:
-                # 工作项负责人
-                owner_id = target.owner_id 
+            target = db.query(models.WorkItem).filter(models.WorkItem.id == int(data.target_id)).first()
         elif data.target_type == "work_package":
-            target = db.query(models.WorkPackage).filter(
-                models.WorkPackage.id == data.target_id
-            ).first()
-            if target:
-                owner_id = target.owner_id
+            target = db.query(models.WorkPackage).filter(models.WorkPackage.id == data.target_id).first()
         elif data.target_type == "project":
-            target = db.query(models.Project).filter(
-                models.Project.id == int(data.target_id)
-            ).first()
-            if target:
-                owner_id = target.owner_id
+            target = db.query(models.Project).filter(models.Project.id == int(data.target_id) ).first()
         else:
-            raise HTTPException(status_code=400, detail="target_type 必须是 work_item / work_package / project")
+            raise HTTPException(status_code=400, detail="目标类型 必须是 work_item / work_package / project")
     except ValueError:
-        raise HTTPException(status_code=400, detail="target_id 格式错误")
+        raise HTTPException(status_code=400, detail="目标id 格式错误")
 
     if not target:
         raise HTTPException(status_code=404, detail="目标不存在")
@@ -508,6 +527,10 @@ def confirm_closed(data: ConfirmClosed, db: Session = Depends(get_db)):
         raise HTTPException(status_code=403, detail="只有领导或管理员可以确认关闭")
 
     confirmed = bool(data.confirmed)
+
+    if not confirmed and role != "ADMIN":
+        raise HTTPException(status_code=403, detail="只有管理员可以取消关闭")
+    
     target.isclosed = confirmed
 
     db.commit()

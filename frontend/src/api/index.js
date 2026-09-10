@@ -13,9 +13,12 @@ export const getPublicScoreBoardApi = (period, year, month, quarter) => {
   return api.get('/score-board/public-score-board', { params })
 }
 
+// 项目汇总（项目/工作包 分值汇总，按 月/季/年/全部）
+export const getProjectSummaryApi = (params) => api.get('/score-board/project-summary', { params })
+
 export const getAllUsersApi = () => api.get('/admin/users')
 export const createUserApi = (data) => api.post('/admin/users', data)
-export const deleteUserApi = (userId) => api.delete(`/admin/users/${userId}`)
+export const deleteUserApi = (userId, currentUserId) => api.delete(`/admin/users/${userId}`, { params: { currentUserId } })
 export const updateUserApi = (userId,data) => api.put(`/admin/users/${userId}`, data)
 // 修改自己的登录密码（校验旧密码）
 export const changePasswordApi = (data) => api.put('/auth/password', data) 
@@ -58,12 +61,14 @@ export const getMyWorkPackagesPagedApi = (userId, params) =>
   api.get(`/work-logs/my-work-packages/${userId}`, { params })
 // 保存工作项本月分值（直接生效，不经过审核）
 export const saveMonthScoreApi = (workItemId, data) => api.put(`/score-board/work-items/${workItemId}/month-score`, data)
-
+//工作完成情况汇总
+export const getCompletedSituationApi = (params) => api.get('/score-board/completed-situation', { params })
 // 工作包拆分申请（员工申请拆解工作包 → 领导审核）
 export const createSplitRequestApi = (data) => api.post('/review/split-requests', data)
 export const getSplitRequestsApi = (userId) => api.get(`/review/split-requests?user_id=${userId}`)
 export const reviewSplitRequestApi = (requestId, data) => api.post(`/review/split-requests/${requestId}/review`, data)
 export const editSplitRequestApi = (requestId, body) => api.put(`/review/split-requests/${requestId}`, body)
+export const removeSplitItemApi = (requestId, body) => api.post(`/review/split-requests/${requestId}/remove-item`, body)
 
 export const saveQualityScoreApi = (workItemId, data) =>
   api.put(`/score-board/work-items/${workItemId}/quality_score`, data)

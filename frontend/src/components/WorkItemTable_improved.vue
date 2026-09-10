@@ -1,13 +1,13 @@
 <template>
   <div class="work-item-table">
-    <div v-if="canManage" class="table-actions">
+    <div class="table-actions">
       <el-tag v-if="pkgLocked" type="danger" effect="dark" size="small" class="closed-notice">
         工作包或所属项目已关闭，禁止新增/编辑/填分
       </el-tag>
-      <el-button type="primary" plain :disabled="pkgLocked || !stagedCount" :loading="saving" size="small" @click="handleOpenBatchSubmit">
+      <el-button v-if="canManage || hasStagedOwned" type="primary" plain :disabled="pkgLocked || !stagedCount" :loading="saving" size="small" @click="handleOpenBatchSubmit">
         提交<el-badge v-if="stagedCount" :value="stagedCount" class="batch-badge" />
       </el-button>
-      <el-button type="success" plain size="small" :disabled="pkgLocked" @click="handleAddWorkItem">新增工作项</el-button>
+      <el-button v-if="canManage" type="success" plain size="small" :disabled="pkgLocked" @click="handleAddWorkItem">新增工作项</el-button>
     </div>
 
     <!-- 填写/查看月份：每月前2天可切换到上月补填 -->
@@ -28,7 +28,8 @@
       empty-text="该工作包下暂无工作项，点击「新增工作项」可添加"
       :row-class-name="rowClassName"
     >
-      <el-table-column prop="name" label="工作项名称" min-width="150">
+      <el-table-column type="index" label="序号" width="52" align="center" fixed="left" />
+      <el-table-column prop="name" label="名称" min-width="150">
         <template #default="{ row }">
           <el-input v-if="row.isEdit" v-model="row.name" size="small" placeholder="请输入名称" />
           <span v-else>{{ row.name }}</span>
@@ -80,7 +81,7 @@
             style="width: 100%"
             placeholder="选择日期"
           />
-          <el-tag v-else-if="row.deadline" type="danger" effect="plain">{{ row.deadline }}</el-tag>
+          <el-tag v-else-if="row.deadline" :type="deadlineTagType(row.deadline)" effect="plain">{{ row.deadline }}</el-tag>
           <span v-else>-</span>
         </template>
       </el-table-column>
@@ -107,17 +108,16 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="进度" width="100" align="center">
+      <el-table-column label="进度" width="108" align="center">
         <template #default="{ row }">
           <div class="progress-wrapper">
-            <span class="progress-text">{{ row.progress || 0 }}%</span>
-            <el-progress 
-              type="circle" 
-              :percentage="row.progress || 0" 
-              :width="20" 
+            <el-progress
+              :percentage="Math.min(100, Math.max(0, Number(row.progress || 0)))"
+              :width="22"
               :stroke-width="4"
               :show-text="false"
             />
+            <span class="progress-text">{{ row.progress || 0 }}%</span>
           </div>
         </template>
       </el-table-column>
@@ -133,7 +133,7 @@
           </template>
           <template v-else>
             <span class="score-text">{{ row.quality_score ?? 0 }}</span>
-            <el-button v-if="canManageQuality && !isLocked(row)" type="primary" link size="small" @click="row.isEditQuality = true">填写</el-button>
+            <el-button v-if="canManageQuality && !isLocked(row) && !row.isPending" type="primary" link size="small" @click="row.isEditQuality = true">填写</el-button>
           </template>
         </template>
       </el-table-column>
@@ -156,30 +156,18 @@
           </template>
           <template v-else>
             <span class="score-text">{{ row.month_score ?? 0 }}</span>
-            <el-button v-if="canManageRow(row) && !isLocked(row) && row.id " type="primary" link size="small" @click="row.isEditMonth = true">填写</el-button>
+            <el-button v-if="canEditScore(row) && !isLocked(row) && !row.isPending && row.id " type="primary" link size="small" @click="row.isEditMonth = true">填写</el-button>
             
           </template>
         </template>
       </el-table-column>
 
-      <el-table-column label="状态" width="170" align="center" fixed="right">
+      <el-table-column label="状态" min-width="100" align="center" fixed="right">
         <template #default="{ row }">
           <div class="status-cell">
-            <!-- 始终显示一个状态标签，避免整列空白 -->
-            <el-tag v-if="row.closed_status" size="small" type="danger" effect="plain">已关闭</el-tag>
-            <el-tag v-else-if="isLocked(row)" size="small" type="danger" effect="plain">所属已关闭</el-tag>
-            <el-tag v-else-if="row.complete_status" size="small" type="success" effect="plain">已完成</el-tag>
-            <!-- 权限按钮（仅在可操作且未锁定时显示） -->
-            <div class="status-actions">
-              <el-button v-if="canManageRow(row) && !isLocked(row) && !row.complete_status && row.id"
-                type="success" link size="small" :loading="confirming" @click="confirmComplete(row)">{{确认完成}}
-              </el-button>
-              <el-button v-if="canManageRow(row) && !isLocked(row) && row.complete_status"
-                type="warning" link size="small" @click="cancelComplete(row)">取消完成
-              </el-button>
-              <el-button v-if="canManageClosed(row) && row.id"
-                type="danger" link size="small" :loading="confirming" @click="confirmClosed(row)">{{ row.closed_status ? '取消关闭' : '确认关闭' }}
-              </el-button>
+            <div class="status-dot-wrapper">
+              <span class="status-dot" :style="{ backgroundColor: getStatusConfig(row).color }" ></span>
+              <span class="status-text" :style="{ color: getStatusConfig(row).color }">{{ getStatusConfig(row).label }}</span>
             </div>
           </div>
         </template>
@@ -197,12 +185,44 @@
           <template v-else>
             <el-tag v-if="row.isStaged" size="small" type="info" effect="plain" class="staged-tag">已暂存</el-tag>
             <el-button v-if="canManageRow(row) && !isLocked(row)" type="primary" link size="small" @click="row.isEdit = true">编辑</el-button>
-            <el-button v-if="isItemOwner(row) && !isLocked(row) && row.id " type="warning" link size="small" @click="openTransfer(row)">转办</el-button>
-            <el-popconfirm v-if="canManageRow(row) && !isLocked(row) && !row.complete_status && row.id" title="确定删除该工作项？" confirm-button-type="danger" @confirm="removeItem(row)">
-              <template #reference>
-                <el-button type="danger" link size="small">删除</el-button>
+            <el-dropdown :disabled="!hasMoreOptions(row)" trigger="click" @command="(command) => handleMoreCommand(command, row)">
+              <el-button :disabled="!hasMoreOptions(row)" type="info" link size="small">更多
+                <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item v-if="isItemOwner(row) && !isLocked(row) && row.id" command="transfer" >
+                    <span class="transfer-menu-item">转办</span>
+                  </el-dropdown-item>
+
+                  <el-dropdown-item
+                    v-if="canManageRow(row) &&!isLocked(row) &&!row.complete_status && row.id" command="delete" divided >
+                    <span class="danger-menu-item">删除</span>
+                  </el-dropdown-item>
+
+                  <!-- 完成/取消完成：按手动原始状态（进度自动完成时按钮仍可用） -->
+                  <el-dropdown-item
+                    v-if="canManageRow(row) &&!isLocked(row) &&!row.manual_complete_status && row.id" command="confirmComplete" divided> 确认完成
+                  </el-dropdown-item>
+
+                  <el-dropdown-item
+                    v-if="canManageRow(row) &&!isLocked(row) && row.manual_complete_status && row.id " command="cancelComplete" >取消完成
+                  </el-dropdown-item>
+
+                  <!-- 确认关闭 -->
+                  <el-dropdown-item
+                    v-if="canManageClosed(row) && row.id && !row.closed_status" command="confirmClosed" divided >
+                    <span class="danger-menu-item">确认关闭</span>
+                  </el-dropdown-item>
+
+                  <!-- 取消关闭 -->
+                  <el-dropdown-item
+                    v-if=" row.closed_status && isAdmin " command="cancelClosed" > 取消关闭
+                  </el-dropdown-item>
+
+                </el-dropdown-menu>
               </template>
-            </el-popconfirm>
+            </el-dropdown>
           </template>
         </template>
       </el-table-column>
@@ -276,7 +296,7 @@
 
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   createSplitRequestApi,
   deleteWorkItemApi,
@@ -291,6 +311,8 @@ import {
 } from '../api'
 import { useUserStore } from '../stores/user'
 import { useLevelDefs } from '../comosables/useLevelDefs'
+import { confirmClose, confirmCancelClose } from '../components/confirm'
+import { ArrowDown, Loading, CircleCheck, CircleClose, Lock } from '@element-plus/icons-vue'
 
 // 模块级缓存：展开行收起再展开时不重新请求后端（方案A），避免本地暂存/待审核行丢失
 const workItemCache = new Map()
@@ -353,6 +375,11 @@ const canManage = computed(() => {
   return workPackage.value && String(workPackage.value.owner_id) === String(userStore.userInfo?.id)
 })
 
+const hasStagedOwned = computed(() =>{
+  if(!userStore.isLoggedIn) return false
+  return workItems.value.some(w => w.isStaged && String(w.owner_id) === String(userStore.userInfo?.id))
+})
+
 const loadUsers = async () => {
   try {
     const res = await getAllUsersApi()
@@ -365,6 +392,8 @@ const loadUsers = async () => {
 // 只有领导可以编辑质量分
 const canManageQuality = computed(() => userStore.isLEADER)
 
+const isAdmin = computed(() => userStore.isAdmin)
+
 // 当前用户是否是某个工作项的负责人（转办拆分后各自负责人不同）
 const currentUserId = computed(() => String(userStore.userInfo?.id || ''))
 const isItemOwner = (row) => {
@@ -373,6 +402,12 @@ const isItemOwner = (row) => {
 }
 // 行级管理权限：包级权限（管理员/领导/科室/工作包负责人）或本人负责的工作项
 const canManageRow = (row) => canManage.value || isItemOwner(row)
+// 填写分值权限：领导/管理员/工作项负责人本人
+const canEditScore = (row) => {
+  if (!userStore.isLoggedIn) return false
+  if (userStore.isAdmin || userStore.isLEADER) return true
+  if (String(row.owner_id || '') === currentUserId.value ) return true
+}
 // 是否展示「操作」列：包级可管理，或存在本人负责的工作项
 const hasManage = computed(() => canManage.value || workItems.value.some(isItemOwner))
 // 关闭权限：只有领导/管理员可以确认/取消关闭
@@ -435,8 +470,47 @@ const confirmTransfer = async () => {
   }
 }
 
-// 已完成工作项整行灰显
-const rowClassName = ({ row }) => (row.closed_status || row.complete_status ? 'completed-row' : '')
+// 行样式：待审核/已关闭/已完成使用不同的提示
+const rowClassName = ({ row }) => {
+  if (row.isPending) return 'pending-row'         // 待审核 - 淡黄提示（只读）
+  if (row.closed_status) return 'closed-row'      // 已关闭 - 更深灰显
+  if (row.complete_status) return 'completed-row' // 已完成 - 较浅灰显
+  return ''
+}
+const statusConfig = {
+  '进行中': {
+    icon: Loading,
+    color: '#409EFF',
+    tagType: 'primary',
+    label: '进行中'
+  },
+  '已完成': {
+    icon: CircleCheck,
+    color: '#67C23A',
+    tagType: 'success',
+    label: '已完成'
+  },
+  '已关闭': {
+    icon: CircleClose,
+    color: '#F56C6C',
+    tagType: 'danger',
+    label: '已关闭'
+  },
+  '所属已关闭': {
+    icon: Lock,
+    color: '#909399',
+    tagType: 'info',
+    label: '所属已关闭'
+  }
+}
+
+// ============ 获取状态配置 ============
+const getStatusConfig = (row) => {
+  if (row.closed_status) return statusConfig['已关闭']
+  if (isLocked(row)) return statusConfig['所属已关闭']
+  if (row.complete_status) return statusConfig['已完成']
+  return statusConfig['进行中']
+}
 
 const notifyChanged = () => emit('changed')
 
@@ -479,17 +553,26 @@ const mergeLocalRows = (serverItems) => {
     const row = { ...l }
     // 已暂存（未提交）→ 始终保留（服务器上还是旧数据）
     if (row.isStaged) { merged.unshift(row); return }
-    // 待审核且服务器已存在同 id → 已生效，去掉本地记录
-    if (row.id && serverIds.has(String(row.id))) return
-    // 其余（新增未落库 / 待审核）→ 放回表格最前
+    if (row.isPending) {
+      // 待审核（编辑/新增）→ 无论服务器是否已有同 id 都保留本地行，
+      // 由 reconcilePending 依据申请状态裁决去留（APPROVED 才清除）
+      if (row.id && serverIds.has(String(row.id))) {
+        // 编辑待审核：用本地行替换服务器旧行，避免同一工作项显示两行
+        const idx = merged.findIndex(m => String(m.id) === String(row.id))
+        if (idx >= 0) merged.splice(idx, 1)
+      }
+      merged.unshift(row)
+      return
+    }
+    // 其余（新增未落库本地草稿）→ 放回表格最前
     merged.unshift(row)
   })
   return merged
 }
 
-// 对账：清除本地 pending 幽灵行
-// - 有 request_id：查询申请状态，APPROVED 的申请对应行清除
-// - 无 request_id（老版本残留的幽灵行，无法对账）：一律视为残留，直接清除
+// 对账：裁决本地 pending 行的去留
+// - 有 request_id：查申请状态 → APPROVED 清除本地行；REJECTED 转回可编辑；其余保持“待审核”
+// - 无 request_id（老版本残留幽灵行，无法对账）：一律视为残留，直接清除
 const reconcilePending = async (items) => {
   // 1) 先清掉“没有申请id 的 pending 行”（老版本残留幽灵行）
   let list = items.filter(w => !(w.isPending && !w.request_id))
@@ -501,10 +584,22 @@ const reconcilePending = async (items) => {
       const res = await getSplitRequestsApi(userStore.userInfo?.id)  // 员工查自己的，领导/管理员查全部
       const statusMap = {}
       ;(res.data?.data || []).forEach(r => { statusMap[r.id] = r.status })
+      // APPROVED：申请已生效 → 清掉本地 pending 行（随后由 fetchData 重拉服务器最新值）
       const approvedIds = new Set(ids.filter(id => statusMap[id] === 'APPROVED'))
       if (approvedIds.size) {
         list = list.filter(w => !(w.isPending && approvedIds.has(w.request_id)))
       }
+      // REJECTED：被驳回 → 转回“已暂存/可修改”，便于修改后重新提交
+      const rejectedIds = new Set(ids.filter(id => statusMap[id] === 'REJECTED'))
+      if (rejectedIds.size) {
+        list = list.map(w => {
+          if (w.isPending && rejectedIds.has(w.request_id)) {
+            return { ...w, isPending: false, isStaged: true, request_id: undefined }
+          }
+          return w
+        })
+      }
+      // 其余（PENDING / SUBMITTED / 查询不到）→ 保持“待审核”
     } catch {
       // 对账接口失败时静默保留原状，不影响展示
     }
@@ -571,7 +666,9 @@ watch(fillMonth, () => {
 
 const handleAddWorkItem = () => {
   if (pkgLocked.value) return ElMessage.warning('工作包或所属项目已关闭，不能新增工作项')
+  const randomClientId = generateClientId();
   workItems.value.unshift({
+    client_id: randomClientId,
     id: null,
     name: '',
     standard: '',
@@ -591,6 +688,14 @@ const handleAddWorkItem = () => {
     isEditQuality: false
   })
   syncCache()
+}
+
+const generateClientId = () => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0
+    const v = c === 'x' ? r : (r & 0x3 | 0x8)
+    return v.toString(16)
+  })
 }
 
 // 必填校验：名称 / 难度 / 重要度 / 创新度 / 截止时间 
@@ -649,6 +754,7 @@ const confirmBatchSubmit = async () => {
       work_package_id: props.workPackageId,
       reason: '批量提交工作项：' + reason,
       split_items: rows.map(row => ({
+        client_id: row.client_id,
         work_item_id: row.isNew ? null : row.id,
         name: row.name.trim(),
         standard: row.standard,
@@ -740,6 +846,57 @@ const cancelEdit = (row, index) => {
   syncCache()   // 同步缓存，避免取消后收起再展开又“复活”
 }
 
+const handleMoreCommand = async (command, row) => {
+  switch (command) {
+    case 'transfer':
+      await openTransfer(row)
+      break
+    case 'delete':
+      try {
+        await ElMessageBox.confirm(
+          '确定删除该工作项？',
+          '删除确认',
+          {
+            confirmButtonText: '确定删除',
+            cancelButtonText: '取消',
+            type: 'warning'
+          }
+        )
+        await removeItem(row)
+      } catch (err) {
+        // 用户点击取消时不提示
+        if (err !== 'cancel' && err !== 'close') {
+          console.error(err)
+        }
+      }
+      break
+
+    case 'confirmComplete':
+      await confirmComplete(row)
+      break
+
+    case 'cancelComplete':
+      await cancelComplete(row)
+      break
+
+    case 'confirmClosed':
+      await handleClosedConfirm(row)
+      break
+
+    case 'cancelClosed':
+      await handleCancelClosedConfirm(row)
+      break
+  }
+}
+
+// 简化版：直接在模板中用 computed 或方法
+const hasMoreOptions = (row) => {
+  // 只要满足任何一个条件就返回 true
+  return !!(isItemOwner(row) && !isLocked(row) && row.id) ||
+         !!(canManageRow(row) && !isLocked(row) && row.id) ||
+         !!(canManageClosed() && row.id)
+}
+
 const removeItem = async (row) => {
   try {
     const res = await deleteWorkItemApi(row.id)
@@ -795,6 +952,16 @@ const cancelComplete = async (row) => {
   }
 }
 
+const handleClosedConfirm = (row) => {
+  confirmClose('工作项', () => {
+    confirmClosed(row)
+  })
+}
+
+const handleCancelClosedConfirm = (row) => {
+  confirmCancelClose('工作项', () => { confirmClosed(row) })
+}
+
 // 确认/取消关闭（只有领导/管理员，后端会校验）
 const confirmClosed = async (row) => {
   if (!row.id) return
@@ -818,6 +985,15 @@ const confirmClosed = async (row) => {
   }
 }
 
+const deadlineTagType = (date) => {
+  if (!date) return 'info'
+  const target = new Date(`${date}T23:59:59`)
+  const diff = Math.ceil((target.getTime() - Date.now()) / 86400000)
+  if (diff < 0) return 'danger'
+  if (diff <= 3) return 'warning'
+  return 'info'
+}
+
 onMounted(() => {
   fetchData()
   loadUsers()
@@ -828,6 +1004,52 @@ onMounted(() => {
 .work-item-table {
   width: 100%;
 }
+/* 已完成 - 浅灰 */
+.work-item-table :deep(.completed-row td) {
+  background-color: #f6fbf7 !important;
+  color: #94a3b8;
+}
+
+.work-item-table :deep(.completed-row .work-name) {
+  color: #64748b;
+}
+
+.work-item-table :deep(.completed-row .el-tag) {
+  opacity: 0.7;
+}
+
+.work-item-table :deep(.completed-row .score-text) {
+  color: #94a3b8;
+}
+
+/* 已关闭 - 深灰 */
+.work-item-table :deep(.closed-row td) {
+  background-color: #f7f7f8 !important;
+  color: #6b7280;
+}
+
+
+.work-item-table :deep(.closed-row .work-name) {
+  color: #4b5563;
+  font-weight: 400;
+}
+
+.work-item-table :deep(.closed-row .el-tag) {
+  opacity: 0.4;
+}
+
+.work-item-table :deep(.closed-row .score-text) {
+  color: #6b7280;
+}
+
+.work-item-table :deep(.closed-row .employee-text) {
+  color: #6b7280;
+}
+
+.work-item-table :deep(.closed-row .progress-text) {
+  color: #6b7280;
+}
+
 
 .table-actions {
   display: flex;
@@ -925,32 +1147,56 @@ onMounted(() => {
 }
 
 
-
-/* 进度圆环样式 */
 .progress-wrapper {
-  display:flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px; /* 圆环和文字之间的间距 */
+  gap: 7px;
 }
 
 .progress-text {
+  min-width: 34px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.danger-menu-item {
+  color: var(--el-color-danger);
+  font-size: 14px;
+}
+
+.transfer-menu-item{
+  color: var(--el-color-warning); 
+  font-size: 14px;
+}
+
+.el-dropdown {
+  margin-left: 4px;
+}
+
+/* 圆点+文字样式 */
+.status-dot-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+.status-text {
   font-size: 13px;
-  color: #606266;
   font-weight: 500;
 }
 
-/* :deep(.completed-row) {
-  background: #f3f4f6 !important;
-  color: #9ca3af;
-} */
-
-/* :deep(.completed-row td) {
-  background: #f3f4f6 !important;
-} */
-
-/* :deep(.completed-row .el-button--link) {
-  color: #c0c4cc;
-  pointer-events: none;
-} */
+.work-item-table :deep(.status-text) {
+  color: #334155 !important;  /* 统一改为深灰色 */
+  font-weight: 500;
+}
 </style>

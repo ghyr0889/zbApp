@@ -6,7 +6,7 @@ from sqlalchemy import func
 import models
 from database import get_db
 from schemas import TransferCreate
-from utils import ensure_open
+from utils import ensure_open, sync_item_completed_at
 
 router = APIRouter(prefix="/api/v1/transfers", tags=["Task Transfers"])
 
@@ -228,6 +228,9 @@ def process_transfer(
         else:
             # 部分转出：原工作项减分保留（已填月度分值留在原工作项），新建一个工作项给接收人
             item.score = round((item.score or 0.0) - score, 2)
+            db.flush()                        # 先让新的满分落库，SUM 查询才准
+            sync_item_completed_at(db, item)  # 满分降低后可能刚好达到完成条件
+            # 新工作项没有任何月度分值（累计 0 < score），必定未完成，completed_at 保持 None
             new_item = models.WorkItem(
                 work_package_id=item.work_package_id,
                 name=item.name,

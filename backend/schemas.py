@@ -66,20 +66,6 @@ class WorkPackageCreate(BaseModel):
     name: Optional[str] = Field(None, description="工作包名称")
 
 
-# class WorkItemCreate(BaseModel):
-#     """创建/更新工作项。"""
-#     work_item_id: Optional[int] = Field(None, description="工作项 ID，新增时为空，修改时传入")
-#     work_package_id: int = Field(..., description="所属工作包 ID")
-#     name: str = Field(..., description="工作项名称")
-#     standard: Optional[str] = Field(None, description="工作项完成标准")
-#     difficulty: Optional[str] = Field(None, description="工作项难度")
-#     importance: Optional[str] = Field(None, description="工作项重要性")
-#     innovation: Optional[str] = Field(None, description="工作项创新性")
-#     deadline: Optional[str] = Field(..., description="完成节点要求（YYYY-MM-DD）")
-#     score: Optional[float] = Field(0.0, description="分值（可选，若不传则按默认分值计算）")
-#     notes:Optional[str] = Field(None, description="备注")
-
-
 class MonthScoreIn(BaseModel):
     """保存工作项本月分值（员工直接填写、直接生效，不经过审核）。"""
     user_id: str = Field(..., description="填写人（员工）ID")
@@ -112,6 +98,7 @@ class LevelDefsUpdate(BaseModel):
 
 class SplitItemIn(BaseModel):
     """申请中携带的一个工作项（新增或编辑）。"""
+    client_id: Optional[str] = Field(None, description="申请内唯一标识，前端生成，删除时使用")
     work_item_id: Optional[int] = Field(None, description="工作项 ID（编辑时传入；新增时为空）")
     name: str = Field(..., description="工作项名称")
     standard: Optional[str] = Field(None, description="完成标准")
@@ -143,6 +130,10 @@ class SplitRequestEdit(BaseModel):
     reason: Optional[str] = Field(None, description="修改后的拆分原因")
     split_items: list[SplitItemIn] = Field(..., description="修改后的工作项列表")
 
+class RemoveSplitItem(BaseModel):
+    """从拆分申请中删除一个工作项。"""
+    editor_id: str = Field(..., description="操作人 ID（员工本人 / 领导 / 管理员）")
+    client_id: Optional[str] = Field(None, description="申请内唯一标识，前端生成，删除时使用")
 
 class TransferCreate(BaseModel):
     task_id: Optional[str] = Field(None, description="任务分配记录 ID（兼容，可空）")

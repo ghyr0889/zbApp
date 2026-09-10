@@ -37,19 +37,19 @@
             empty-text="您暂未负责任何工作包"
             row-key="id"
             :row-class-name="tableRowClassName"
-            :header-cell-style="{ background: '#f8fafc', color: '#334155', fontWeight: 'bold' }"
+            :header-cell-style="{background: '#ffffff', color: '#64748b', fontWeight: '600'}"
           >
             <!-- 展开列：展示该工作包下的工作项（可编辑/删除/填分值） -->
             <el-table-column type="expand">
               <template #default="{ row: pkg }">
                 <div class="nested-table-container">
-                  <WorkItemTable :workPackageId="pkg.id" :refresh-key="refreshKey" @changed="refreshAll" />
+                  <WorkItemTable_improved :workPackageId="pkg.id" :refresh-key="refreshKey" @changed="refreshAll" />
                 </div>
               </template>
             </el-table-column>            
-            <el-table-column prop="id" label="工作包编号" min-width="140" align="center">
+            <el-table-column prop="id" label="工作包编号" min-width="120" align="center">
               <template #default="{ row: pkg }">
-                <span class="code-text">{{ pkg.code }}</span>
+                <span>{{ pkg.code }}</span>
               </template>
             </el-table-column>
             <el-table-column prop="category_name" label="工作包类别" min-width="120" align="center">
@@ -93,21 +93,27 @@
               </template>
             </el-table-column>
 
-            <el-table-column label="状态" width="230" align="center" fixed="right">
+            <el-table-column label="状态" min-width="100" align="center" fixed="right">
               <template #default="{ row: pkg }">
-                <el-button v-if="canConfirmPkg(pkg) && !pkg.closed_status && !pkg.project_closed" type="success" link size="small" :loading="confirming" @click="confirmPkg(pkg)">
-                  {{ pkg.complete_status ? '取消完成' : '确认完成' }}
-                </el-button>
-                <el-button v-if="canClosed && pkg.id" type="danger" link size="small" :loading="confirming" @click="confirmClosed(pkg)">
-                  {{ pkg.closed_status ? '取消关闭' : '确认关闭' }}
-                </el-button>
-                <el-tag v-if="pkg.closed_status || pkg.project_closed" size="small" type="danger" effect="plain">{{ pkg.project_closed ? '所属项目已关闭' : '已关闭' }}</el-tag>
+                <div class="status-cell">
+                  <div class="status-dot-wrapper">
+                    <span class="status-dot" :style="{ backgroundColor: getStatusConfig(pkg).color }" ></span>
+                    <span class="status-text" :style="{ color: getStatusConfig(pkg).color }">{{ getStatusConfig(pkg).label }}</span>
+                  </div>
+                </div>
               </template>
             </el-table-column>
 
-            <el-table-column label="操作" min-width="100" align="center" fixed="right">
+            <el-table-column label="操作" min-width="150" align="center" fixed="right">
               <template #default="{ row: pkg }">
-                <el-button v-if="isPkgOwner(pkg) && !pkg.closed_status && !pkg.project_closed" type="warning" link size="small" @click="handleTransferWorkPackage(pkg)">转办</el-button>
+                <!-- 转办：按生效状态（已自动完成/手动完成均不可转办） -->
+                <el-button v-if="isPkgOwner(pkg) && !pkg.complete_status && !pkg.closed_status && !pkg.project_closed" 
+                type="warning" link size="small" @click="handleTransferWorkPackage(pkg)">转办
+                </el-button>
+                <!-- 完成/取消完成：按手动原始状态 -->
+                <el-button v-if="canConfirmPkg(pkg) && !pkg.closed_status && !pkg.project_closed" type="success" link size="small" :loading="confirming" @click="confirmPkg(pkg)">
+                  {{ pkg.manual_complete_status ? '取消完成' : '完成' }}
+                </el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -137,7 +143,7 @@
             empty-text="暂无项目数据"
             row-key="project_id"
             :row-class-name="tableRowClassName"
-            :header-cell-style="{ background: '#f8fafc', color: '#334155', fontWeight: 'bold' }"
+            :header-cell-style="{ background: '#ffffff', color: '#64748b', fontWeight: '600' }"
             @row-dblclick="openProjectDetail"
           >
 
@@ -156,14 +162,14 @@
             <el-table-column prop="project_code" label="项目编号" min-width="100">
               <template #default="{ row }">
                 <el-input v-if="row.isEdit" v-model="row.project_code" size="small" placeholder="请输入项目编号" />
-                <span v-else class="project-code">{{ row.project_code }}</span>
+                <span v-else>{{ row.project_code }}</span>
               </template>
             </el-table-column>
 
             <el-table-column prop="project_name" label="项目名称" min-width="140">
               <template #default="{ row }">
                 <el-input v-if="row.isEdit" v-model="row.project_name" size="small" placeholder="请输入项目名称" />
-                <span v-else class="project-title">{{ row.project_name }}</span>
+                <span v-else>{{ row.project_name }}</span>
               </template>
             </el-table-column>
 
@@ -171,7 +177,7 @@
               <template #default="{ row }">
                 <el-input v-if="row.isEdit" v-model="row.category" size="small" placeholder="请输入项目类别" />
                 <template v-else>
-                  <span v-if="row.category" class="project-code" type="info" effect="plain">{{ row.category }}</span>
+                  <span v-if="row.category" type="info" effect="plain">{{ row.category }}</span>
                   <span v-else class="tip-text">-</span>
                 </template>
               </template>
@@ -200,7 +206,7 @@
                   <el-option v-for="user in userOptions" :key="user.id" :label="`${user.username}（${user.id}）`" :value="user.id" />
                 </el-select>
                 <template v-else>
-                  <span class="owner-text" v-if="row.owner_name || row.owner_id">
+                  <span v-if="row.owner_name || row.owner_id">
                     {{ row.owner_name ? `${row.owner_name}` : row.owner_id }}
                   </span>
                   <span v-else class="tip-text">暂未指定</span>
@@ -214,7 +220,7 @@
                   <el-option v-for="user in userOptions" :key="user.id" :label="`${user.username}（${user.id}）`" :value="user.id" />
                 </el-select>
                 <template v-else>
-                  <span class="owner-text" v-if="row.tech_owner_id || row.tech_owner_name">
+                  <span v-if="row.tech_owner_id || row.tech_owner_name">
                     {{ row.tech_owner_name ? `${row.tech_owner_name}` : row.tech_owner_id }}
                   </span>
                   <span v-else class="tip-text">暂未指定</span>
@@ -238,17 +244,13 @@
             </el-table-column>
 
              <el-table-column label="状态" min-width="100" align="center" fixed="right">
-              <template #default="{ row, $index }">
-                <el-tag v-if="row.complete_status" type="success" size="small">已完成</el-tag>
-                <el-tag v-if="row.closed_status" type="danger" effect="plain" size="small">已关闭</el-tag>
-                <div style="margin-top: 4px">
-                  <el-button v-if="canManageProject(row)" type="success" link size="small" :disabled="row.closed_status" :loading="confirming" @click="confirmProject(row)">
-                    {{ row.complete_status ? '取消完成' : '确认完成' }}
-                  </el-button>
+              <template #default="{ row }">
+                <div class="status-cell">
+                  <div class="status-dot-wrapper">
+                    <span class="status-dot" :style="{ backgroundColor: getStatusConfig(row).color }" ></span>
+                    <span class="status-text" :style="{ color: getStatusConfig(row).color }">{{ getStatusConfig(row).label }}</span>
+                  </div>
                 </div>
-                <el-button v-if="canClosed" type="danger" link size="small" :loading="confirming" @click="confirmClosedProject(row)">
-                  {{ row.closed_status ? '取消关闭' : '确认关闭' }}
-                </el-button>
               </template>
             </el-table-column>
 
@@ -260,9 +262,43 @@
                     <el-button type="info" link size="small" @click="cancelProjectEdit(row, $index)">取消</el-button>
                   </template>
                   <template v-else>
-                    <el-button type="primary" link size="small" :disabled="row.closed_status" @click="removeProject(row)">删除</el-button>
                     <el-button type="primary" link size="small" :disabled="row.closed_status" @click="row.isEdit = true">编辑</el-button>
                   </template>
+                   <el-dropdown trigger="click" :disabled="!hasMoreOptions(row)" @command="(command) => handleMoreCommand(command, row)">
+                    <el-button type="info" link size="small">更多
+                      <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                    </el-button>
+                    <template #dropdown>
+                      <el-dropdown-menu>
+                        <!-- 删除：仅未完成且未关闭（合成口径：进度达成也不可删） -->
+                        <el-dropdown-item
+                          v-if="!row.complete_status && !row.closed_status" command="delete" divided >
+                          <span class="danger-menu-item">删除</span>
+                        </el-dropdown-item>
+
+                        <!-- 完成 / 取消完成：按手动原始状态互斥 -->
+                        <el-dropdown-item
+                          v-if="!row.manual_complete_status && !row.closed_status" command="confirmComplete" divided> 确认完成
+                        </el-dropdown-item>
+
+                        <el-dropdown-item
+                          v-if="row.manual_complete_status && !row.closed_status" command="cancelComplete" >取消完成
+                        </el-dropdown-item>
+
+                        <!-- 确认关闭：仅未关闭，领导/管理员 -->
+                        <el-dropdown-item
+                          v-if="canClosed && !row.closed_status" command="confirmClosed" divided >
+                          <span class="danger-menu-item">确认关闭</span>
+                        </el-dropdown-item>
+
+                        <!-- 取消关闭：仅已关闭且管理员 -->
+                        <el-dropdown-item
+                          v-if="row.closed_status && isAdmin" command="cancelClosed" > 取消关闭
+                        </el-dropdown-item>
+
+                      </el-dropdown-menu>
+                    </template>
+                  </el-dropdown>
                 </template>
               </template>
             </el-table-column>
@@ -281,6 +317,7 @@
           </div>
         </el-tab-pane>
       </el-tabs>
+
       <el-dialog v-model="transferDialogVisible" title="发起工作转办" width="460px" draggable>
         <el-form label-width="70px">
           <el-form-item label="工作包">
@@ -305,7 +342,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   createProjectApi,
@@ -320,7 +357,9 @@ import {
 } from '../api'
 import { useUserStore } from '../stores/user'
 import { useRouter } from 'vue-router'
-import WorkItemTable from '../components/WorkItemTable.vue'
+import { confirmClose, confirmCancelClose } from '../components/confirm'
+import WorkItemTable_improved from '../components/WorkItemTable_improved.vue'
+import { ArrowDown, Loading, CircleCheck, CircleClose, Lock } from '@element-plus/icons-vue'
 
 const userStore = useUserStore()
 const router = useRouter()
@@ -329,8 +368,12 @@ const isLeader = computed(() => userStore.isLEADER)
 const isDepartment = computed(() => userStore.isDEPARTMENT)
 const currentUserId = computed(() => String(userStore.userInfo?.id || ''))
 const activeTab = ref('mine')   // 默认显示“所有项目”
-// 已完成/已关闭行灰显
-const tableRowClassName = ({ row }) => (row.complete_status || row.closed_status ? 'completed-row' : '')
+
+const tableRowClassName = ({ row }) => {
+  if (row.closed_status) return 'closed-row'      // 返回深灰类名
+  if (row.complete_status) return 'completed-row' // 返回浅灰类名
+  return ''
+}
 
 //是否有权新增项目
 const canAddProject = computed(() => isAdmin.value || isLeader.value || isDepartment.value)
@@ -408,6 +451,7 @@ const fetchProjects = async (page = 1) => {
         tech_owner_name: p.tech_owner_name === '未指定机型主管' ? '' : p.tech_owner_name,
         progress: p.project_progress || 0,
         complete_status: p.complete_status,
+        manual_complete_status: p.manual_complete_status,
         closed_status: p.closed_status || false,
         work_package_count: p.work_package_count || 0,
         work_packages: [],
@@ -471,6 +515,87 @@ const refreshAll = () => {
   fetchMyWorkPackages(myPage.value)
 }
 
+const statusConfig = {
+  '进行中': {
+    icon: Loading,
+    color: '#409EFF',
+    tagType: 'primary',
+    label: '进行中'
+  },
+  '已完成': {
+    icon: CircleCheck,
+    color: '#67C23A',
+    tagType: 'success',
+    label: '已完成'
+  },
+  '已关闭': {
+    icon: CircleClose,
+    color: '#F56C6C',
+    tagType: 'danger',
+    label: '已关闭'
+  },
+  '所属已关闭': {
+    icon: Lock,
+    color: '#909399',
+    tagType: 'info',
+    label: '所属已关闭'
+  }
+}
+// ============ 获取状态配置 ============
+const getStatusConfig = (row) => {
+  if (row.closed_status) return statusConfig['已关闭']
+  if (row.project_closed) return statusConfig['所属已关闭']
+  if (row.complete_status) return statusConfig['已完成']
+  return statusConfig['进行中']
+}
+
+// 是否存在可用的“更多”操作：控制更多按钮禁用，避免点开空菜单
+const hasMoreOptions = (row) => {
+  if (!row || row.isEdit) return false
+  if (row.closed_status) return !!isAdmin.value // 已关闭：仅管理员可“取消关闭”
+  return true                                  // 未关闭：删除/完成/关闭等均可能
+}
+
+//更多操作菜单
+const handleMoreCommand = async (command, row) => {
+  switch (command) {
+    case 'delete':
+      try {
+        await ElMessageBox.confirm(
+          '确定删除该工作项？',
+          '删除确认',
+          {
+            confirmButtonText: '确定删除',
+            cancelButtonText: '取消',
+            type: 'warning'
+          }
+        )
+        await removeProject(row)
+      } catch (err) {
+        // 用户点击取消时不提示
+        if (err !== 'cancel' && err !== 'close') {
+          console.error(err)
+        }
+      }
+      break
+    case 'confirmComplete':
+      await confirmProject(row)
+      break
+
+    case 'cancelComplete':
+      await confirmProject(row)
+      break
+
+    case 'confirmClosed':
+      await handleClosedConfirm(row)
+      break
+
+    case 'cancelClosed':
+      await handleCancelClosedConfirm(row)
+      break
+  }
+}
+
 // —— 确认完成（项目/工作包，负责人或领导/管理员）——
 const confirming = ref(false)
 // 是否为工作包负责人本人（可发起工作包转办）
@@ -498,31 +623,22 @@ const doConfirm = async (target_type, target_id, confirmed) => {
     confirming.value = false
   }
 }
-const confirmProject = (row) => doConfirm('project', row.project_id, !row.complete_status)
-const confirmPkg = (pkg) => doConfirm('work_package', pkg.id, !pkg.complete_status)
+const confirmProject = (row) => doConfirm('project', row.project_id, !row.manual_complete_status)
+const confirmPkg = (pkg) => doConfirm('work_package', pkg.id, !pkg.manual_complete_status)
+
+const handleClosedConfirm = (row) => {
+  confirmClose('项目', () => {
+    confirmClosed(row)
+  })
+}
+
+const handleCancelClosedConfirm = (row) => {
+  confirmCancelClose('项目', () => { confirmClosed(row) })
+}
 
 // —— 确认/取消关闭（工作包/项目，只有领导/管理员，后端会校验）——
 const canClosed = computed(() => isAdmin.value || isLeader.value)
-const confirmClosed = async (pkg) => {
-  confirming.value = true
-  try {
-    const res = await confirmClosedApi({
-      target_type: 'work_package',
-      target_id: pkg.id,
-      user_id: currentUserId.value,
-      confirmed: !pkg.closed_status
-    })
-    if (res.data?.code === 200) {
-      ElMessage.success(pkg.closed_status ? '已取消关闭' : '已确认关闭')
-      refreshAll()
-    }
-  } catch (err) {
-    ElMessage.error(err.response?.data?.detail || '操作失败')
-  } finally {
-    confirming.value = false
-  }
-}
-const confirmClosedProject = async (row) => {
+const confirmClosed = async (row) => {
   confirming.value = true
   try {
     const res = await confirmClosedApi({
@@ -541,7 +657,6 @@ const confirmClosedProject = async (row) => {
     confirming.value = false
   }
 }
-
 /* =============== 行内编辑相关方法 =============== */
 //删除项目
 const removeProject = async (row) => {
@@ -672,8 +787,8 @@ onMounted(async () => {
   await fetchMyWorkPackages(1)
   await fetchAdminOptions()
 })
-</script>
 
+</script>
 <style scoped>
 /* 延续美化风格的 CSS 样式 */
 .project-overview {
@@ -690,6 +805,13 @@ onMounted(async () => {
   border-radius: 12px;
   border: none;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+}
+
+
+/* 完成/关闭行不再整行禁用点击；具体操作由按钮/菜单 v-if 控制，仅弱化文字颜色 */
+.project-overview :deep(.completed-row .el-button--link),
+.project-overview :deep(.closed-row .el-button--link) {
+  color: #c0c4cc;
 }
 
 /* 表格固定高度内部滚动，不受全局 flex:1 拉伸影响 */
@@ -720,18 +842,6 @@ onMounted(async () => {
 }
 
 /* 文本和列的颜色高亮 */
-.project-code{
-  font-weight: bold;
-  color: #334155;
-  font-size: 14px;
-}
-
-.project-title {
-  font-weight: bold;
-  color: #334155;
-  font-size: 14px;
-}
-
 .employee-text {
   color: #0f766e;
   font-weight: 500;
@@ -746,27 +856,30 @@ onMounted(async () => {
 }
 
 /* 状态圆点设计 */
-.status-dot {
+.status-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.status-dot-wrapper {
   display: inline-flex;
   align-items: center;
-  font-size: 13px;
-  font-weight: 500;
+  gap: 6px;
 }
-.status-dot::before {
-  content: '';
-  display: inline-block;
+
+.status-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  margin-right: 6px;
+  flex-shrink: 0;
+  display: inline-block;
 }
-.status-dot.success::before {
-  background-color: #10b981;
-  box-shadow: 0 0 0 2px #d1fae5;
-}
-.status-dot.primary::before {
-  background-color: #3b82f6;
-  box-shadow: 0 0 0 2px #dbeafe;
+
+.status-text {
+  font-size: 13px;
+  font-weight: 500;
 }
 
 /* 嵌套表格容器的背景处理 */
@@ -783,21 +896,66 @@ onMounted(async () => {
   background-color: #fbfbfc !important;
 }
 
-/* 已完成项目/工作包整行灰显 */
-:deep(.completed-row) {
-  background: #f3f4f6 !important;
-  color: #9ca3af;
+/* ==========================================
+   现代简约商务风 表格统一样式改造（与项目详情一致）
+========================================== */
+
+/* 1. 表格全局变量替换：去线化、低饱和度 */
+.project-overview :deep(.el-table) {
+  --el-table-border-color: #f1f5f9; /* 极浅的分割线 */
+  --el-table-header-bg-color: #ffffff; /* 表头纯白，靠底边框区分 */
+  --el-table-header-text-color: #64748b; /* 表头文字使用 slate-500 灰色，不抢戏 */
+  --el-table-row-hover-bg-color: #f8fafc; /* 极其微妙的悬浮高亮 */
+  --el-table-text-color: #334155; /* 正文深灰，比纯黑更柔和 */
+  background-color: transparent;
 }
 
-:deep(.completed-row td) {
-  background: #f3f4f6 !important;
+/* 2. 表头优化：去掉竖线，加粗底线，增加呼吸感 */
+.project-overview :deep(.el-table__header th) {
+  font-weight: 600;
+  font-size: 13px;
+  padding: 12px 0; /* 增加表头上下留白 */
+  border-bottom: 2px solid #e2e8f0 !important; /* 加重表头底线，稳住视觉重心 */
+}
+
+/* 3. 单元格优化：增加行高，让数据不拥挤 */
+.project-overview :deep(.el-table__row td.el-table__cell) {
+  padding: 14px 0; /* 增加正文单元格上下留白 */
+  font-size: 14px;
+}
+
+/* 4. 隐藏固定列的阴影线（让左右固定列更无缝衔接） */
+.project-overview :deep(.el-table__fixed-right::before),
+.project-overview :deep(.el-table__fixed::before) {
+  display: none;
+}
+
+/* 5. 优化已完成/已关闭行的视觉呈现（更温和的灰显） */
+.project-overview :deep(.completed-row td) {
+  background-color: #f9fafb !important;
+  color: #94a3b8;
+}
+
+.project-overview :deep(.closed-row td) {
+  background-color: #f9fafb !important;
+  color: #94a3b8;
+}
+
+.project-overview :deep(.completed-row ),
+.project-overview :deep(.closed-row ) {
+  background-color: #f1f5f9;
+  color: #94a3b8;
+  opacity: 0.7;
 }
 
 :deep(.completed-row .el-button--link) {
   color: #c0c4cc;
-  pointer-events: none;
 }
 
+.project-overview :deep(.status-text) {
+  color: #334155 !important;  /* 统一改为深灰色 */
+  font-weight: 500;
+}
 /* 强制让 Tabs 标签页容器弹性撑满屏幕剩余高度 */
 :deep(.el-tabs) {
   flex: 1;
@@ -832,5 +990,13 @@ onMounted(async () => {
   font-size: 13px;
   color: #606266;
   font-weight: 500;
+}
+
+.danger-menu-item {
+  color: var(--el-color-danger);
+}
+
+.el-dropdown {
+  margin-left: 4px;
 }
 </style>

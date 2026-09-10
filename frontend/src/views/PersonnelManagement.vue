@@ -173,7 +173,7 @@ const handleCreateUser = async () => {
 //删除人员
 const handleDeleteUser = async(row) => {
     try {
-      const res = await deleteUserApi(row.id)
+      const res = await deleteUserApi(row.id, currentUser.value.id)
       
       if (res.data && res.data.code === 200) {
         ElMessage.success(`已成功删除员工 ${row.username}`)

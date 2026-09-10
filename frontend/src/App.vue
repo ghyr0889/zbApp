@@ -137,7 +137,7 @@ body {
 }
 
 .main-body { 
-  margin-left: 240px;
+  margin-left: 200px;
   height: 100vh;
   /* 顶部50px给顶部栏占位;左右/底部空隙统一由各页面根 div 的 padding(20px)控制 */
   padding: 64px 0 0;
@@ -159,34 +159,8 @@ body {
 }
 
 /* ================= 页面内部卡片自适应容器 (已修复登录页拉伸) ================= */
-/* 1. 只针对进入系统后的主区域生效，放过登录页 */
-/* .main-body .page-container {
-  padding: 16px; 
-  flex: 1;       
-  overflow: hidden; 
-  display: flex;
-  flex-direction: column;
-} */
 
-/* 2. 强制主界面内的 el-card 自适应高度 */
-/* .main-body .page-container > div, 
-.main-body .page-container .el-card {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border-radius: 8px; 
-}
-
-.main-body .page-container .el-card__body {
-  flex: 1;
-  overflow: hidden; 
-  display: flex;
-  flex-direction: column;
-  padding: 12px 16px; 
-} */
-
-/* 3. 让登录页的容器恢复居中并且取消拉伸 */
+/*  让登录页的容器恢复居中并且取消拉伸 */
 .login-body {
   min-height: 100vh;
   display: flex;
@@ -231,24 +205,25 @@ body {
   top: 0;
   bottom: 0;
   z-index: 1001;
-  width: 240px;
+  width: 200px;
   background-color: #ffffff;
   box-shadow: 2px 0 8px 0 rgba(29, 35, 41, 0.05);
   display: flex;
   flex-direction: column;
 }
 
-/* 品牌 Logo 区域 */
+/* 品牌 Logo 文字 */
 .brand-logo {
   height: 64px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
-  font-weight: 600;
-  color: #303133;
+  font-size: 17px;
+  font-weight: 700;
+  color: #010203;
+  letter-spacing: 2px;
   border-bottom: 1px solid #f0f2f5;
-  background-color: #ffffff;
+  background: linear-gradient(135deg, #ffffff, #f8fafc);
 }
 
 .logo-icon {
@@ -267,11 +242,19 @@ body {
   border-right: none !important;
 }
 
+/* 2. 菜单项文字统一样式 */
 .el-menu-item {
   margin: 4px 12px;
   border-radius: 8px;
   height: 48px;
   line-height: 48px;
+  
+  /* 文字样式 */
+  color: #495462;
+  font-size: 14px;
+  font-weight: 550;
+  letter-spacing: 0.3px;
+  transition: all 0.3s ease;
 }
 
 .el-menu-item.is-active {
@@ -287,7 +270,7 @@ body {
 .right-profile {
   position: fixed;
   top: 0;
-  left: 240px;
+  left: 200px;
   right: 0;
   height: 64px;
   padding: 0 24px;

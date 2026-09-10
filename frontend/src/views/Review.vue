@@ -7,6 +7,7 @@
         <div class="action-bar">
           <div class="search-area">
             <el-input 
+              v-if="activeTab === 'review'"
               v-model="searchKeyword" 
               placeholder="输入申请人进行搜索..." 
               clearable 
@@ -14,6 +15,7 @@
               style="width: 180px;" 
             />
             <el-select 
+              v-if="activeTab === 'review'"
               v-model="searchStatus" 
               placeholder="根据状态进行筛选..." 
               clearable 
@@ -145,6 +147,21 @@
                   </template>
                 </el-table-column>
 
+                <el-table-column  v-if="row.isEditing" label="操作" width="100" align="center" fixed="right">
+                  <template #default="{ row: itemRow, $index }">
+                    <el-button 
+                      v-if="canRemoveItem(row, itemRow)" 
+                      type="danger" 
+                      size="small" 
+                      link 
+                      @click="handleRemoveItem(row, itemRow, $index)"
+                    >
+                      移除
+                    </el-button>
+                    <span v-else class="muted-text">-</span>
+                  </template>
+                </el-table-column>
+
                 </el-table>
                 
                 <!-- 最下面一行：高亮修改说明 -->
@@ -170,12 +187,12 @@
               <span>{{ row.work_package_code }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="工作包名称" min-width="100">
+          <el-table-column label="工作包名称" min-width="180">
             <template #default="{ row }">
               <span>{{ row.work_package_name }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="工作包目标" min-width="100">
+          <el-table-column label="工作包目标" min-width="180">
             <template #default="{ row }">
               <span>{{ row.work_package_objective }}</span>
             </template>
@@ -194,7 +211,7 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="操作" min-width="280" align="center" fixed="right">
+          <el-table-column label="操作" min-width="250" align="center" fixed="right">
             <template #default="{ row }">
               <!-- 员工：被驳回的申请可以修改并重新提交 -->
               <template v-if="isEmployee && row.status === 'REJECTED' && isApplicant(row)">
@@ -332,7 +349,16 @@
 <script setup>
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getIncomingTransfersApi, getMyOutgoingTransfersApi, getSplitRequestsApi, processTransferApi, reviewSplitRequestApi, editSplitRequestApi, getLevelDefsApi, getAllUsersApi } from '../api'
+import { getIncomingTransfersApi, 
+         getMyOutgoingTransfersApi,
+         getSplitRequestsApi,
+         removeSplitItemApi,
+         processTransferApi, 
+         reviewSplitRequestApi, 
+         editSplitRequestApi, 
+         getLevelDefsApi, 
+         getAllUsersApi 
+        } from '../api'
 
 const activeTab = ref('review')
 const searchKeyword = ref('')
@@ -450,12 +476,24 @@ const fetchLevelDefs = async () => {
   } catch { /* 档位加载失败不影响主流程 */ }
 }
 
+// 在收到数据后，确保每条记录都有client_id
+const normalizeSplitItems = (items) => {
+  return (items || []).map(item => ({
+    ...item,
+    // 如果没有client_id，使用id或生成临时ID
+    client_id: item.client_id || item.id || `temp_${Date.now()}_${Math.random()}`
+  }))
+}
 const fetchRequests = async () => {
   loading.value = true
   try {
     const res = await getSplitRequestsApi(currentUser.value.id)
     if (res.data?.code === 200) {
-      requests.value = res.data.data || []
+      requests.value = (res.data.data || []).map(req => ({
+        ...req,
+        split_items: normalizeSplitItems(req.split_items),
+        isEditing: false // 初始化编辑状态
+      }))
     }
   } catch (err) {
     ElMessage.error(err.response?.data?.detail || '获取申请列表失败')
@@ -545,6 +583,81 @@ const confirmReject = async () => {
     ElMessage.error(err.response?.data?.detail || '驳回失败')
   } finally {
     submitting.value = false
+  }
+}
+
+// ============ 移除工作项相关 ============
+const removingItem = ref(false)
+// 判断是否可以移除工作项
+const canRemoveItem = (row, itemRow) => {
+  if (row.status === 'APPROVED') return false
+  // 检查工作包/项目是否关闭（通过外层传入的pkgLocked状态）
+  if (row.pkg_closed || row.project_closed) return false
+  //  检查编辑模式：如果在不在编辑中，不允许移除（防止冲突）
+  if (!row.isEditing) return false
+  // 根据不同角色和状态判断
+  // 员工：只能改被驳回的且是自己发起的
+  if (isEmployee.value && isApplicant(row) && row.status === 'REJECTED') {
+    return true
+  }
+  // 科室：只能改 PENDING 状态
+  if (isDepartment.value && row.status === 'PENDING') {
+    return true
+  }
+  // 领导/管理员：只能改 SUBMITTED 状态
+  if ((isLeader.value) && row.status === 'SUBMITTED') {
+    return true
+  }
+  return false
+}
+// 移除工作项
+const handleRemoveItem = async (row, itemRow, index) => {
+  // 检查是否只剩1项
+  if ((row.split_items || []).length <= 1) {
+    ElMessage.warning('至少保留一项，整单不同意请用"驳回"')
+    return
+  }
+  // 确认对话框
+  try {
+    await ElMessageBox.confirm(
+      `确定移除工作项「${itemRow.name || '未命名'}」吗？<br/><br/>` +
+      '仅从本申请移除，<strong>不会删除数据库中已存在的工作项</strong>；<br/>' +
+      '通过后该项将不会生效。',
+      '移除确认',
+      {
+        confirmButtonText: '确认移除',
+        cancelButtonText: '取消',
+        type: 'warning',
+        dangerouslyUseHTMLString: true
+      }
+    )
+  } catch {
+    return // 用户取消
+  }
+  
+  // 发送移除请求
+  removingItem.value = true
+  try {
+    const res = await removeSplitItemApi(row.id, {
+      editor_id: currentUser.value.id,
+      client_id: itemRow.client_id || itemRow.id
+    })
+    
+    if (res.data?.code === 200) {
+      ElMessage.success('工作项已从申请中移除')
+      
+      // 方式1：用返回的split_items直接更新该行
+      if (res.data?.data?.split_items) {
+        row.split_items = res.data.data.split_items
+      } else {
+        // 方式2：重新拉取列表（确保数据一致）
+        await fetchRequests()
+      }
+    }
+  } catch (err) {
+    ElMessage.error(err.response?.data?.detail || '移除失败')
+  } finally {
+    removingItem.value = false
   }
 }
 

@@ -1,6 +1,7 @@
 # xiangmu/backend/routers/review.py
 import json
 from datetime import datetime
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -10,9 +11,10 @@ from database import get_db
 from schemas import (
     SplitRequestCreate,
     SplitRequestReview,
-    SplitRequestEdit
+    SplitRequestEdit,
+    RemoveSplitItem
 )
-from utils import work_package_summary, deadline_str, parse_deadline, ensure_open
+from utils import work_package_summary, deadline_str, parse_deadline, ensure_open, sync_items_completed_at
 
 router = APIRouter(prefix="/api/v1/review", tags=["Owner Review"])
 
@@ -32,10 +34,12 @@ def _split_request_view(req):
         "work_package_code": work_package.code if work_package else "-",
         "work_package_name": work_package.name if work_package else "-",
         "work_package_objective": work_package.objective if work_package else "-",
+        "pkg_closed": work_package.isclosed,
         "project_id": work_package.project_id if work_package else None,
         "project_name": project.name if project else "-",
         "project_owner_id": project.owner_id,
         "project_owner_name": project.owner.username if project.owner else "",
+        "project_closed": project.isclosed,
         "category_name": work_package.category_name if work_package else "-",
         "applicant_id": req.applicant_id,
         "applicant_name": req.applicant.username if req.applicant else req.applicant_id,
@@ -53,6 +57,7 @@ def _split_items_payload(items):
     """把工作项变更列表序列化为 JSON 字符串（带 work_item_id 表示编辑）。"""
     return json.dumps([
         {
+            "client_id": it.client_id or uuid4().hex,  # 前端生成的唯一标识，便于删除
             "work_item_id": it.work_item_id,
             "name": it.name,
             "standard": it.standard,
@@ -62,7 +67,7 @@ def _split_items_payload(items):
             "deadline": it.deadline,
             "score": it.score,
             "owner_id": it.owner_id,
-            "notes": it.notes
+            "notes": it.notes,
         }
         for it in items
     ], ensure_ascii=False)
@@ -109,10 +114,26 @@ def create_split_request(req: SplitRequestCreate, db: Session = Depends(get_db))
 
     # 权限：普通员工只能拆自己负责的工作包；领导/管理员可代拆
     role = str(applicant.role).upper()
-    if role == "EMPLOYEE" and work_package.owner_id != applicant.id:
-        raise HTTPException(status_code=403, detail="只能申请拆分自己负责的工作包")
+    for it in req.split_items:
+        if not it.work_item_id:
+            if role == "EMPLOYEE" and work_package.owner_id != applicant.id:
+                    raise HTTPException(status_code=403, detail="只能申请拆分自己负责的工作包")
+        else:
+            # 带 work_item_id 的，表示编辑已有工作项；普通员工只能编辑自己负责的工作项
+            item = db.query(models.WorkItem).filter(models.WorkItem.id == it.work_item_id).first()
+            if not item or str(item.work_package_id) != str(work_package.id):
+                raise HTTPException(status_code=400, detail="待编辑的工作项不存在或不属于该工作包")
+            if role == "EMPLOYEE" and str(item.owner_id) != str(applicant.id):
+                raise HTTPException(status_code=403, detail="只能编辑自己负责的工作项")
 
     require_work_item_fields(req.split_items)
+
+    for item in req.split_items:
+        item_dict = item.model_dump()  # 转为字典
+        if not item_dict.get("client_id"):
+            item_dict["client_id"] = uuid4().hex
+        # 后续使用 item_dict，或者如果需要转回模型：
+        # item = SplitItemIn(**item_dict)
 
     new_req = models.WorkPackageSplitRequest(
         work_package_id=req.work_package_id,
@@ -210,6 +231,7 @@ def review_split_request(request_id: int, body: SplitRequestReview, db: Session 
 
             require_work_item_fields(items)
 
+            affected = []  # 本次审批生效的工作项，最后统一同步 completed_at
             for it in items:
                 # 带 work_item_id → 编辑已有工作项；否则 → 新增
                 if it.get("work_item_id"):
@@ -233,6 +255,11 @@ def review_split_request(request_id: int, body: SplitRequestReview, db: Session 
                 item.score = it.get("score") or 0.0
                 item.owner_id = it.get("owner_id") or work_package.owner_id
                 item.notes = it.get("notes") if it.get("notes") else "-"
+
+                affected.append(item)  # 记录受影响的工作项，后续批量同步 completed_at
+
+            db.flush()                              # 先把 item.score 落库，SUM 查询才准
+            sync_items_completed_at(db, affected)   # 批量同步 completed_at
             req.status = "APPROVED"
             req.review_comment = (body.comment or "").strip() or "审核通过"
 
@@ -276,10 +303,28 @@ def edit_split_request(request_id: int, body: SplitRequestEdit, db:Session = Dep
     if not reason:
         raise HTTPException(status_code=400, detail="请填写拆分原因")
 
+    old_items = json.loads(req.split_items or "[]") if req.split_items else []
+    old_map = {}
+    for old in old_items:
+        name = old.get("name", "").strip()
+        if name:
+            old_map[name] = old
+
+    # 合并client_id：如果新项有对应的旧项，保留旧项的client_id
+    merged_items = []
+    for new_item in body.split_items:
+        new_item_dict = new_item if isinstance(new_item, dict) else new_item.dict()
+        name = new_item_dict.get("name", "").strip()
+        if name in old_map and old_map[name].get("client_id"): # 如果存在同名旧项，且旧项有client_id，新项没有，则复制
+            if not new_item_dict.get("client_id"):
+                new_item_dict["client_id"] = old_map[name]["client_id"]
+        merged_items.append(new_item_dict)
+
+    split_pkg = db.query(models.WorkPackage).filter(models.WorkPackage.id == req.work_package_id).first()
     if editor_role == "EMPLOYEE":
     # 只能改自己的、且必须是被驳回的
-        if str(req.applicant_id) != str(editor.id):
-            raise HTTPException(status_code=403, detail="只能修改自己发起的申请")
+        if str(split_pkg.owner_id) != str(editor.id):
+            raise HTTPException(status_code=403, detail="只能修改自己负责的工作申请")
         if req.status != "REJECTED":
             raise HTTPException(status_code=400, detail="只有被驳回的申请才能修改并重新提交")
 
@@ -317,3 +362,49 @@ def edit_split_request(request_id: int, body: SplitRequestEdit, db:Session = Dep
     return {"code": 200, "message": message,
             "data": {"id": req.id, "status": req.status}}
 
+@router.post("/split-requests/{request_id}/remove-item")
+def remove_item_from_split_request(request_id: int, body: RemoveSplitItem, db: Session = Depends(get_db)):
+    """从拆分申请中移除一个工作项（编辑时使用）。"""
+    req = db.query(models.WorkPackageSplitRequest).filter(models.WorkPackageSplitRequest.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="申请不存在")
+
+    editor = db.query(models.User).filter(models.User.id == body.editor_id).first()
+    if not editor:
+        raise HTTPException(status_code=404, detail="操作人不存在")
+    editor_role = str(editor.role).upper()
+
+    ensure_open(req.work_package,
+                req.work_package.project if req.work_package else None)  # 已关闭不能再改申请
+
+    if editor_role == "EMPLOYEE":
+        if str(req.applicant_id) != str(editor.id):
+            raise HTTPException(status_code=403, detail="只能修改自己发起的申请")
+        if req.status != "REJECTED":
+            raise HTTPException(status_code=400, detail="只有被驳回的申请才能修改并重新提交")
+    elif editor_role == "DEPARTMENT":
+        if req.status != "PENDING":
+            raise HTTPException(status_code=400, detail="当前状态不允许修改")
+    elif editor_role in ["LEADER"]:
+        # 领导只能改提交到领导这级的申请
+        if req.status != "SUBMITTED":
+            raise HTTPException(status_code=400, detail="只有提交到领导审核的申请才能修改")
+    else:
+        raise HTTPException(status_code=403, detail="当前角色没有编辑权限")
+
+    try:
+        client = json.loads(req.split_items or "[]") #原始拆分列表
+        new_client = [it for it in client if it.get("client_id") != body.client_id] #新拆分列表
+        if len(new_client) == 0:
+            raise HTTPException(status_code=400, detail="拆分申请中至少要保留一个工作项")
+        
+        if len(new_client) == len(client): # 长度没变，说明没有找到要删除的工作项
+            raise HTTPException(status_code=404, detail="指定的工作项在申请中不存在")
+        
+        req.split_items = json.dumps(new_client, ensure_ascii=False)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"移除工作项失败: {str(e)}")
+
+    return {"code": 200, "message": "工作项已从拆分申请中移除", "data": {"id": req.id}}
