@@ -49,6 +49,13 @@ export const deleteWorkItemApi = (workItemId) => api.delete(`/work-logs/work-ite
 // 确认/取消完成（负责人手动标记）
 export const confirmCompletionApi = (data) => api.put('/work-logs/confirm-completion', data)
 
+// 工作项完成审核（进度满 / 手动提交 → 技术负责人审核）
+export const createCompleteRequestApi = (data) => api.post('/complete_review/complete-requests', data)
+export const getCompleteRequestsApi = (userId) =>
+  api.get('/complete_review/complete-requests', { params: { user_id: userId } })
+export const reviewCompleteRequestApi = (requestId, data) =>
+  api.post(`/complete_review/complete-requests/${requestId}/review`, data)
+
 // 确认/取消关闭（负责人手动标记）
 export const confirmClosedApi = (data) => api.put('/work-logs/confirm-closed', data)
 

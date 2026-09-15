@@ -7,9 +7,10 @@ from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import func, or_, exists
 
 import models
+import json
 from database import get_db
 from schemas import ConfirmCompletionIn, MonthScoreIn, ConfirmClosed
-from utils import project_effective_complete, package_effective_complete, deadline_str, effective_complete, calc_progress, ensure_open, sync_item_completed_at
+from utils import project_effective_complete, package_effective_complete, deadline_str, effective_complete, calc_progress, ensure_open
 from routers.score_board import compute_calc_score, compute_deducted, monthly_quality_score
 
 router = APIRouter(prefix="/api/v1/work-logs", tags=["Work Logs"])
@@ -80,7 +81,6 @@ def get_paged_projects(page: int = 1,
                        page_size: int = 20,
                        keyword: str = None,
                        owner_id: str = None,
-                       tech_owner_id: str = None,
                        level: str = None,
                        complete_status: str = None,
                        db: Session = Depends(get_db)):
@@ -144,7 +144,6 @@ def get_paged_projects(page: int = 1,
 @router.get("/projects/{project_id}")
 def get_project_detail(project_id: int, db: Session = Depends(get_db)):
     """项目详情（含聚合统计），供项目详情页标题/信息卡使用。"""
-    # 预加载到工作项/月度分值一级，供项目级联动判定使用（避免 N+1）
     project = db.query(models.Project).options(
         selectinload(models.Project.owner),
         selectinload(models.Project.tech_owner),
@@ -277,8 +276,13 @@ def get_my_work_packages_paged(user_id: str,
 
 
 # ---------------------------------------------------------------- 工作项管理
-def _work_item_view(item):
-    """把 WorkItem 展开为前端需要的结构。"""
+def _work_item_view(item, pending_review_id=None):
+    """把 WorkItem 展开为前端需要的结构。
+
+    - complete_status：是否已完成（以技术负责人审核通过为准）
+    - pending_complete_review：是否有待审核的完成申请
+    - can_submit_complete：是否满足提交完成申请的条件（进度满 或 已手动确认）
+    """
     return {
         "id": item.id,
         "name": item.name,
@@ -289,12 +293,19 @@ def _work_item_view(item):
         "deadline": deadline_str(item.deadline) if item.deadline else "",
         "score": item.score or 0.0,
         "completed_at": deadline_str(item.completed_at),
-        # 生效完成状态：手动完成 或 累计分值已达满分
-        "complete_status": effective_complete(item),
-        # 手动原始状态，给前端按钮用
+        # 已完成：只有审核通过（complete_status 置位）才算
+        "complete_status": bool(item.complete_status),
+        # 是否有待审核的完成申请
+        "pending_complete_review": bool(pending_review_id),
+        "pending_review_id": pending_review_id,
+        # 是否满足“提交完成申请”的条件
+        "can_submit_complete": effective_complete(item),
+        # 兼容旧字段：含义与 complete_status 一致
         "manual_complete_status": bool(item.complete_status),
         "owner_id": item.owner_id or "",
         "owner_name": item.owner.username if item.owner else "",
+        "tech_owner_id": item.tech_owner_id or "",
+        "tech_owner_name": item.tech_owner.username if item.tech_owner else "",
         "notes": item.notes or "-",
         "work_package_id": item.work_package_id,
         "work_package_code": item.work_package.code,
@@ -312,9 +323,10 @@ def get_work_items(work_package_id: str, month: str = None, db: Session = Depend
     if not pkg:
         raise HTTPException(status_code=404, detail="工作包不存在")
 
-    # 预加载月度分值：_work_item_view 里的 effective_complete 需要累计分值
+    # 预加载月度分值与负责人：_work_item_view 的进度/提交条件需要
     items = db.query(models.WorkItem).options(
         selectinload(models.WorkItem.owner),
+        selectinload(models.WorkItem.tech_owner),
         selectinload(models.WorkItem.monthly_scores),
     ).filter(
         models.WorkItem.work_package_id == work_package_id
@@ -351,6 +363,15 @@ def get_work_items(work_package_id: str, month: str = None, db: Session = Depend
             completed_score = acc_sum.get(item.id, 0.0)
             remaining_scores[item.id] = total_score - completed_score
 
+    # 待技术负责人审核的完成申请：work_item_id -> 申请 id
+    pending_reviews = {}
+    if item_ids:
+        for r in db.query(models.WorkItemCompletionReview).filter(
+            models.WorkItemCompletionReview.work_item_id.in_(item_ids),
+            models.WorkItemCompletionReview.status == "PENDING"
+        ).all():
+            pending_reviews[r.work_item_id] = r.id
+
     # 工作包级扣分汇总：超期完成的工作项每个扣 1 分
     deducted = sum(compute_deducted(it) for it in items)
 
@@ -374,7 +395,7 @@ def get_work_items(work_package_id: str, month: str = None, db: Session = Depend
             },
             "work_items": [
                 {
-                    **_work_item_view(it),
+                    **_work_item_view(it, pending_reviews.get(it.id)),
                     "month_score": month_scores.get(it.id, 0.0),
                     "quality_score": monthly_quality_score(db, it.id, cur_month),
                     "calc_score": calc_scores.get(it.id) if calc_scores.get(it.id) is not None else compute_calc_score(month_scores.get(it.id, 0.0), it, db, owner_job_grade, monthly_quality_score(db, it.id, cur_month)),
@@ -404,16 +425,34 @@ def delete_work_item(work_item_id: int, db: Session = Depends(get_db)):
     ).all()
 
     for req in pending_requests:
-        split_items = req.split_items or []
+        try:
+            split_items = json.loads(req.split_items or "[]")
+        except (TypeError, ValueError):
+            split_items = []                      # 兼容脏数据 / 空值
+        if not isinstance(split_items, list):
+            continue
         for split_item in split_items:
-             if split_item.get("work_item_id") == work_item_id:
+            if not isinstance(split_item, dict):
+                continue
+            if str(split_item.get("work_item_id")) == str(work_item_id):
                 raise HTTPException(status_code=400, detail="该工作项正在审核申请中，不能删除")
             
-    if effective_complete(item):
+    # 已完成（审核通过）或存在待审核完成申请时，不能删除
+    if bool(item.complete_status):
         raise HTTPException(status_code=400, detail="工作项已完成，不能删除")
+    if db.query(models.WorkItemCompletionReview).filter(
+        models.WorkItemCompletionReview.work_item_id == work_item_id,
+        models.WorkItemCompletionReview.status == "PENDING"
+    ).first():
+        raise HTTPException(status_code=400, detail="该工作项有待审核的完成申请，不能删除")
 
     ensure_open(item, item.work_package,
                 item.work_package.project if item.work_package else None)
+
+    # 一并清理该工作项的完成申请记录（表未设级联删除）
+    db.query(models.WorkItemCompletionReview).filter(
+        models.WorkItemCompletionReview.work_item_id == work_item_id
+    ).delete(synchronize_session=False)
 
     db.delete(item)
     db.commit()
@@ -423,9 +462,11 @@ def delete_work_item(work_item_id: int, db: Session = Depends(get_db)):
 # ---------------------------------------------------------------- 确认完成（负责人手动标记，完成时间随确认记录）
 @router.put("/confirm-completion")
 def confirm_completion(data: ConfirmCompletionIn, db: Session = Depends(get_db)):
-    """确认/取消完成：只有负责人（或领导/管理员）可操作。
-    完成时间由 sync_item_completed_at 统一维护：手动确认完成、或累计月度分值已达满分
-    即记录（首次达成时间）；两者都不满足才清空（仅工作项有 completed_at 列）。
+    """确认/取消完成。
+
+    - 工作项：改为“提交完成申请 / 撤回申请”，由技术负责人在 complete_review 里审核，
+      审核通过后才置 complete_status 并写 completed_at。
+    - 工作包 / 项目：仍是负责人（或领导/管理员）直接手动确认。
     """
     operator = db.query(models.User).filter(models.User.id == data.user_id).first()
     if not operator:
@@ -476,13 +517,59 @@ def confirm_completion(data: ConfirmCompletionIn, db: Session = Depends(get_db))
     ensure_open(*chain)
 
     confirmed = bool(data.confirmed)
-    target.complete_status = confirmed
 
-    # 完成时间：仅工作项有 completed_at 列。
-    # 取消完成时若累计分值仍已达满分，按口径仍算完成，此时保留原完成时间。
+    # ---------- 工作项：走“提交完成申请 → 技术负责人审核”流程 ----------
     if data.target_type == "work_item":
-        target.completed_at = sync_item_completed_at(db, target)
+        if confirmed:
+            # 幂等：已有待审核申请则复用，不重复建单
+            existing = db.query(models.WorkItemCompletionReview).filter(
+                models.WorkItemCompletionReview.work_item_id == target.id,
+                models.WorkItemCompletionReview.status == "PENDING",
+            ).first()
+            if not existing:
+                db.add(models.WorkItemCompletionReview(
+                    work_item_id=target.id,
+                    applicant_id=operator.id,
+                    reason="负责人手动确认完成",
+                    status="PENDING",
+                ))
+            db.commit()
+            return {
+                "code": 200,
+                "message": "已提交，等待技术负责人审核",
+                "data": {
+                    "target_type": "work_item",
+                    "target_id": target.id,
+                    "complete_status": bool(target.complete_status),
+                    "pending_complete_review": True,
+                    "manual_complete_status": True,
+                },
+            }
 
+        # 取消 = 撤回待审核的完成申请（保留记录，标记为已驳回）
+        pending = db.query(models.WorkItemCompletionReview).filter(
+            models.WorkItemCompletionReview.work_item_id == target.id,
+            models.WorkItemCompletionReview.status == "PENDING",
+        ).first()
+        if pending:
+            pending.status = "REJECTED"
+            pending.review_comment = "申请人撤回"
+            pending.reviewed_at = datetime.now()
+        db.commit()
+        return {
+            "code": 200,
+            "message": "已撤回完成申请",
+            "data": {
+                "target_type": "work_item",
+                "target_id": target.id,
+                "complete_status": bool(target.complete_status),
+                "pending_complete_review": False,
+                "manual_complete_status": False,
+            },
+        }
+
+    # ---------- 工作包 / 项目：保持手动确认 ----------
+    target.complete_status = confirmed
     db.commit()
     return {
         "code": 200,
@@ -490,8 +577,7 @@ def confirm_completion(data: ConfirmCompletionIn, db: Session = Depends(get_db))
         "data": {
             "target_type": data.target_type,
             "target_id": data.target_id,
-            # 生效状态（工作项可能因进度已满而仍为完成）+ 手动原始状态
-            "complete_status": effective_complete(target) if data.target_type == "work_item" else confirmed,
+            "complete_status": confirmed,
             "manual_complete_status": confirmed,
         },
     }

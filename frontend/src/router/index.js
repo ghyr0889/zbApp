@@ -17,6 +17,8 @@ const routes = [
   { path: '/login', name: 'Login', component: Login },
   { path: '/project-overview', name: 'ProjectOverview', component: ProjectOverview },
   { path: '/review', name: 'ReviewLogs', component: Review },
+  // 完成申请已并入「审批查阅」页签；保留旧路径重定向，避免书签失效
+  { path: '/complete-review', redirect: '/review' },
   { path: '/score-board', name: 'ScoreBoard', component: ScoreBoard },
   { path: '/personal-info', name: 'PersonalInfo', component: PersonalInfo },
   { path: '/personnel-management', name: 'PersonnelManagement', component: PersonnelManagement, meta: { requiresAdmin: true } },

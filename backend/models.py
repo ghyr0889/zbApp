@@ -91,6 +91,7 @@ class WorkItem(Base):
     score = Column(Float, default=0.00, nullable=False)  # 工作项分值
     complete_status = Column(Boolean, default=False, nullable=True) # 完成状态
     owner_id = Column(String(50), ForeignKey("users.id"), nullable=True) #工作项负责人
+    tech_owner_id = Column(String(50),ForeignKey("users.id"),nullable=False) #技术负责人
     notes = Column(Text, nullable=True) # 备注
     isclosed = Column(Boolean, default=False, nullable=True) # 是否关闭
 
@@ -98,14 +99,31 @@ class WorkItem(Base):
     
     work_package = relationship("WorkPackage", back_populates="work_items")
     owner = relationship("User", foreign_keys=[owner_id])
+    tech_owner = relationship("User", foreign_keys=[tech_owner_id])#技术负责人
     monthly_scores = relationship("WorkItemMonthlyScore", back_populates="work_item", cascade="all, delete-orphan")
 
+
+class WorkItemCompletionReview(Base):
+    """工作项完成确认审核：进度满/手动提交后，由工作项技术负责人审核。"""
+    __tablename__ = "work_item_completion_reviews"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    work_item_id = Column(Integer, ForeignKey("work_items.id"), nullable=False, index=True)
+    applicant_id = Column(String(50), ForeignKey("users.id"), nullable=False)   # 提交人（负责人）
+    reviewer_id  = Column(String(50), ForeignKey("users.id"), nullable=True)    # 技术负责人
+    status       = Column(String(20), default="PENDING")   # PENDING / APPROVED / REJECTED
+    reason       = Column(Text, nullable=True)             # 提交说明
+    review_comment = Column(Text, nullable=True)           # 审核意见 / 驳回原因
+    created_at   = Column(DateTime, default=datetime.now)
+    reviewed_at  = Column(DateTime, nullable=True)         # = 审核通过时间
+
+    work_item = relationship("WorkItem", foreign_keys=[work_item_id])
+    applicant = relationship("User", foreign_keys=[applicant_id])
+    reviewer  = relationship("User", foreign_keys=[reviewer_id])
 
 class TaskTransfer(Base):
     __tablename__ = "task_transfers"#工作转办表
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    task_assignment_id = Column(String(50), nullable=False, comment="任务分配记录 ID")
     work_package_id = Column(Integer, ForeignKey("work_packages.id"), nullable=False)
     work_item_id = Column(Integer, ForeignKey("work_items.id"), nullable=False) 
     transfer_score = Column(Float, default=0.00) #转移的分数

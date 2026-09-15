@@ -108,6 +108,16 @@
         </template>
       </el-table-column>
 
+      <!-- 技术负责人：工作项完成后由 TA 审核 -->
+      <el-table-column label="技术负责人" width="130" align="center">
+        <template #default="{ row }">
+          <el-select v-if="row.isEdit" v-model="row.tech_owner_id" filterable clearable placeholder="选择技术负责人" size="small" style="width: 100%">
+            <el-option v-for="u in userOptions" :key="u.id" :label="`${u.username}（${u.id}）`" :value="u.id" />
+          </el-select>
+          <span v-else class="employee-text">{{ row.tech_owner_name || '-' }}</span>
+        </template>
+      </el-table-column>
+
       <el-table-column label="进度" width="108" align="center">
         <template #default="{ row }">
           <div class="progress-wrapper">
@@ -191,6 +201,11 @@
               </el-button>
               <template #dropdown>
                 <el-dropdown-menu>
+                  <el-dropdown-item v-if="row.isStaged" command="cancelStage" >
+                    <span>取消暂存</span>
+                  </el-dropdown-item>
+                  
+
                   <el-dropdown-item v-if="isItemOwner(row) && !isLocked(row) && row.id" command="transfer" >
                     <span class="transfer-menu-item">转办</span>
                   </el-dropdown-item>
@@ -200,13 +215,16 @@
                     <span class="danger-menu-item">删除</span>
                   </el-dropdown-item>
 
-                  <!-- 完成/取消完成：按手动原始状态（进度自动完成时按钮仍可用） -->
+                  <!-- 提交完成审核：未完成且无待审申请时可用（后端校验进度满或已手动确认） -->
                   <el-dropdown-item
-                    v-if="canManageRow(row) &&!isLocked(row) &&!row.manual_complete_status && row.id" command="confirmComplete" divided> 确认完成
+                    v-if="canManageRow(row) && !isLocked(row) && row.id && !row.complete_status && !row.pending_complete_review"
+                    command="confirmComplete" divided> 提交完成审核
                   </el-dropdown-item>
 
+                  <!-- 撤回完成申请：已有待审申请时可用 -->
                   <el-dropdown-item
-                    v-if="canManageRow(row) &&!isLocked(row) && row.manual_complete_status && row.id " command="cancelComplete" >取消完成
+                    v-if="canManageRow(row) && !isLocked(row) && row.id && row.pending_complete_review"
+                    command="cancelComplete" >撤回完成申请
                   </el-dropdown-item>
 
                   <!-- 确认关闭 -->
@@ -472,9 +490,10 @@ const confirmTransfer = async () => {
 
 // 行样式：待审核/已关闭/已完成使用不同的提示
 const rowClassName = ({ row }) => {
-  if (row.isPending) return 'pending-row'         // 待审核 - 淡黄提示（只读）
+  if (row.isPending) return 'pending-row'         // 拆分申请待审核 - 淡黄提示（只读）
   if (row.closed_status) return 'closed-row'      // 已关闭 - 更深灰显
-  if (row.complete_status) return 'completed-row' // 已完成 - 较浅灰显
+  if (row.complete_status) return 'completed-row' // 已完成（审核通过）- 较浅灰显
+  if (row.pending_complete_review) return 'pending-row'  // 完成申请待审核
   return ''
 }
 const statusConfig = {
@@ -489,6 +508,12 @@ const statusConfig = {
     color: '#67C23A',
     tagType: 'success',
     label: '已完成'
+  },
+  '待审核': {
+    icon: Loading,
+    color: '#E6A23C',
+    tagType: 'warning',
+    label: '待审核'
   },
   '已关闭': {
     icon: CircleClose,
@@ -508,7 +533,10 @@ const statusConfig = {
 const getStatusConfig = (row) => {
   if (row.closed_status) return statusConfig['已关闭']
   if (isLocked(row)) return statusConfig['所属已关闭']
+  // 已完成：只有技术负责人审核通过才算
   if (row.complete_status) return statusConfig['已完成']
+  // 已提交完成申请，等待技术负责人审核
+  if (row.pending_complete_review) return statusConfig['待审核']
   return statusConfig['进行中']
 }
 
@@ -552,7 +580,14 @@ const mergeLocalRows = (serverItems) => {
   local.forEach(l => {
     const row = { ...l }
     // 已暂存（未提交）→ 始终保留（服务器上还是旧数据）
-    if (row.isStaged) { merged.unshift(row); return }
+    if (row.isStaged) {
+      if (row.id) {
+        const idx = merged.findIndex(m => String(m.id) === String(row.id))
+        if (idx >= 0) merged.splice(idx, 1)     // 用本地暂存值替换服务器旧值
+      }
+      merged.unshift(row)                        // 新增草稿（无 id）不受影响，直接插入
+      return
+    }
     if (row.isPending) {
       // 待审核（编辑/新增）→ 无论服务器是否已有同 id 都保留本地行，
       // 由 reconcilePending 依据申请状态裁决去留（APPROVED 才清除）
@@ -679,6 +714,9 @@ const handleAddWorkItem = () => {
     score: 0,
     work_package_id: props.workPackageId,
     owner_id: workPackage.value?.owner_id || '',
+    // 技术负责人默认继承所属工作包的技术负责人
+    tech_owner_id: workPackage.value?.tech_owner_id || '',
+    tech_owner_name: workPackage.value?.tech_owner_name || '',
     notes: '-',
     isEdit: true,
     isNew: true,
@@ -714,17 +752,21 @@ const handleSaveLocal = (row) => {
   if (msg) return ElMessage.warning(msg)
   row.isEdit = false
   row.isStaged = true
-  row._original = {
-    name: row.name,
-    standard: row.standard,
-    difficulty: row.difficulty,
-    importance: row.importance,
-    innovation: row.innovation,
-    deadline: row.deadline,
-    score: row.score
-  }
   syncCache()
   ElMessage.success('已保存，点击「提交」可一起提交审核')
+}
+//取消暂存
+const cancelStaged = (row, index) => {
+  const i = index ?? workItems.value.findIndex(w => w === row)
+  if (row.isNew) {
+    workItems.value.splice(i, 1)          // 新增草稿：服务器上还没有 → 直接删掉这行
+  } else {
+    Object.assign(row, row._original)     // 已有工作项：还原成服务器原值
+    row.isStaged = false
+    row.isEdit = false
+  }
+  syncCache()                             // ← 必须，见下面第 ③ 点
+  ElMessage.success('已取消修改')
 }
 
 // 头部「提交」：收集所有已暂存的修改
@@ -764,6 +806,7 @@ const confirmBatchSubmit = async () => {
         deadline: row.deadline || '',
         score: row.score,
         owner_id: row.owner_id,
+        tech_owner_id: row.tech_owner_id,
         notes: row.notes
       }))
     })
@@ -848,6 +891,9 @@ const cancelEdit = (row, index) => {
 
 const handleMoreCommand = async (command, row) => {
   switch (command) {
+    case 'cancelStage':
+      cancelStaged(row)
+      break
     case 'transfer':
       await openTransfer(row)
       break
@@ -910,7 +956,7 @@ const removeItem = async (row) => {
   }
 }
 
-// 确认完成（负责人手动标记，后端会记录完成时间）
+// 提交完成审核（后端校验：进度已满或已手动确认；通过后需技术负责人审核）
 const confirmComplete = async (row) => {
   if (!row.id) return
   confirming.value = true
@@ -922,18 +968,18 @@ const confirmComplete = async (row) => {
       confirmed: true
     })
     if (res.data?.code === 200) {
-      ElMessage.success('已确认完成')
+      ElMessage.success(res.data.message || '已提交，等待技术负责人审核')
       await fetchData(true)
       notifyChanged()
     }
   } catch (err) {
-    ElMessage.error(err.response?.data?.detail || '确认完成失败')
+    ElMessage.error(err.response?.data?.detail || '提交完成审核失败')
   } finally {
     confirming.value = false
   }
 }
 
-// 取消完成（取消时后端清空完成时间）
+// 撤回完成申请（仅撤回待审核的申请，不改变已完成状态）
 const cancelComplete = async (row) => {
   try {
     const res = await confirmCompletionApi({
@@ -943,12 +989,12 @@ const cancelComplete = async (row) => {
       confirmed: false
     })
     if (res.data?.code === 200) {
-      ElMessage.success('已取消完成')
+      ElMessage.success(res.data.message || '已撤回完成申请')
       await fetchData(true)
       notifyChanged()
     }
   } catch (err) {
-    ElMessage.error(err.response?.data?.detail || '取消完成失败')
+    ElMessage.error(err.response?.data?.detail || '撤回完成申请失败')
   }
 }
 

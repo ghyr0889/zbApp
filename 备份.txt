@@ -1,103 +1,30 @@
-def get_project_summary(currentUserId: str = None,
-                        period: str = "all",
-                        year: int = None,
-                        month: int = None,
-                        quarter: int = None,
-                        db: Session = Depends(get_db)):
-    """按项目汇总分值（可按 月 / 季 / 年 / 全部 统计）。仅领导、管理员可查看。
+d:\xiangmu
+├── backend/                     # FastAPI 后端（"平铺式"分层，无包分隔）
+│   ├── main.py                  # 应用装配：建表、CORS、注册路由、静态托管、SPA 回退
+│   ├── database.py              # 引擎/会话/Base + 手写轻量迁移 ensure_database_schema()
+│   ├── models.py                # 11 张表的 ORM 声明
+│   ├── schemas.py               # Pydantic 请求体模型（仅入参，无响应模型）
+│   ├── utils.py                 # 分值/进度/完成判定/deadline 解析等共享口径
+│   ├── routers/                 # 6 个业务路由模块（业务逻辑主要落在这里）
+│   │   ├── auth.py  work_logs.py  review.py
+│   │   ├── admin.py  tasks.py  score_board.py
+│   ├── reset_db.py              # 开发期造数脚本
+│   ├── recalc_scores_*.sql      # 计算得分重算脚本（preview / apply 分离）
+│   └── workstat-backend.spec    # PyInstaller 打包配置
+├── frontend/                    # Vue3 SPA
+│   ├── src/api/index.js         # 唯一的接口层（~40 个 api 函数，集中导出）
+│   ├── src/stores/user.js       # 唯一 Pinia store（登录态 + 角色 getter）
+│   ├── src/router/index.js      # 8 条路由 + beforeEach 守卫
+│   ├── src/comosables/          # 自定义组合式函数（目录名拼写有误，应为 composables）
+│   ├── src/components/          # WorkItemTable_improved.vue（核心复用组件）等
+│   ├── src/views/            		# 8 个页面级组件
+│   ├── src/autoUpdate.js        # 轮询 /version.json 实现无感热更新
+│   └── scripts/gen-version.mjs  # 构建后生成版本指纹
+├── 部署文件/workstat-backend/    # 打包产物：exe + _internal/ + dist/ + 运行日志
 
-    - total_score    = 项目下所有工作项满分之和（不随周期变化）
-    - filled_score   = 这些工作项在周期内已填的月度基础分值之和
-    - unfilled_score = total_score - filled_score
-    """
-    user = db.query(models.User).filter(models.User.id == currentUserId).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="用户不存在")
-    if str(user.role).upper() not in ["LEADER", "ADMIN"]:
-        raise HTTPException(status_code=403, detail="只有领导和管理员可以查看项目汇总")
+D:\xiangmu\部署文件\workstat-backend\
+|一workstat-backend.exe
+|一_internal/
+|一dist/
+|一zbapp.sql
 
-    period = str(period or "all").lower()
-    now = datetime.now()
-    y = int(year or now.year)
-    months = months_of_period(period, y, month, quarter)
-
-    # ---- 每个工作包：工作项个数 + 满分合计 ----
-    total_rows = (db.query(
-        models.WorkPackage.id.label("wp_id"),
-        models.WorkPackage.project_id.label("project_id"),
-        func.count(models.WorkItem.id).label("item_count"),
-        func.coalesce(func.sum(models.WorkItem.score), 0.0).label("total_score"),
-    ).outerjoin(models.WorkItem, models.WorkItem.work_package_id == models.WorkPackage.id)
-        .group_by(models.WorkPackage.id, models.WorkPackage.project_id).all())
-
-    # ---- 每个工作包：周期内已填分 ----
-    filled_q = (db.query(
-        models.WorkItem.work_package_id.label("wp_id"),
-        func.coalesce(func.sum(models.WorkItemMonthlyScore.score), 0.0).label("filled_score"),
-    ).join(models.WorkItem, models.WorkItem.id == models.WorkItemMonthlyScore.work_item_id)
-        .group_by(models.WorkItem.work_package_id))
-    if months is not None:
-        filled_q = filled_q.filter(models.WorkItemMonthlyScore.month.in_(months))
-    filled_pkg = {r.wp_id: float(r.filled_score or 0.0) for r in filled_q.all()}
-
-    # ---- 按项目汇总 ----
-    summaries = {}
-    for r in total_rows:
-        pid = r.project_id
-        if pid is None:
-            continue
-        s = summaries.setdefault(pid, {
-            "project_id": pid,
-            "work_package_count": 0,
-            "work_item_count": 0,
-            "total_score": 0.0,
-            "filled_score": 0.0,
-        })
-        s["work_package_count"] += 1
-        s["work_item_count"] += int(r.item_count or 0)
-        s["total_score"] += float(r.total_score or 0.0)
-        s["filled_score"] += filled_pkg.get(r.wp_id, 0.0)
-
-    # ---- 项目基础信息 ----
-    projects = db.query(models.Project).order_by(models.Project.id).all()
-    proj_map = {p.id: p for p in projects}
-
-    items = []
-    for pid, s in summaries.items():
-        p = proj_map.get(pid)
-        if not p:
-            continue
-        total_score = round(s["total_score"], 3)
-        filled_score = round(s["filled_score"], 3)
-        items.append({
-            "project_id": pid,
-            "project_code": p.code,
-            "project_name": p.name,
-            "work_package_count": s["work_package_count"],
-            "work_item_count": s["work_item_count"],
-            "total_score": total_score,
-            "filled_score": filled_score,
-            "unfilled_score": round(total_score - filled_score, 3),
-        })
-
-    items.sort(key=lambda r: r["total_score"], reverse=True)
-
-    return {
-        "code": 200,
-        "data": {
-            "period": period,
-            "year": y,
-            "month": month,
-            "quarter": quarter,
-            "months": months,
-            "totals": {
-                "project_count": len(items),
-                "work_package_count": sum(r["work_package_count"] for r in items),
-                "work_item_count": sum(r["work_item_count"] for r in items),
-                "total_score": round(sum(r["total_score"] for r in items), 3),
-                "filled_score": round(sum(r["filled_score"] for r in items), 3),
-                "unfilled_score": round(sum(r["unfilled_score"] for r in items), 3),
-            },
-            "projects": items,
-        },
-    }

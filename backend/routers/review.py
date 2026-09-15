@@ -14,7 +14,7 @@ from schemas import (
     SplitRequestEdit,
     RemoveSplitItem
 )
-from utils import work_package_summary, deadline_str, parse_deadline, ensure_open, sync_items_completed_at
+from utils import work_package_summary, deadline_str, parse_deadline, ensure_open
 
 router = APIRouter(prefix="/api/v1/review", tags=["Owner Review"])
 
@@ -67,6 +67,7 @@ def _split_items_payload(items):
             "deadline": it.deadline,
             "score": it.score,
             "owner_id": it.owner_id,
+            "tech_owner_id": it.tech_owner_id,
             "notes": it.notes,
         }
         for it in items
@@ -254,12 +255,14 @@ def review_split_request(request_id: int, body: SplitRequestReview, db: Session 
                 item.deadline = parse_deadline(it.get("deadline")) if it.get("deadline") else None
                 item.score = it.get("score") or 0.0
                 item.owner_id = it.get("owner_id") or work_package.owner_id
+                # 技术负责人：仅当申请里明确带了该字段时才覆盖（兼容历史申请 JSON）
+                if "tech_owner_id" in it:
+                    item.tech_owner_id = it.get("tech_owner_id") or None
                 item.notes = it.get("notes") if it.get("notes") else "-"
 
                 affected.append(item)  # 记录受影响的工作项，后续批量同步 completed_at
 
             db.flush()                              # 先把 item.score 落库，SUM 查询才准
-            sync_items_completed_at(db, affected)   # 批量同步 completed_at
             req.status = "APPROVED"
             req.review_comment = (body.comment or "").strip() or "审核通过"
 
@@ -320,47 +323,46 @@ def edit_split_request(request_id: int, body: SplitRequestEdit, db:Session = Dep
                 new_item_dict["client_id"] = old_map[name]["client_id"]
         merged_items.append(new_item_dict)
 
-    split_pkg = db.query(models.WorkPackage).filter(models.WorkPackage.id == req.work_package_id).first()
-    if editor_role == "EMPLOYEE":
-    # 只能改自己的、且必须是被驳回的
-        if str(split_pkg.owner_id) != str(editor.id):
-            raise HTTPException(status_code=403, detail="只能修改自己负责的工作申请")
-        if req.status != "REJECTED":
-            raise HTTPException(status_code=400, detail="只有被驳回的申请才能修改并重新提交")
+    # ---- 权限与状态流转判定：全部基于【原始状态】，必须在写库之前完成 ----
+    old_status = req.status
+    is_applicant = str(req.applicant_id) == str(editor.id)
 
-        req.split_items = _split_items_payload(body.split_items)   # 存 JSON 字符串
-        req.reason = reason
-        req.status = "PENDING"                    # 重置为待科室审核（重新提交）
-        req.reviewer_id = None                     # 清空上次的审核记录
+    if old_status == "PENDING":
+        if editor_role not in ("DEPARTMENT", "ADMIN"):
+            raise HTTPException(status_code=403, detail="待科室审核的申请只能由科室主任修改")
+        new_status = "PENDING"
+        message = "内容已更新，等待科室审核"
+        reset_review = False
+
+    elif old_status == "SUBMITTED":
+        if editor_role not in ("LEADER", "ADMIN"):
+            raise HTTPException(status_code=403, detail="待领导审核的申请只能由领导修改")
+        new_status = "SUBMITTED"
+        message = "内容已更新，可继续审核"
+        reset_review = False
+
+    elif old_status == "REJECTED":
+        if not is_applicant:
+            raise HTTPException(status_code=403, detail="只有申请人本人可以修改被驳回的申请")
+        new_status = "PENDING"            # 改完重新提交，回到科室审核
+        message = "已修改并重新提交，等待科室审核"
+        reset_review = True               # 只有这条路径要清空上一次的审核痕迹
+
+    else:  # APPROVED 
+        raise HTTPException(status_code=400, detail="已通过的申请不能再修改")
+
+    # ---- 判定通过后才写库 ----
+    req.split_items = _split_items_payload(body.split_items)
+    req.reason = reason
+    req.status = new_status
+    if reset_review:
+        req.reviewer_id = None
         req.reviewed_at = None
         req.review_comment = None
-        message = "已修改并重新提交，等待科室审核"
-
-    elif editor_role in ["LEADER"]:
-        # 领导只能改提交到领导这级的申请
-        if req.status != "SUBMITTED":
-            raise HTTPException(status_code=400, detail="只有提交到领导审核的申请才能修改")
-
-        req.split_items = _split_items_payload(body.split_items)
-        req.reason = reason
-        # 状态保持 SUBMITTED，改完由领导再点“通过”生效
-        message = "内容已更新，可继续审核"
-
-    elif editor_role == "DEPARTMENT":
-        # 可选：科室主任在待审(PENDING)时也能直接改内容
-        if req.status != "PENDING":
-            raise HTTPException(status_code=400, detail="当前状态不允许修改")
-        req.split_items = _split_items_payload(body.split_items)
-        req.reason = reason
-        message = "内容已更新"
-
-    else:
-        raise HTTPException(status_code=403, detail="当前角色没有编辑权限")
 
     db.commit()
     db.refresh(req)
-    return {"code": 200, "message": message,
-            "data": {"id": req.id, "status": req.status}}
+    return {"code": 200, "message": message, "data": {"id": req.id, "status": req.status}}
 
 @router.post("/split-requests/{request_id}/remove-item")
 def remove_item_from_split_request(request_id: int, body: RemoveSplitItem, db: Session = Depends(get_db)):

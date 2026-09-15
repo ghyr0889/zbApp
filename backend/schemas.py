@@ -108,6 +108,7 @@ class SplitItemIn(BaseModel):
     deadline: Optional[str] = Field(..., description="截止节点（YYYY-MM-DD）")
     score: Optional[float] = Field(0.0, description="分值")
     owner_id: Optional[str] = Field(None, description="工作项负责人 ID")
+    tech_owner_id: Optional[str] = Field(None, description="工作项技术负责人 ID（完成后由 TA 审核）")
     notes:Optional[str] = Field(None, description="备注")
 
 class SplitRequestCreate(BaseModel):
@@ -170,3 +171,15 @@ class ScoreRuleUpdate(BaseModel):
     """管理员保存评分维度权重与档位系数。"""
     user_id: str = Field(..., description="操作人 ID")
     items: list[ScoreDimensionItemIn] = Field(..., description="维度权重与档位系数列表")
+
+class CompleteRequestReview(BaseModel):
+    """审核完成申请。"""
+    reviewer_id: str = Field(..., description="审核人 ID")
+    action: str = "APPROVE"  #  # APPROVE=同意 / REJECT=驳回
+    comment: str = Field("", description="审核意见 / 驳回原因（驳回必填）")
+
+class CompleteRequestCreate(BaseModel):
+    """提交完成申请。"""
+    applicant_id: str = Field(..., description="申请人 ID")
+    item_id: int = Field(..., description="申请的工作项 ID")
+    reason: str = Field(..., description="原因")

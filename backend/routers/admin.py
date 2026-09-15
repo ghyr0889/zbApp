@@ -12,8 +12,6 @@ from utils import (ensure_open, effective_complete,
 from routers.score_board import compute_calc_score, monthly_quality_score
 
 router = APIRouter(prefix="/api/v1/admin", tags=["Admin Management"])
-# 兼容前端历史路径：deleteUserApi 实际请求 DELETE /api/v1/users/{id}
-legacy_router = APIRouter(prefix="/api/v1", tags=["Legacy Compat"])
 
 
 # ---------------------------------------------------------------- 用户

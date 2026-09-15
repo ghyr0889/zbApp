@@ -9,8 +9,9 @@ from sqlalchemy.orm import Session
 import models
 from database import get_db
 from schemas import MonthScoreIn, MonthlyExtraScoreIn
-from utils import ensure_open, item_filled_score, sync_item_completed_at
+from utils import ensure_open, item_filled_score, auto_create_complete_request
 import logging
+from datetime import timedelta
 
 router = APIRouter(prefix="/api/v1/score-board", tags=["Score Board"])
 
@@ -97,8 +98,10 @@ def assert_month_fillable(month):
 
 
 def compute_deducted(item):
-    """扣分计算函数，超时扣1分"""
-    if item.completed_at and item.deadline and item.completed_at > item.deadline:
+    """通过时间超出 deadline 7 天以上才扣 1 分。"""
+    if not item.completed_at or not item.deadline:
+        return 0.0
+    if item.completed_at > item.deadline + timedelta(days=7):
         return 1.0
     return 0.0
 
@@ -452,13 +455,22 @@ def save_month_score(work_item_id: int, body: MonthScoreIn, db: Session = Depend
     rec.calculate_score = compute_calc_score(score, item, db, owner_job_grade, q)
 
     db.flush()  # 确保上面的 rec 新增/修改已经反映到查询里
-    sync_item_completed_at(db, item)  # 同步工作项完成时间（如果累计分值已达满分）
+
+    # 进度已满 → 自动提交完成申请（等待工作项技术负责人审核）
+    db.expire(item, ["monthly_scores"])   # 丢弃关系缓存，确保读到刚写入的分值
+    auto_review = auto_create_complete_request(db, item, applicant_id=owner_id)
 
     db.commit()
     return {
         "code": 200,
-        "message": "本月分值已保存",
-        "data": {"work_item_id": work_item_id, "month": month, "score": score, "calculate_score": rec.calculate_score}
+        "message": "本月分值已保存" + ("，进度已满，已自动提交完成申请待技术负责人审核" if auto_review else ""),
+        "data": {
+            "work_item_id": work_item_id,
+            "month": month,
+            "score": score,
+            "calculate_score": rec.calculate_score,
+            "auto_complete_request_id": auto_review.id if auto_review else None, 
+        }
     }
 
 @router.put("/monthly-extra-scores")
@@ -693,7 +705,7 @@ def get_project_summary(currentUserId: str = None,
                 continue
             s = agg[r.project_id]
             s["wp"] += 1
-            s["item"] += int(r.item_count or 0)     # ← 补上这一行
+            s["item"] += int(r.item_count or 0) 
             s["total"] += float(r.total_score or 0.0)
             s["filled"] += filled_pkg.get(r.wp_id, 0.0)
         for pid, s in agg.items():
@@ -723,7 +735,7 @@ def get_project_summary(currentUserId: str = None,
             items.append({
                 "id": wp.id, "type": "work_package",
                 "code": wp.code, "name": wp.name or "-",
-                "parent_name": proj_map[wp.project_id].name if wp.project_id in proj_map else "-",
+                "parent_code": proj_map[wp.project_id].code if wp.project_id in proj_map else "-",
                 "category_name": wp.category_name or "-",
                 "child_count": int(r.item_count or 0),   # 所含工作项个数
                 "child_label": "工作项",

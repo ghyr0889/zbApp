@@ -3,11 +3,8 @@
 import re
 from datetime import datetime
 
-
-
 def ensure_open(*objs):
     """校验给定的 项目/工作包/工作项 未被“关闭”；任一已关闭即抛 403。
-
     供各写操作入口调用：对象关闭后不允许再编辑；
     项目关闭会连带锁住其下工作包/工作项（调用时把整条链的对象都传入即可）。
     """
@@ -69,7 +66,7 @@ def item_filled_score(db, item_id):
 
 def has_full_progress(item):
     """进度是否已满：累计月度分值 >= 工作项分值。
-    满分 0（无工作量）视为已满——即“天然完成”，与 item_is_completed 口径一致。
+    满分 0（无工作量）视为已满——即“天然可提交”，与 effective_complete 口径一致。
     """
     total = item.score or 0.0
     if not total:
@@ -78,11 +75,25 @@ def has_full_progress(item):
     return filled >= total - 1e-6
 
 def effective_complete(item):
-    """完成状态 = 手动确认完成 或 进度已满。"""
+    """可提交申请 = 手动确认完成 或 进度已满。"""
     return bool(item.complete_status) or has_full_progress(item)
 
+def is_completed(item):
+    """是否已完成：以 complete_status（审核通过后置位）为准。"""
+    return bool(item.complete_status)
+
+def item_progress(item):
+    """工作项进度百分比（0~100）；满分 0 视为 100%。
+    要求调用前已预加载 item.monthly_scores，避免 N+1。
+    """
+    total = item.score or 0.0
+    filled = sum((ms.score or 0.0) for ms in (item.monthly_scores or []))
+    if not total:
+        return 100.0
+    return calc_progress(filled, total)
+
 def package_effective_complete(pkg):
-    """工作包有效完成 = 手动确认完成 或 其下所有工作项都有效完成。
+    """工作包有效完成 = 手动确认完成 或 其下所有工作项都已审核通过。
     空工作包（无工作项）不自动完成，需手动确认。
     要求调用前已预加载 pkg.work_items -> monthly_scores，避免 N+1 查询。
     """
@@ -91,11 +102,10 @@ def package_effective_complete(pkg):
     items = list(pkg.work_items or [])
     if not items:
         return False
-    return all(effective_complete(it) for it in items)
+    return all(is_completed(it) for it in items)
 
 def project_effective_complete(project):
     """项目有效完成 = 手动确认完成 或 其下所有工作包都有效完成。
-
     空项目不自动完成；空工作包不阻塞项目（自身不自动完成，但不影响父级）。
     要求调用前已预加载 project.work_packages -> work_items -> monthly_scores。
     """
@@ -109,57 +119,40 @@ def project_effective_complete(project):
         for wp in wps
     )
 
-def item_is_completed(db, item):
-    """完成判定（库版）：手动确认完成 或 累计分值已达满分（满分 0 视为已完成）。"""
-    if bool(item.complete_status): return True
-    total = item.score or 0.0
-    if not total:                      # 满分为 0：无工作量，视为已完成
-        return True
-    return item_filled_score(db, item.id) >= total - 1e-6   # 浮点容差
-
-def sync_item_completed_at(db, item, at=None):
-    """按判定自动维护 completed_at：达成则记首次时间，未达成则清空。"""
-    from datetime import datetime
-    if item_is_completed(db, item):
-        if not item.completed_at:
-            item.completed_at = at or datetime.now()
-    else:
-        item.completed_at = None
-    return item.completed_at
-
-
-def sync_items_completed_at(db, items, at=None):
-    """批量版 sync_item_completed_at：一次 GROUP BY 算出全部工作项的累计分值，
-    避免逐个工作项查询（拆分审批、转办等批量场景）。
-
-    判定口径与 item_is_completed 一致：手动确认完成、满分 0、或 累计月度分值 >= 工作项分值。
-    注意：调用前请先 db.flush()，确保刚修改的 score 已进入数据库。
+def auto_create_complete_request(db, item, applicant_id=None, reason=None):
+    """进度已满时自动提交完成申请。
+    条件 ：
+    - 工作项尚未完成（complete_status 为假）
+    - 进度已满（累计月度分值 >= 工作项分值；满分 0 视为已满）
+    - 不存在待审核（PENDING）的完成申请
+    - 能确定一个**真实存在**的申请人（优先传入值，其次工作项负责人）
+    返回：新建的申请对象 / 已存在的待审申请 / None（未触发）。
     """
-    from sqlalchemy import func
     import models
 
-    items = [it for it in (items or []) if it is not None]
-    if not items:
-        return
+    if bool(item.complete_status):
+        return None                      # 已完成，无需再提交
+    if not has_full_progress(item):
+        return None                      # 进度未满
 
-    ids = [it.id for it in items if it.id]
-    sums = {}
-    if ids:
-        sums = dict(db.query(
-            models.WorkItemMonthlyScore.work_item_id,
-            func.coalesce(func.sum(models.WorkItemMonthlyScore.score), 0.0)
-        ).filter(models.WorkItemMonthlyScore.work_item_id.in_(ids))
-            .group_by(models.WorkItemMonthlyScore.work_item_id).all())
+    existing = db.query(models.WorkItemCompletionReview).filter(
+        models.WorkItemCompletionReview.work_item_id == item.id,
+        models.WorkItemCompletionReview.status == "PENDING",
+    ).first()
+    if existing:
+        return existing                  # 已有待审申请，不重复建单
 
-    now = at or datetime.now()
-    for it in items:
-        total = it.score or 0.0
-        # 手动确认 / 满分 0（无工作量）/ 累计分值达到满分 → 视为完成
-        done = bool(it.complete_status) or (not total) or (
-            sums.get(it.id, 0.0) >= total - 1e-6
-        )
-        if done:
-            if not it.completed_at:
-                it.completed_at = now
-        else:
-            it.completed_at = None
+    # 申请人必须存在（外键约束），否则放弃自动提交，交由人工提交
+    applicant = applicant_id or item.owner_id
+    if not applicant or not db.query(models.User).filter(models.User.id == applicant).first():
+        return None
+
+    review = models.WorkItemCompletionReview(
+        work_item_id=item.id,
+        applicant_id=applicant,
+        reason=reason or "进度已满，系统自动提交完成申请",
+        status="PENDING",
+    )
+    db.add(review)
+    return review
+

@@ -8,8 +8,8 @@ from fastapi.staticfiles import StaticFiles
 import sys
 import logging, os
 
-from database import engine, Base, ensure_database_schema
-from routers import auth, work_logs, review, admin, tasks, score_board
+from database import engine, Base
+from routers import auth, work_logs, review, admin, tasks, score_board, complete_review
 
 log_file = os.path.join(os.path.dirname(sys.executable), 'calculate_score.log')
 logging.basicConfig(level=logging.DEBUG,
@@ -18,7 +18,6 @@ logging.basicConfig(level=logging.DEBUG,
 
 # 建表 + 轻量迁移（为旧库补列，如 projects.level）
 Base.metadata.create_all(bind=engine)
-ensure_database_schema()
 
 app = FastAPI(
     title="工作内容统计系统 API",
@@ -26,7 +25,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# 跨域配置（必须加在 include_router 之前）
+# 跨域配置
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -42,8 +41,7 @@ app.include_router(review.router)
 app.include_router(admin.router)
 app.include_router(tasks.router)
 app.include_router(score_board.router)
-# 兼容前端历史路径（如 DELETE /api/v1/users/{id}）
-app.include_router(admin.legacy_router)
+app.include_router(complete_review.router)
 
 # ---- 前端静态托管（方案A：无 Nginx，由后端托管 dist）----
 # 前端构建产物：backend 的上一级 frontend/dist

@@ -12,14 +12,14 @@
               placeholder="输入申请人进行搜索..." 
               clearable 
               prefix-icon="Search"
-              style="width: 180px;" 
+              style="width: 160px;" 
             />
             <el-select 
               v-if="activeTab === 'review'"
               v-model="searchStatus" 
               placeholder="根据状态进行筛选..." 
               clearable 
-              style="width: 160px;"
+              style="width: 140px;"
             >
               <el-option label="待科室审核" value="PENDING" />
               <el-option label="待领导审核" value="SUBMITTED" />
@@ -36,7 +36,6 @@
       <!-- 标签页：审批查阅 / 工作包转办 -->
       <el-tabs v-model="activeTab" class="custom-tabs">
       <el-tab-pane label="审批查阅" name="review">
-
         <div class="table-container">
           <el-table 
             ref="tableRef"
@@ -161,7 +160,6 @@
                     <span v-else class="muted-text">-</span>
                   </template>
                 </el-table-column>
-
                 </el-table>
                 
                 <!-- 最下面一行：高亮修改说明 -->
@@ -214,7 +212,7 @@
           <el-table-column label="操作" min-width="250" align="center" fixed="right">
             <template #default="{ row }">
               <!-- 员工：被驳回的申请可以修改并重新提交 -->
-              <template v-if="isEmployee && row.status === 'REJECTED' && isApplicant(row)">
+              <template v-if="row.status === 'REJECTED' && isApplicant(row)">
                 <el-button v-if="!row.isEditing" type="warning" size="small" plain @click="startEdit(row)">修改</el-button>
                 <span v-else class="muted-text">编辑中</span>
               </template>
@@ -242,6 +240,14 @@
         </el-table>
       </div>
       </el-tab-pane>
+
+      
+       <!-- 工作项完成申请 -->
+        <el-tab-pane label="完成申请" name="complete" lazy>
+          <div class="complete-review-embed">
+            <CompleteReview />
+          </div>
+        </el-tab-pane>
 
         <!-- 工作包转办标签页：收件箱（接收/拒绝）+ 发件箱（状态） -->
         <el-tab-pane label="工作包转办" name="transfers">
@@ -321,6 +327,7 @@
           </div>
         </el-tab-pane>
       </el-tabs>
+
     </el-card>
 
     <!-- ============ 驳回原因弹窗 ============ -->
@@ -359,6 +366,7 @@ import { getIncomingTransfersApi,
          getLevelDefsApi, 
          getAllUsersApi 
         } from '../api'
+import CompleteReview from './CompleteReview.vue'
 
 const activeTab = ref('review')
 const searchKeyword = ref('')
@@ -406,7 +414,7 @@ const isApplicant = (row) => String(row.applicant_id || '') === String(currentUs
 
 // 当前用户能否编辑该申请：员工改被驳回的；领导/管理员改 SUBMITTED；科室改 PENDING
 const canEditRequest = (row) => {
-  if (row.status === 'REJECTED' && isEmployee.value && isApplicant(row)) return true
+  if (row.status === 'REJECTED' && isApplicant(row)) return true
   if (row.status === 'SUBMITTED' && (isLeader.value || isAdmin.value)) return true
   if (row.status === 'PENDING' && isDepartment.value) return true
   return false
@@ -750,6 +758,17 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* 完成申请是内嵌子组件：去掉它的外层内边距与卡片阴影，与当前页签视觉统一 */
+.complete-review-embed :deep(.complete-review-page) {
+  padding: 0;
+}
+
+.complete-review-embed :deep(.box-card) {
+  box-shadow: none;
+  min-height: auto;
+  border-radius: 0;
+}
+
 .review-page { 
   padding: 20px; 
   animation: fadeIn 0.4s ease; 

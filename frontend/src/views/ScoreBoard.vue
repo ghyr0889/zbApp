@@ -4,6 +4,12 @@
     <el-card class="box-card" shadow="never">
       <!-- 全局查询区：选择查看哪个月 / 哪个季度 / 哪一年 -->
       <div class="global-filter">
+      <!-- 项目汇总：查看方式（项目 / 工作包） -->
+        <el-select v-if="activeTab === 'summary'" v-model="summaryViewType" size="default"
+          style="width: 150px" @change="fetchProjectSummary">
+          <el-option label="查看项目" value="project" />
+          <el-option label="查看工作包" value="work_package" />
+        </el-select>
         <span v-if="showPeriodFilter" class="filter-label">查询维度：</span>
         <el-select v-if="showPeriodFilter" v-model="queryMode" size="default" style="width: 120px" @change="onQueryChange">
           <el-option label="按月份" value="month" />
@@ -52,12 +58,6 @@
         <!-- 月份（可选：空 = 累计全部月份） -->
         <el-date-picker v-if="activeTab === 'situation'" v-model="situationMonth" type="month" value-format="YYYY-MM" clearable
           placeholder="全部月份（累计）" style="width: 160px; margin-left: 12px" @change="fetchSituation" />
-        <!-- 项目汇总：查看方式（项目 / 工作包） -->
-        <el-select v-if="activeTab === 'summary'" v-model="summaryViewType" size="default"
-          style="width: 150px" @change="fetchProjectSummary">
-          <el-option label="按项目查看" value="project" />
-          <el-option label="按工作包查看" value="work_package" />
-        </el-select>
       </div>
 
 
@@ -339,44 +339,21 @@
         <!-- 项目汇总：项目 / 工作包 分值汇总（按 月/季/年） -->
         <el-tab-pane v-if="canViewSummary" label="项目汇总" name="summary">
           <div class="tab-content">
-            <!-- 汇总卡片 -->
-            <div class="summary-cards">
-              <div class="summary-card">
-                <div class="summary-card-label">{{ summaryViewType === 'project' ? '项目数量' : '工作包数量' }}</div>
-                <div class="summary-card-value">{{ summaryTotals.count || 0 }}</div>
-              </div>
-              <div class="summary-card">
-                <div class="summary-card-label">工作包 / 工作项</div>
-                <div class="summary-card-value">{{ summaryTotals.work_package_count || 0 }} / {{ summaryTotals.work_item_count || 0 }}</div>
-              </div>
-              <div class="summary-card">
-                <div class="summary-card-label">总分值</div>
-                <div class="summary-card-value">{{ summaryTotals.total_score ?? 0 }}</div>
-              </div>
-              <div class="summary-card">
-                <div class="summary-card-label">已填分值</div>
-                <div class="summary-card-value summary-filled">{{ summaryTotals.filled_score ?? 0 }}</div>
-              </div>
-              <div class="summary-card">
-                <div class="summary-card-label">未填分值</div>
-                <div class="summary-card-value summary-unfilled">{{ summaryTotals.unfilled_score ?? 0 }}</div>
-              </div>
-            </div>
             <el-table
-              :data="summaryItems"
+              :data="pagedSummaryItems"
               v-loading="loading"
               border
               style="width: 100%"
-              height="calc(100vh - 400px)"
+              height="calc(100vh - 330px)"
               :empty-text="summaryViewType === 'project' ? '暂无项目数据' : '暂无工作包数据'"
               :header-cell-style="{ background: '#f8fafc', color: '#334155' }"
-              show-summary
+              show-summary 
               :summary-method="summaryTableSummary">
               <el-table-column :label="summaryViewType === 'project' ? '项目名称' : '工作包名称'" min-width="200" fixed="left" show-overflow-tooltip>
                 <template #default="{ row }"><span class="employee-text">{{ row.name }}</span></template>
               </el-table-column>
               <el-table-column prop="code" label="编号" min-width="150" align="center" show-overflow-tooltip />
-              <el-table-column v-if="summaryViewType === 'work_package'" prop="parent_name" label="所属项目" min-width="150" show-overflow-tooltip />
+              <el-table-column v-if="summaryViewType === 'work_package'" prop="parent_code" label="所属项目" min-width="150" show-overflow-tooltip />
               <el-table-column v-if="summaryViewType === 'work_package'" prop="category_name" label="类别" min-width="110" align="center" />
               <el-table-column prop="child_count" :label="summaryViewType === 'project' ? '所含工作包数' : '所含工作项数'" width="120" align="center">
                 <template #default="{ row }"><span class="score-text">{{ row.child_count || 0 }}</span></template>
@@ -403,6 +380,16 @@
                 </template>
               </el-table-column>
             </el-table>
+            <div class="pagination-bar">
+              <el-pagination 
+                background layout="total, prev, pager, next, sizes"
+                :total="summaryItems.length"
+                :current-page="summaryPage"
+                :page-size="summaryPageSize"
+                :page-sizes="[10, 20, 50]"
+                @current-change="(p) => summaryPage = p"
+                @size-change="(s) => { summaryPageSize = s; summaryPage = 1 }" />
+            </div>
           </div>
         </el-tab-pane>
 
@@ -530,7 +517,7 @@ const onQueryChange = () => {
 // 周期（年/季/月）变化时：项目汇总页查汇总，其余页查积分
 const onPeriodChange = () => {
   if (activeTab.value === 'summary') {
-    fetchProjectSummary()
+    handleFilterChange()
     return
   }
   fetchPublicScoreBoard()
@@ -639,12 +626,19 @@ const saveRow = async (row) => {
 const summaryItems = ref([])                 // 当前视图的行数据（项目 或 工作包）
 const summaryTotals = ref({})
 const summaryViewType = ref('project')       // project | work_package
+const summaryPage = ref(1)
+const summaryPageSize = ref(20)
+const pagedSummaryItems = computed(() => {
+  const start = (summaryPage.value - 1) * summaryPageSize.value
+  return summaryItems.value.slice(start, start + summaryPageSize.value)
+})
 const canViewSummary = computed(() => {
   const r = String(currentUser.value?.role || '').toUpperCase()
   return r === 'LEADER' || r === 'ADMIN'
 })
 // 查询维度选择器：个人积分 / 所有人员积分 / 项目汇总 三个页签共用
 const showPeriodFilter = computed(() => ['personal', 'all', 'summary'].includes(activeTab.value))
+
 
 const fetchProjectSummary = async () => {
   if (!currentUser.value || !canViewSummary.value) return
@@ -676,14 +670,23 @@ const fetchProjectSummary = async () => {
   }
 }
 
+const handleFilterChange = () => {
+  summaryPage.value = 1        // ← 关键：重置到第 1 页
+  fetchProjectSummary()
+}
+
 // 项目汇总表格底部合计（个数 / 总分值 / 已填 / 未填）
-const summaryTableSummary = ({ columns, data }) => {
+const summaryTableSummary = ({ columns }) => {
   const sums = []
   columns.forEach((col, idx) => {
     if (idx === 0) { sums[idx] = '合计'; return }
     const key = col.property
     if (['child_count', 'work_item_count', 'total_score', 'filled_score', 'unfilled_score'].includes(key)) {
-      sums[idx] = parseFloat(data.reduce((s, r) => s + (Number(r[key]) || 0), 0).toFixed(2))
+      const key = col.property === 'child_count'
+        ? (summaryViewType.value === 'project' ? 'work_package_count' : 'work_item_count')
+        : col.property
+      const val = summaryTotals.value?.[key]
+      sums[idx] = val == null ? '' : parseFloat(Number(val).toFixed(2))
     } else sums[idx] = ''
   })
   return sums
