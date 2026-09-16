@@ -222,7 +222,9 @@ def get_public_score_board(period: str = "all",
     # 周期内月份集合（month / quarter / year / all）
     months = months_of_period(period, y, month, quarter)
 
-    users = db.query(models.User).filter(models.User.role.notin_(["LEADER", "ADMIN"])).all()
+    users = db.query(models.User).filter(
+        models.User.role.notin_(["LEADER", "ADMIN"]),
+        models.User.is_deleted.isnot(True)).all()
     all_records = db.query(models.WorkItemMonthlyScore).all()
 
     # 周期内的月度附加分（技术提升 / 日常管理）
