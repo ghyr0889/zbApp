@@ -18,6 +18,7 @@ class User(Base):
     password = Column(String(100), default="123456", nullable=False)
     role = Column(String(20), default="EMPLOYEE")  # EMPLOYEE / DEPARTMENT / LEADER / ADMIN
     job_grade = Column(String(20), nullable=False)  # 职级（必填）
+    department = Column(String(255), nullable=True) # 所属科室
 
     is_deleted = Column(Boolean, default=False)
     deleted_at = Column(DateTime, nullable=True)
@@ -40,6 +41,14 @@ class Project(Base):
     owner = relationship("User", foreign_keys=[owner_id])
     tech_owner = relationship("User", foreign_keys=[tech_owner_id])
     work_packages = relationship("WorkPackage", back_populates="project", cascade="all, delete-orphan")
+
+
+class Department(Base):
+    """统一维护科室名称；人员仍沿用现有 department 字段，无需重建人员表。"""
+    __tablename__ = "departments"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(255), nullable=False, unique=True)
 
 
 class WorkPackageCategory(Base):
@@ -221,3 +230,40 @@ class ScoreLevelDef(Base):
     is_active = Column(Integer, default=1)                     # 是否启用
 
     __table_args__ = (UniqueConstraint("category", "name", name="uq_def_category_name"),)
+
+
+class Announcement(Base):
+    """公告 主表"""
+    __tablename__ = "announcement"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    title = Column(String(200), nullable=False) #标题
+    content = Column(Text, nullable=False) #正文
+    publisher_id = Column(String(50), ForeignKey("users.id"), nullable=False) # 发布人id
+    audience_mode = Column(String(30),default="all", nullable=False) # 可见范围
+    status = Column(String(20), default="DRAFT") # 状态 草稿DRAFT，已发布PUNLISHED，已撤回WITHRAWN
+    is_pinned = Column(Boolean, default=False) # 是否置顶 TRUE为置顶
+    published_at = Column(DateTime, nullable=True) # 发布时间
+    created_at = Column(DateTime, default=datetime.now, nullable=True) # 创建时间
+
+
+class AnnouncementRole(Base):
+    """ 公告角色表 """
+    __tablename__ = "announcement-role"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    announcement_id = Column(Integer, ForeignKey("announcement.id"), nullable=False)
+    role = Column(String(20), nullable=True)
+
+    __table_args__ = (UniqueConstraint( "announcement_id", "role",name="uq_announcement_role"),)
+
+
+class LoginSession(Base):
+    """登录会话表：一条记录对应一次登录，退出时删除对应记录。"""
+    __tablename__ = "login_sessions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column( String(50), ForeignKey("users.id"), nullable=False, index=True, )
+    # 只保存原始令牌的 SHA-256 哈希，原始令牌仅在登录成功时返回前端。
+    token_hash = Column( String(64),unique=True, nullable=False, index=True, )
+    expires_at = Column(DateTime, nullable=False)  # UTC 到期时间，与签发和验证逻辑一致。

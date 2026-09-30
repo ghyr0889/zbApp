@@ -19,8 +19,8 @@ router = APIRouter(prefix="/api/v1/admin", tags=["Admin Management"])
 def get_all_users(db: Session = Depends(get_db)):
     users = db.query(models.User).filter(models.User.is_deleted == False).all()
     return {"code": 200, "data": [
-        {"id": u.id, "username": u.username, "role": u.role, "job_grade": u.job_grade, "password": u.password} for u in users
-    ]}
+        {"id": u.id, "username": u.username, "role": u.role, "job_grade": u.job_grade, "password": u.password, "department": u.department} 
+        for u in users]}
 
 
 @router.post("/users")
@@ -38,7 +38,8 @@ def create_user(user_in: UserCreate, db: Session = Depends(get_db)):
             username=user_in.username.strip(),
             password=user_in.password or "123456",
             role=(user_in.role or "EMPLOYEE").upper(),
-            job_grade=user_in.job_grade
+            job_grade=user_in.job_grade,
+            department=user_in.department.strip() or None
         )
         db.add(new_user)
         db.commit()
@@ -61,7 +62,8 @@ def update_user(userId: str, data: UserUpdate, db:Session = Depends(get_db)):
     old_grade = user.job_grade
     user.username = data.username or user.username
     user.role = data.role or user.role
-    user.job_grade = data.job_grade or user.job_grade
+    user.job_grade = data.job_grade or old_grade
+    user.department = data.department.strip() or None
     grade_changed = (user.job_grade or "") != (old_grade or "")
 
     # 职级变化 → 重算该人员作为“工作项负责人”的【当月】已填月度分值计算得分

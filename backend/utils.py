@@ -3,6 +3,24 @@
 import re
 from datetime import datetime
 
+# 各角色在「审批查阅」里需要处理的拆分申请状态
+PENDING_STATUS_BY_ROLE = {
+    "DEPARTMENT": "PENDING",    # 科室主任：待科室审核
+    "LEADER": "SUBMITTED",      # 领导：待领导审核
+    "ADMIN": "SUBMITTED",       # 管理员：等同领导
+    "EMPLOYEE": "REJECTED",     # 员工：自己被驳回、待修改重提的申请
+}
+
+
+def pending_status_for(role):
+    """返回该角色需要处理的拆分申请状态；未知角色返回空串（视为没有待办）。
+
+    唯一的状态映射表：审批查阅列表、待办计数接口都用它，
+    避免多处各写一套导致前后端口径分叉。
+    """
+    return PENDING_STATUS_BY_ROLE.get(str(role or "").upper(), "")
+
+
 def ensure_open(*objs):
     """校验给定的 项目/工作包/工作项 未被“关闭”；任一已关闭即抛 403。
     供各写操作入口调用：对象关闭后不允许再编辑；

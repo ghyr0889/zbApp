@@ -743,6 +743,7 @@ const validateWorkItemFields = (row) => {
   if (!row.importance) return '请选择重要度'
   if (!row.innovation) return '请选择创新度'
   if (!row.deadline) return '请选择截止时间'
+  if (!String(row.tech_owner_id ?? '').trim()) {return '请选择工作项技术负责人'}
   return ''
 }
 
@@ -788,7 +789,15 @@ const confirmBatchSubmit = async () => {
   if (!rows.length) return
   const reason = (submitReason.value || '').trim()
   if (!reason) return ElMessage.warning('请填写具体修改内容')
-
+  // 最终发送请求前再次校验，避免提交窗口打开后数据发生变化。
+  for (const row of rows) {
+    const message = validateWorkItemFields(row)
+    if (message) {
+      return ElMessage.warning(
+        `「${row.name || '未命名工作项'}」：${message}`
+      )
+    }
+  }
   saving.value = true
   try {
     const res = await createSplitRequestApi({

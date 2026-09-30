@@ -4,12 +4,6 @@
     <el-card class="box-card" shadow="never">
       <!-- 全局查询区：选择查看哪个月 / 哪个季度 / 哪一年 -->
       <div class="global-filter">
-      <!-- 项目汇总：查看方式（项目 / 工作包） -->
-        <el-select v-if="activeTab === 'summary'" v-model="summaryViewType" size="default"
-          style="width: 150px" @change="fetchProjectSummary">
-          <el-option label="查看项目" value="project" />
-          <el-option label="查看工作包" value="work_package" />
-        </el-select>
         <span v-if="showPeriodFilter" class="filter-label">查询维度：</span>
         <el-select v-if="showPeriodFilter" v-model="queryMode" size="default" style="width: 120px" @change="onQueryChange">
           <el-option label="按月份" value="month" />
@@ -43,25 +37,7 @@
         <span v-if="showPeriodFilter" class="period-label">当前查看：{{ periodLabel }}</span>
       </div>
 
-    <!-- 视图切换：项目 / 工作包类别 -->
-      <div class="view-controls">
-      <el-select v-if="activeTab === 'situation'" v-model="viewType" size="default" style="width: 150px" @change="onViewChange"placeholder="选择查看方式">
-        <el-option label="查看项目" value="project" />
-        <el-option label="查看工作包类别" value="category" />
-      </el-select>
-        <!-- 对象选择 -->
-        <el-select v-if="activeTab === 'situation'" v-model="situationTarget" filterable
-          :placeholder="viewType === 'project' ? '选择项目' : '选择工作包类别'"
-          style="width: 220px; margin-left: 12px" @change="fetchSituation">
-          <el-option v-for="opt in situationOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
-        </el-select>
-        <!-- 月份（可选：空 = 累计全部月份） -->
-        <el-date-picker v-if="activeTab === 'situation'" v-model="situationMonth" type="month" value-format="YYYY-MM" clearable
-          placeholder="全部月份（累计）" style="width: 160px; margin-left: 12px" @change="fetchSituation" />
-      </div>
-
-
-      <!-- 主体内容区：Tabs 顶格显示 -->
+    <!-- 主体内容区：Tabs 顶格显示 -->
       <el-tabs v-model="activeTab" class="custom-tabs">
         
         <!-- 页面一：个人积分 -->
@@ -306,102 +282,16 @@
           </div>
         </el-tab-pane>
 
-
-        <!-- 完成情况 -->
-        <el-tab-pane v-if="canViewSituation" label="完成情况" name="situation">
-          <div class="tab-content">
-            <el-table 
-              :data="situationPeople"
-              v-loading="loading" 
-              border
-              style="width: 100%"
-              height="calc(100vh - 330px)"
-              empty-text="该对象下暂无人员数据"
-              :header-cell-style="{ background: '#f8fafc', color: '#334155' }"
-              show-summary 
-              :summary-method="situationSummary">
-              <el-table-column prop="username" label="人员" min-width="140" align="center" fixed="left" />
-              <el-table-column prop="total_score" label="总分值" min-width="110" align="center">
-                <template #default="{ row }"><span class="score-text">{{ row.total_score ?? 0 }}</span></template>
-              </el-table-column>
-              <el-table-column prop="filled_score" label="已填分" min-width="110" align="center">
-                <template #default="{ row }"><span class="score-text">{{ row.filled_score ?? 0 }}</span></template>
-              </el-table-column>
-              <el-table-column prop="unfilled_score" label="未填分" min-width="110" align="center">
-                <template #default="{ row }">
-                  <span :class="(row.unfilled_score ?? 0) < 0 ? 'penalty-text' : 'muted-text'">{{ row.unfilled_score ?? 0 }}</span>
-                </template>
-              </el-table-column>
-            </el-table>
-          </div>
-        </el-tab-pane>
-
-        <!-- 项目汇总：项目 / 工作包 分值汇总（按 月/季/年） -->
-        <el-tab-pane v-if="canViewSummary" label="项目汇总" name="summary">
-          <div class="tab-content">
-            <el-table
-              :data="pagedSummaryItems"
-              v-loading="loading"
-              border
-              style="width: 100%"
-              height="calc(100vh - 330px)"
-              :empty-text="summaryViewType === 'project' ? '暂无项目数据' : '暂无工作包数据'"
-              :header-cell-style="{ background: '#f8fafc', color: '#334155' }"
-              show-summary 
-              :summary-method="summaryTableSummary">
-              <el-table-column :label="summaryViewType === 'project' ? '项目名称' : '工作包名称'" min-width="200" fixed="left" show-overflow-tooltip>
-                <template #default="{ row }"><span class="employee-text">{{ row.name }}</span></template>
-              </el-table-column>
-              <el-table-column prop="code" label="编号" min-width="150" align="center" show-overflow-tooltip />
-              <el-table-column v-if="summaryViewType === 'work_package'" prop="parent_code" label="所属项目" min-width="150" show-overflow-tooltip />
-              <el-table-column v-if="summaryViewType === 'work_package'" prop="category_name" label="类别" min-width="110" align="center" />
-              <el-table-column prop="child_count" :label="summaryViewType === 'project' ? '所含工作包数' : '所含工作项数'" width="120" align="center">
-                <template #default="{ row }"><span class="score-text">{{ row.child_count || 0 }}</span></template>
-              </el-table-column>
-              <el-table-column v-if="summaryViewType === 'project'" prop="work_item_count" label="工作项总数" width="110" align="center">
-                <template #default="{ row }"><span class="score-text">{{ row.work_item_count || 0 }}</span></template>
-              </el-table-column>
-              <el-table-column prop="total_score" label="总分值" width="110" align="center">
-                <template #default="{ row }"><span class="score-text">{{ row.total_score ?? 0 }}</span></template>
-              </el-table-column>
-              <el-table-column prop="filled_score" label="已填分值" width="110" align="center">
-                <template #default="{ row }"><span class="score-text">{{ row.filled_score ?? 0 }}</span></template>
-              </el-table-column>
-              <el-table-column prop="unfilled_score" label="未填分值" width="120" align="center">
-                <template #default="{ row }">
-                  <span :class="(row.unfilled_score ?? 0) < 0 ? 'penalty-text' : 'muted-text'">{{ row.unfilled_score ?? 0 }}</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="状态" width="100" align="center">
-                <template #default="{ row }">
-                  <el-tag v-if="row.closed_status" type="danger" size="small">已关闭</el-tag>
-                  <el-tag v-else-if="row.complete_status" type="success" size="small">已完成</el-tag>
-                  <el-tag v-else type="primary" size="small">进行中</el-tag>
-                </template>
-              </el-table-column>
-            </el-table>
-            <div class="pagination-bar">
-              <el-pagination 
-                background layout="total, prev, pager, next, sizes"
-                :total="summaryItems.length"
-                :current-page="summaryPage"
-                :page-size="summaryPageSize"
-                :page-sizes="[10, 20, 50]"
-                @current-change="(p) => summaryPage = p"
-                @size-change="(s) => { summaryPageSize = s; summaryPage = 1 }" />
-            </div>
-          </div>
-        </el-tab-pane>
-
+        <!-- 完成情况 / 项目汇总 已迁至「数据看板」页面 -->
       </el-tabs>
     </el-card>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getPublicScoreBoardApi, updateMonthlyExtraScoreApi, getCompletedSituationApi, getAllProjectsApi, getWorkCategoriesApi, getProjectSummaryApi } from '../api'
+import { getPublicScoreBoardApi, updateMonthlyExtraScoreApi } from '../api'
 import { useUserStore } from '../stores/user'
 
 const userStore = useUserStore()
@@ -431,6 +321,9 @@ const periodLabel = computed(() => {
   if (queryMode.value === 'quarter') return `${selectedYear.value}年第${selectedQuarter.value}季度`
   if (queryMode.value === 'year') return `${selectedYear.value}年`
 })
+
+// 查询维度选择器：个人积分 / 所有人员积分 两个页签共用
+const showPeriodFilter = computed(() => ['personal', 'all'].includes(activeTab.value))
 
 // 所选周期总得分（仪表盘）
 const periodBaseScore = computed(() => {
@@ -514,12 +407,8 @@ const onQueryChange = () => {
   onPeriodChange()
 }
 
-// 周期（年/季/月）变化时：项目汇总页查汇总，其余页查积分
+// 周期（年/季/月）变化时重新查询积分数据
 const onPeriodChange = () => {
-  if (activeTab.value === 'summary') {
-    handleFilterChange()
-    return
-  }
   fetchPublicScoreBoard()
 }
 
@@ -622,159 +511,6 @@ const saveRow = async (row) => {
   }
 }
 
-// ====================== 项目汇总（项目 / 工作包 → 分值进度） ======================
-const summaryItems = ref([])                 // 当前视图的行数据（项目 或 工作包）
-const summaryTotals = ref({})
-const summaryViewType = ref('project')       // project | work_package
-const summaryPage = ref(1)
-const summaryPageSize = ref(20)
-const pagedSummaryItems = computed(() => {
-  const start = (summaryPage.value - 1) * summaryPageSize.value
-  return summaryItems.value.slice(start, start + summaryPageSize.value)
-})
-const canViewSummary = computed(() => {
-  const r = String(currentUser.value?.role || '').toUpperCase()
-  return r === 'LEADER' || r === 'ADMIN'
-})
-// 查询维度选择器：个人积分 / 所有人员积分 / 项目汇总 三个页签共用
-const showPeriodFilter = computed(() => ['personal', 'all', 'summary'].includes(activeTab.value))
-
-
-const fetchProjectSummary = async () => {
-  if (!currentUser.value || !canViewSummary.value) return
-  loading.value = true
-  try {
-    const params = {
-      currentUserId: currentUser.value.id,
-      target_type: summaryViewType.value,
-      period: queryMode.value,
-      year: selectedYear.value
-    }
-    if (queryMode.value === 'month' && selectedMonth.value) {
-      params.month = Number(String(selectedMonth.value).split('-')[1])
-    }
-    if (queryMode.value === 'quarter') {
-      params.quarter = selectedQuarter.value
-    }
-    const res = await getProjectSummaryApi(params)
-    if (res?.data?.code === 200) {
-      const data = res.data.data || {}
-      summaryTotals.value = data.totals || {}
-      summaryItems.value = data.items || []
-    }
-  } catch (err) {
-    console.error('获取项目汇总失败:', err)
-    ElMessage.error(err.response?.data?.detail || '获取项目汇总失败')
-  } finally {
-    loading.value = false
-  }
-}
-
-const handleFilterChange = () => {
-  summaryPage.value = 1        // ← 关键：重置到第 1 页
-  fetchProjectSummary()
-}
-
-// 项目汇总表格底部合计（个数 / 总分值 / 已填 / 未填）
-const summaryTableSummary = ({ columns }) => {
-  const sums = []
-  columns.forEach((col, idx) => {
-    if (idx === 0) { sums[idx] = '合计'; return }
-    const key = col.property
-    if (['child_count', 'work_item_count', 'total_score', 'filled_score', 'unfilled_score'].includes(key)) {
-      const key = col.property === 'child_count'
-        ? (summaryViewType.value === 'project' ? 'work_package_count' : 'work_item_count')
-        : col.property
-      const val = summaryTotals.value?.[key]
-      sums[idx] = val == null ? '' : parseFloat(Number(val).toFixed(2))
-    } else sums[idx] = ''
-  })
-  return sums
-}
-
-// ====================== 完成情况（项目/类别 → 人员分值进度） ======================
-const viewType = ref('project')        // project | category
-const situationTarget = ref('')        // 当前选中的 项目id 或 类别名
-const situationMonth = ref('')         // 空 = 累计全部月份
-const situationOptions = ref([])       // 项目或类别下拉选项
-const situationPeople = ref([])        // 接口返回的人员行
-const canViewSituation = computed(() => {
-  const r = String(currentUser.value?.role || '').toUpperCase()
-  return r === 'LEADER' || r === 'ADMIN'
-})
-
-const loadSituationOptions = async () => {
-  try {
-    if (viewType.value === 'project') {
-      const res = await getAllProjectsApi()
-      const list = res.data?.data || []
-      situationOptions.value = list.map(p => ({ label: `${p.name}（${p.code || p.id}）`, value: String(p.id) }))
-    } else {
-      const res = await getWorkCategoriesApi()
-      situationOptions.value = (res.data?.data || []).map(c => ({ label: c, value: c }))
-    }
-    situationTarget.value = situationOptions.value[0]?.value || ''
-    situationPeople.value = []
-    if (situationTarget.value) fetchSituation()
-  } catch (err) {
-    console.error(err)
-    ElMessage.error('获取项目/类别列表失败')
-  }
-}
-
-const onViewChange = () => {
-  situationTarget.value = ''
-  situationPeople.value = []
-  loadSituationOptions()
-}
-
-const fetchSituation = async () => {
-  if (!currentUser.value || !canViewSituation.value) return
-  if (!situationTarget.value) return
-  loading.value = true
-  try {
-    const params = {
-      target_type: viewType.value,
-      currentUserId: currentUser.value.id,
-      month: situationMonth.value || undefined
-    }
-    if (viewType.value === 'project') params.target_id = Number(situationTarget.value)
-    else params.category_name = situationTarget.value
-    const res = await getCompletedSituationApi(params)
-    if (res?.data?.code === 200) {
-      situationPeople.value = res.data.data.people || []
-    }
-  } catch (err) {
-    console.error(err)
-    ElMessage.error(err.response?.data?.detail || '获取完成情况失败')
-  } finally {
-    loading.value = false
-  }
-}
-
-// 表格底部合计（总分值 / 已填 / 未填）
-const situationSummary = ({ columns, data }) => {
-  const sums = []
-  columns.forEach((col, idx) => {
-    if (idx === 0) { sums[idx] = '合计'; return }
-    const key = col.property
-    if (['total_score', 'filled_score', 'unfilled_score'].includes(key)) {
-      sums[idx] = parseFloat(data.reduce((s, r) => s + (Number(r[key]) || 0), 0).toFixed(2))
-    } else sums[idx] = ''
-  })
-  return sums
-}
-
-// 切标签页时按需加载：项目汇总 / 完成情况
-watch(activeTab, (tab) => {
-  if (tab === 'summary' && canViewSummary.value) {
-    fetchProjectSummary()
-  }
-  if (tab === 'situation' && canViewSituation.value && !situationOptions.value.length) {
-    loadSituationOptions()
-  }
-})
-
 onMounted(() => {
   fetchPublicScoreBoard()
 })
@@ -833,38 +569,6 @@ onMounted(() => {
   font-weight: 600;
   margin-left: 8px;
 }
-
-/* 项目汇总：顶部统计卡片 */
-.summary-cards {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.summary-card {
-  flex: 1 1 150px;
-  background-color: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  padding: 12px 16px;
-}
-
-.summary-card-label {
-  font-size: 13px;
-  color: #64748b;
-  margin-bottom: 6px;
-}
-
-.summary-card-value {
-  font-size: 20px;
-  font-weight: 600;
-  color: #1e293b;
-}
-
-.summary-filled { color: #67c23a; }
-
-.summary-unfilled { color: #f56c6c; }
 
 .employee-text {
   color: #1e293b;

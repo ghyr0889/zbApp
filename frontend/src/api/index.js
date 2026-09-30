@@ -5,6 +5,30 @@ const api = axios.create({
   timeout: 5000
 })
 
+// 只在统一的 API 实例中携带真实令牌，不能使用用户 ID 充当 Bearer 凭证。
+api.interceptors.request.use(config => {
+  const token = sessionStorage.getItem('access_token')
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  return config
+})
+
+// 由入口注入清理登录状态的回调，避免 API、用户 store、router 循环导入。
+let unauthorizedHandler = null
+export const setUnauthorizedHandler = handler => { unauthorizedHandler = handler }
+api.interceptors.response.use(response => response, error => {
+  const token = sessionStorage.getItem('access_token')
+  const sentToken = error.config?.headers?.Authorization
+  // 仅处理当前会话的 401；旧请求迟到的响应不能清除刚刚重新登录的新会话。
+  // 403 是业务权限不足，不退出登录。
+  if (error.response?.status === 401 && token && sentToken === `Bearer ${token}`) {
+    unauthorizedHandler?.()
+  }
+  return Promise.reject(error)
+})
+
+export const getCurrentUserApi = () => api.get('/auth/me')
+export const logoutApi = () => api.post('/auth/logout')
+
 export const getPublicScoreBoardApi = (period, year, month, quarter) => {
   const params = { period, year, month, quarter }
   Object.keys(params).forEach(k => {
@@ -89,5 +113,32 @@ export const putComputedScoreDimensionsApi = (data) => api.put('/admin/computed-
 // 后台管理：档位字典（职级/难度/重要度/创新度）
 export const getLevelDefsApi = () => api.get('/admin/level-defs')
 export const putLevelDefsApi = (data) => api.put('/admin/level-defs', data)
+// 全局红点提示：待办数量汇总（菜单红点 = review + complete + transfers）
+export const getPendingSummaryApi = (userId) => api.get('/pending/summary', { params: { user_id: userId } })
+
+//登录认证 拉取个人信息
+export const getUserProfileApi = (userId) => api.get(`/auth/profile/${encodeURIComponent(userId)}`)
+
+// 创建公告，后端默认保存为草稿。
+export const createAnnouncementApi = data => api.post('/announcements', data)
+// 收到的公告：后端根据登录用户筛选可见范围。
+export const getAnnouncementsApi = params => api.get('/announcements', { params })
+// 查看公告详情
+export const getAnnouncementDetailApi = announcementId => api.get(`/announcements/${announcementId}`)
+// 查询当前登录用户创建的公告
+export const getMyAnnouncementsApi = params => api.get('/announcements/mine', { params })
+// 发布已有草稿或重新发布已撤回公告。
+export const publishAnnouncementApi = id => api.post(`/announcements/${id}/publish`)
+// 撤回指定公告
+export const withdrawAnnouncementApi = announcementId => api.post(`/announcements/${announcementId}/withdraw`)
 
 export default api
+
+// 后台信息管理：统一的科室选项与工作包类型维护。
+export const getDepartmentOptionsApi = () => api.get('/admin/departments')
+export const getInformationApi = kind => api.get(`/admin/information/${kind}`)
+export const createInformationApi = (kind, data) => api.post(`/admin/information/${kind}`, data)
+export const updateInformationApi = (kind, id, data) => api.put(`/admin/information/${kind}/${id}`, data)
+
+export const getChartOptionsApi = (userId) => api.get('/analytics/options', { params: { user_id: userId }, timeout: 30000 })
+export const getCustomChartApi = (data) => api.post('/analytics/chart', data, { timeout: 30000 })

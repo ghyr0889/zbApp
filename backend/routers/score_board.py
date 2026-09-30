@@ -98,12 +98,24 @@ def assert_month_fillable(month):
 
 
 def compute_deducted(item):
-    """通过时间超出 deadline 7 天以上才扣 1 分。"""
+    """逾期扣分：前30天每满7天扣0.5分，之后每满7天扣1分。"""
     if not item.completed_at or not item.deadline:
         return 0.0
-    if item.completed_at > item.deadline + timedelta(days=7):
-        return 1.0
-    return 0.0
+
+    # 获取完整的逾期天数；未逾期则不扣分。
+    overdue_days = (item.completed_at - item.deadline).days
+    if overdue_days <= 0:
+        return 0.0
+
+    # 第一阶段：前30天，最多计算4个完整的7天。
+    first_days = min(overdue_days, 30)
+    first_deducted = (first_days // 7) * 0.5
+
+    # 第二阶段：超过30天的部分，重新计算完整的7天。
+    extra_days = max(overdue_days - 30, 0)
+    extra_deducted = (extra_days // 7) * 1.0
+
+    return first_deducted + extra_deducted
 
 def monthly_quality_score(db, work_item_id, month):
     """M月质量分 = 当月显式值 → 之前最近显式值 → 0（不再使用工作项全局默认）"""

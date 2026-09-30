@@ -35,6 +35,19 @@
                     />
                   </el-select>
                 </el-form-item>
+                <el-form-item label="所属科室">
+                  <el-select
+                    v-model="userForm.department"
+                    filterable
+                    default-first-option
+                    clearable
+                    :reserve-keyword="false"
+                    placeholder="请选择所属科室"
+                    style="width: 100%"
+                  >
+                    <el-option v-for="d in departmentOptions" :key="d" :label="d" :value="d" />
+                  </el-select>
+                </el-form-item>
                 <el-form-item>
                   <el-button type="primary" style="width: 100%" @click="handleCreateUser">确认添加人员</el-button>
                 </el-form-item>
@@ -46,22 +59,22 @@
           <el-col :span="16">
             <el-card header="现有人员名册" shadow="never">
               <el-table :data="allUsers" border stripe style="width: 100%" height="calc(100vh - 340px)">
-                <el-table-column prop="id" label="工号" width="90" sortable />
+                <el-table-column prop="id" label="工号" min-width="90" sortable />
                 <el-table-column prop="username" label="姓名" width="100">
                   <template #default="{ row }">
                     <el-input v-if="row.isEditing" v-model="row.username" size="small" />
                     <span v-else>{{ row.username }}</span>
                   </template>
                 </el-table-column>
-                <el-table-column prop="role" label="角色" width="140">
+                <el-table-column prop="role" label="角色" min-width="140">
                   <template #default="{ row }">
-                    <el-select v-if="row.isEditing" v-model="row.role" size="small" width="130">
+                    <el-select v-if="row.isEditing" v-model="row.role" size="small" min-width="130">
                       <el-option v-for="r in roleOptions" :key="r.value" :label="r.label" :value="r.value" />
                     </el-select>
                     <span v-else>{{ roleLabel(row.role) }}</span>
                   </template>
                 </el-table-column>
-                <el-table-column prop="job_grade" label="职级" width="100">
+                <el-table-column prop="job_grade" label="职级" min-width="100">
                   <template #default="{ row }">
                     <el-select v-if="row.isEditing" v-model="row.job_grade" size="small" style="width: 40px">
                       <el-option v-for="g in jobGradeOptions" :key="g" :label="g" :value="g" />
@@ -69,8 +82,26 @@
                     <span v-else>{{ row.job_grade }}</span>
                   </template>
                 </el-table-column>
-                <el-table-column prop="password" label="密码" width="120" />
-                <el-table-column label="操作" width="140" align="center" >
+                <el-table-column prop="department" label="所属科室" min-width="150">
+                  <template #default="{ row }">
+                    <el-select
+                      v-if="row.isEditing"
+                      v-model="row.department"
+                      filterable
+                      default-first-option
+                      clearable
+                      :reserve-keyword="false"
+                      size="small"
+                      placeholder="请选择所属科室"
+                      style="width: 100%"
+                    >
+                      <el-option v-for="d in departmentOptions" :key="d" :label="d" :value="d" />
+                    </el-select>
+                    <span v-else>{{ row.department || '未分配' }}</span>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="password" label="密码" min-width="120" />
+                <el-table-column label="操作" min-width="140" align="center" >
                   <template #default="{ row }">
                     <template v-if="!row.isEditing">
                       <el-button type="primary" link size="small" @click="startEditRow(row)">编辑</el-button>
@@ -98,7 +129,8 @@ import {
   createUserApi, 
   deleteUserApi,
   updateUserApi,
-  getLevelDefsApi
+  getLevelDefsApi,
+  getDepartmentOptionsApi
 } from '../api'
 
 const activeTab = ref('users')
@@ -107,9 +139,11 @@ const activeTab = ref('users')
 const allUsers = ref([])
 
 // 表单响应式绑定
-const userForm = reactive({ id: '', username: '', password: '123456', job_grade: '', role: 'EMPLOYEE' })
+const userForm = reactive({ id: '', username: '', password: '123456', job_grade: '', role: 'EMPLOYEE', department: '' })
 const employeeOptions = ref([])
 const jobGradeOptions = ref([])
+// 两处表单共用“信息管理”中的科室字典，尚未分配人员的新科室也可以选择。
+const departmentOptions = ref([])
 
 const currentUser = ref(JSON.parse(localStorage.getItem('user_info') || '{}'))
 
@@ -125,7 +159,12 @@ const savingEdit = ref(false)
 // 批量加载所有数据
 const fetchAllData = async () => {
   try {
-    const resUsers = await getAllUsersApi()
+    const [resUsers, resDepartments] = await Promise.all([getAllUsersApi(), getDepartmentOptionsApi()])
+    departmentOptions.value = resDepartments.data.data || []
+    // 科室在信息管理中改名后，清除新增表单尚未保存的旧选项，避免再次提交旧名称。
+    if (userForm.department && !departmentOptions.value.includes(userForm.department)) {
+      userForm.department = ''
+    }
     if (resUsers.data && resUsers.data.code === 200) {
       const users = resUsers.data.data || []
       allUsers.value = users.sort((a, b) => {
@@ -134,6 +173,7 @@ const fetchAllData = async () => {
     }
   } catch (err) {
     console.error('拉取后台数据失败:', err)
+    ElMessage.error(err.response?.data?.detail || '人员或科室加载失败，请刷新重试')
   }
 }
 defineExpose({ fetchAllData })
@@ -152,17 +192,22 @@ const fetchJobGrades = async () => {
 // 1. 新增人员
 const handleCreateUser = async () => {
   if (!userForm.id.trim() || !userForm.username.trim()) return ElMessage.warning('请填写工号和姓名！')
+  // 下拉框清空时仍提交空字符串，保持现有后端“未分配科室”的处理方式。
+  const department = String(userForm.department || '').trim()
+  if (department.length > 255) return ElMessage.warning('科室名称不能超过255个字符')
   try {
     const res = await createUserApi({ 
         id: userForm.id.trim(), 
         username: userForm.username.trim(),
         password: userForm.password.trim(),
         role: String(userForm.role).toUpperCase(),
-        job_grade: String(userForm.job_grade).toUpperCase() })
+        job_grade: String(userForm.job_grade).toUpperCase(),
+        department })
     if (res.data.code === 200) {
       ElMessage.success('人员创建成功！')
       userForm.id = ''
       userForm.username = ''
+      userForm.department = ''
       fetchAllData()
     }
   } catch (err) {
@@ -194,7 +239,7 @@ const roleLabel = (role) => {
 }
 
 const startEditRow = (row) => {
-  row._backup = { username: row.username, role: row.role, job_grade: row.job_grade }
+  row._backup = { username: row.username, role: row.role, job_grade: row.job_grade, department: row.department }
   row.isEditing = true
 }
 const cancelEditRow = (row) => {
@@ -202,13 +247,16 @@ const cancelEditRow = (row) => {
   row.isEditing = false
 }
 const saveEditRow = async (row) => {
+  const department = String(row.department || '').trim()
+  if (department.length > 255) return ElMessage.warning('科室名称不能超过255个字符')
   savingEdit.value = true
   try {
     const res = await updateUserApi(row.id, {
       updated_by_id: currentUser.value.id,
       username: row.username,
       role: row.role,
-      job_grade: row.job_grade
+      job_grade: row.job_grade,
+      department
     })
     if (res.data?.code === 200) {
       ElMessage.success('人员信息已更新')

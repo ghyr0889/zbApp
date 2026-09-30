@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import case
 
 import models
 from database import get_db
@@ -14,12 +15,18 @@ from schemas import (
     SplitRequestEdit,
     RemoveSplitItem
 )
-from utils import work_package_summary, deadline_str, parse_deadline, ensure_open
+from utils import work_package_summary, deadline_str, parse_deadline, ensure_open, pending_status_for
 
 router = APIRouter(prefix="/api/v1/review", tags=["Owner Review"])
 
+# 角色判断函数（状态映射表见 utils.pending_status_for，全站唯一）
+def _pending_status_for(role: str) -> str:
+    status = pending_status_for(role)
+    if not status:
+        raise HTTPException(status_code=403, detail=f"未知角色，无法统计待办: {role}")
+    return status
 
-# ---------------------------------------------------------------- 工作包拆分申请
+# 工作包拆分申请
 def _split_request_view(req):
     """把拆分申请展开为前端需要的结构。"""
     work_package = req.work_package
@@ -74,7 +81,14 @@ def _split_items_payload(items):
     ], ensure_ascii=False)
 
 # 除 name 外，还要必填的字段
-REQUIRED_ITEM_FIELDS = ["difficulty", "importance", "innovation", "deadline"]
+REQUIRED_ITEM_FIELDS = ["difficulty", "importance", "innovation", "deadline", "tech_owner_id"]
+ITEM_FIELD_LABELS = {
+    "difficulty": "难度",
+    "importance": "重要度",
+    "innovation": "创新度",
+    "deadline": "截止时间",
+    "tech_owner_id": "技术负责人",
+}
 
 def require_work_item_fields(items, label="工作项"):
     for idx, it in enumerate(items or [], 1):
@@ -83,7 +97,7 @@ def require_work_item_fields(items, label="工作项"):
         for f in REQUIRED_ITEM_FIELDS:
             v = it.get(f) if isinstance(it, dict) else getattr(it, f, None)
             if v is None or str(v).strip() == "":
-                missing.append(f)
+                missing.append(ITEM_FIELD_LABELS.get(f, f))
         if missing:
             raise HTTPException(status_code=400,
                                 detail=f"第 {idx} 个工作项缺少必填项：{', '.join(missing)}")
@@ -160,16 +174,30 @@ def get_split_requests(user_id: str = Query(...), db: Session = Depends(get_db))
         raise HTTPException(status_code=404, detail="用户不存在")
 
     role = str(viewer.role).upper()
-    if role in ["LEADER", "ADMIN", "DEPARTMENT"]:
-        requests = db.query(models.WorkPackageSplitRequest).order_by(
-            models.WorkPackageSplitRequest.created_at.desc()
-        ).all()
-    else:
-        requests = db.query(models.WorkPackageSplitRequest).filter(
-            models.WorkPackageSplitRequest.applicant_id == user_id
-        ).order_by(models.WorkPackageSplitRequest.created_at.desc()).all()
+    pending_status = _pending_status_for(role)
 
-    return {"code": 200, "data": [_split_request_view(r) for r in requests]}
+    Request = models.WorkPackageSplitRequest
+    query = db.query(Request)
+
+    # 保留原来的查看范围
+    if role not in ["LEADER", "ADMIN", "DEPARTMENT"]:
+        query = query.filter(Request.applicant_id == user_id)
+
+    requests = query.order_by(
+        # 当前用户未处理的排最前面
+        case(
+            (Request.status == pending_status, 0),
+            else_=1,
+        ).asc(),
+        # 每组内部按提交时间倒序
+        Request.created_at.desc(),
+        # 时间相同时保证顺序稳定
+        Request.id.desc(),
+    ).all()
+    return {
+        "code": 200,
+        "pending_status": pending_status,
+        "data": [_split_request_view(r) for r in requests]}
 
 
 @router.post("/split-requests/{request_id}/review")

@@ -1,5 +1,6 @@
 # xiangmu/backend/schemas.py
-from typing import Optional
+from typing import Optional, Literal
+from datetime import datetime
 
 from pydantic import BaseModel, Field
 
@@ -35,12 +36,14 @@ class UserCreate(BaseModel):
     password: str = Field(..., description="密码")
     role: str = Field(..., description="角色：EMPLOYEE / LEADER / ADMIN / DEPARTMENT")
     job_grade: str = Field(..., description="工号级别: P1/P2/P3/P4")
+    department: str = Field("", max_length=255, description="所属科室")
 
 class UserUpdate(BaseModel):
     updated_by_id: str = Field(..., description="修改人工号")
     username: str = Field(..., description="姓名")
     role: str = Field(..., description="角色：EMPLOYEE / LEADER / ADMIN / DEPARTMENT")
     job_grade: str = Field(..., description="工号级别: P1/P2/P3/P4")
+    department: str = Field(..., max_length=255, description="所属科室")
 
 class ProjectCreate(BaseModel):
     id: Optional[int] = None
@@ -183,3 +186,23 @@ class CompleteRequestCreate(BaseModel):
     applicant_id: str = Field(..., description="申请人 ID")
     item_id: int = Field(..., description="申请的工作项 ID")
     reason: str = Field(..., description="原因")
+
+class AnnouncementCreate(BaseModel):
+    """ 创建公告 """
+    title: str = Field(..., description="标题")
+    content: str = Field(..., description="正文内容")
+    audience_mode: str = "ALL" #ALL 所有人，ROLE 指定角色
+    roles: list[str] = Field(default_factory=list)
+    is_pinned: bool = Field(False, description="是否置顶")
+
+class AnnouncementOut(BaseModel):
+    id: int
+    title: str
+    content: str
+    publisher_id: str
+    audience_mode: str
+    status: str
+    is_pinned: bool
+    published_at: Optional[datetime] = None
+    created_at: datetime
+    roles: list[str] = Field(default_factory=list)

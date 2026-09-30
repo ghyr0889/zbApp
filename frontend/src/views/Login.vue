@@ -52,7 +52,6 @@
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import axios from 'axios'
 import { useUserStore } from '../stores/user'
 
 // 注意：你需要确保 api.js 中导出了 userLoginApi 和 adminLoginApi。
@@ -92,16 +91,17 @@ const handleLogin = async () => {
     }
 
     if (res.data.code === 200) {
+      if (!res.data.access_token) throw new Error('登录接口未返回凭证，请确认后端已更新')
       ElMessage.success(`${activeTab.value === 'employee' ? '员工' : '管理员'}登录成功`)
       const user = res.data.data
-      userStore.setUser(user)
-      axios.defaults.headers.common['Authorization'] = `Bearer ${user.id}`
+      // 先保存令牌，再更新用户；后续待办等请求才能携带本次登录凭证。
+      userStore.setUser(user, res.data.access_token)
       router.push('/project-overview')
     }
   } catch (error) {
     console.error('登录异常:', error)
     // 后端会在权限校验不通过时返回 403 "当前账号没有权限登录该入口"，这里会被捕捉并提示给用户
-    const errorMsg = error.response?.data?.detail || '登录失败，请检查工号、密码及登录身份'
+    const errorMsg = error.response?.data?.detail || error.message || '登录失败，请检查工号、密码及登录身份'
     ElMessage.error(errorMsg)
   } finally {
     loading.value = false

@@ -23,7 +23,15 @@
         </el-menu-item>
         <el-menu-item index="/review">
           <i class="el-icon-s-check"></i>
-          <span>审批查阅</span>
+          <!-- 红点锚在文字上（不是按钮上），所以放进这个 span 里 -->
+          <span class="menu-label">
+            审批查阅
+            <el-badge
+              v-if="pendingTotal"
+              :value="pendingTotal"
+              :max="99"
+              class="menu-badge"/>
+          </span>
         </el-menu-item>
         <el-menu-item index="/score-board">
           <i class="el-icon-data-line"></i>
@@ -32,6 +40,15 @@
         <el-menu-item index="/personal-info">
           <i class="el-icon-user"></i>
           <span>个人信息</span>
+        </el-menu-item>
+        <el-menu-item index="/announcements">
+          <i class="el-icon-bell" aria-hidden="true"></i>
+          <span>公告板</span>
+        </el-menu-item>
+        <!-- 数据看板只对领导/管理员开放（内部两个看板都是这个口径） -->
+        <el-menu-item index="/data-board" v-if="isLEADER || isAdmin">
+          <i class="el-icon-data-analysis"></i>
+          <span>数据看板</span>
         </el-menu-item>
         <el-menu-item index="/admin-panel" v-if="isAdmin">
           <i class="el-icon-setting"></i>
@@ -61,7 +78,13 @@
         <!-- 只有点击后才出现的下拉菜单 -->
         <template #dropdown>
           <el-dropdown-menu>
-            <el-dropdown-item command="logout" class="logout-item">
+            <el-dropdown-item command="toggle-notify">
+              {{ notifyEnabled ? '关闭待办提醒' : '开启待办提醒' }}
+            </el-dropdown-item>
+            <el-dropdown-item command="toggle-sound">
+              {{ soundEnabled ? '关闭提醒音' : '开启提醒音' }}
+            </el-dropdown-item>
+            <el-dropdown-item command="logout" class="logout-item" divided>
               退出登录
             </el-dropdown-item>
           </el-dropdown-menu>
@@ -79,8 +102,8 @@
 
 <script setup>
 // 脚本部分保持原样，未做修改以保证逻辑稳定
-import { ElMessage } from 'element-plus'
-import { computed, watch } from 'vue'
+import { ElMessage, ElNotification } from 'element-plus'
+import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from './stores/user'
 
@@ -90,6 +113,180 @@ const userInfo = computed(() => userStore.userInfo)
 
 const isAdmin = computed(() => userStore.isAdmin)
 const isLEADER = computed(() => userStore.isLEADER)
+
+const pendingTotal = computed(() => userStore.pendingTotal)
+
+// ================= 待办提醒（站内浮层 + 提示音 + 标题闪烁） =================
+// 不依赖 Notification 权限：局域网 http 下浏览器不允许系统通知，这种方案任何环境都能用
+const NOTIFY_KEY = 'pending_notify_enabled'
+const SOUND_KEY = 'pending_notify_sound'
+
+const notifyEnabled = ref(localStorage.getItem(NOTIFY_KEY) !== '0')  // 默认开启
+const soundEnabled = ref(localStorage.getItem(SOUND_KEY) !== '0')    // 默认开启
+
+const TAB_KEYS = ['review', 'complete', 'transfers']
+const TAB_LABEL = { review: '审批查阅', complete: '完成申请', transfers: '工作包转办' }
+const BASE_TITLE = '综保工作管理系统'   // 与 index.html 的 <title> 保持一致
+
+let lastPending = null         // 上一次的待办快照；null = 还没建基线
+let pendingWhileHidden = false // 页面在后台期间累积了新增，切回前台时合并提示
+
+// ---- 提示音：用 Web Audio 现场生成两声"叮咚"，免去引入音频文件 ----
+let audioCtx = null
+async function unlockAudio() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+    if (audioCtx.state === 'suspended') await audioCtx.resume()
+    return audioCtx
+  } catch {
+    return null   // 浏览器不支持就静默降级，不影响浮层和标题提醒
+  }
+}
+
+function playBeep() {
+  if (!soundEnabled.value || !audioCtx || audioCtx.state !== 'running') return
+  const start = audioCtx.currentTime
+  ;[880, 1174].forEach((freq, i) => {          // A5 → D6
+    const at = start + i * 0.18
+    const osc = audioCtx.createOscillator()
+    const gain = audioCtx.createGain()
+    osc.type = 'sine'
+    osc.frequency.value = freq
+    gain.gain.setValueAtTime(0.0001, at)                        // 淡入淡出，避免爆音
+    gain.gain.exponentialRampToValueAtTime(0.18, at + 0.02)
+    gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.16)
+    osc.connect(gain).connect(audioCtx.destination)
+    osc.start(at)
+    osc.stop(at + 0.18)
+  })
+}
+
+// 浏览器自动播放策略：必须有过用户交互才允许出声，所以首次点击时解锁
+function handleFirstGesture() {
+  unlockAudio()
+  document.removeEventListener('pointerdown', handleFirstGesture)
+}
+document.addEventListener('pointerdown', handleFirstGesture)
+
+// ---- 页面在后台时把数量标在标题上（切回前台恢复） ----
+function setTitleBadge(n) {
+  document.title = n > 0 ? `(${n}) ${BASE_TITLE}` : BASE_TITLE
+}
+
+// ---- 只在待办"变多"时提醒；处理完变少时静默 ----
+function pendingDelta(prev, now) {
+  let added = 0
+  let target = 'review'
+  let best = 0
+  const parts = []
+  for (const key of TAB_KEYS) {
+    const d = (now[key] || 0) - (prev[key] || 0)
+    if (d > 0) {
+      added += d
+      parts.push(`${TAB_LABEL[key]} +${d}`)
+      if (d > best) { best = d; target = key }   // 增量最大的那个页签作为跳转目标
+    }
+  }
+  return { added, parts, target }
+}
+
+function remind(added, parts, total, target) {
+  playBeep()
+  ElNotification({
+    title: `有 ${added} 条新的待办`,
+    message: `${parts.join('、')}（当前共 ${total} 条）`,
+    type: 'warning',
+    duration: 6000,
+    position: 'bottom-right',
+    // 点一下直接跳到对应页签，不用自己去翻
+    onClick: () => router.push({ path: '/review', query: { tab: target } })
+  })
+}
+
+watch(() => userStore.pending, (now) => {
+  const prev = lastPending
+  lastPending = { ...now }
+  if (!prev || !notifyEnabled.value) return   // 登录后的第一笔只做基线，不提醒
+  const { added, parts, target } = pendingDelta(prev, now)
+  if (added <= 0) return
+  const total = userStore.pendingTotal
+  if (document.hidden) {
+    // 免打扰：不弹浮层，只在标题上显示数字，切回前台再合并成一条
+    pendingWhileHidden = true
+    setTitleBadge(total)
+    return
+  }
+  remind(added, parts, total, target)
+})
+
+let pendingTimer = null
+
+function startPendingPolling() {
+  stopPendingPolling()
+  userStore.refreshPendingCount()
+  pendingTimer = setInterval(() => {
+    userStore.refreshPendingCount()
+  }, 45000) // 45s，30~60s 之间
+}
+
+function stopPendingPolling() {
+  if (pendingTimer) {
+    clearInterval(pendingTimer)
+    pendingTimer = null
+  }
+}
+
+// 用户切换（登录/退出）时统一处理：有用户就拉 + 起轮询，没用户就停 + 归零
+watch(
+  () => userInfo.value,
+  (u) => {
+    if (u) {
+      startPendingPolling()
+    } else {
+      stopPendingPolling()
+      userStore.clearPending()
+      // 退出后重置提醒状态：下次登录重新建基线，避免把"登录瞬间拉到数据"当成新增
+      lastPending = null
+      pendingWhileHidden = false
+      setTitleBadge(0)
+    }
+  },
+  { immediate: true }
+)
+
+// 切回页面 / 窗口聚焦时立即拉一次，数字马上是新的
+async function handleVisible() {
+  if (document.visibilityState !== 'visible') return
+  setTitleBadge(0)                       // 回到前台，标题恢复正常
+  if (!userInfo.value) return
+  if (pendingWhileHidden && notifyEnabled.value) {
+    pendingWhileHidden = false
+    const total = userStore.pendingTotal
+    if (total > 0) {
+      playBeep()
+      ElNotification({
+        title: '你有待处理的申请',
+        message: `当前共 ${total} 条`,
+        type: 'warning',
+        duration: 8000,
+        position: 'bottom-right',
+        onClick: () => router.push('/review')
+      })
+    }
+  }
+  userStore.refreshPendingCount()
+}
+
+onBeforeUnmount(() => {
+  stopPendingPolling()
+  document.removeEventListener('visibilitychange', handleVisible)
+  window.removeEventListener('focus', handleVisible)
+  document.removeEventListener('pointerdown', handleFirstGesture)
+  setTitleBadge(0)
+})
+
+document.addEventListener('visibilitychange', handleVisible)
+window.addEventListener('focus', handleVisible)
 
 const roleDisplayName = computed(() => {
   if (!userInfo.value) return ''
@@ -112,13 +309,35 @@ const roleTagType = computed(() => {
 const handleUserCommand = (command) => {
   if (command === 'logout') {
     logout()
+    return
+  }
+  if (command === 'toggle-notify') {
+    notifyEnabled.value = !notifyEnabled.value
+    localStorage.setItem(NOTIFY_KEY, notifyEnabled.value ? '1' : '0')
+    ElMessage.success(notifyEnabled.value ? '已开启待办提醒' : '已关闭待办提醒')
+    if (notifyEnabled.value) {
+      lastPending = { ...userStore.pending }   // 重新开启时重建基线，不补弹历史
+      setTitleBadge(0)
+    }
+    return
+  }
+  if (command === 'toggle-sound') {
+    soundEnabled.value = !soundEnabled.value
+    localStorage.setItem(SOUND_KEY, soundEnabled.value ? '1' : '0')
+    ElMessage.success(soundEnabled.value ? '已开启提醒音' : '已关闭提醒音')
+    // 开启后试听一声：此时正处于用户点击的上下文里，正好用来解锁音频
+    if (soundEnabled.value) unlockAudio().then(playBeep)
   }
 }
 
-const logout = () => {
-  userStore.clearUser()
-  ElMessage.success('已安全退出登录')
-  router.push('/login')
+const logout = async () => {
+  try {
+    await userStore.logout() // 撤销服务端令牌后再退出页面。
+    ElMessage.success('已安全退出登录')
+    router.push('/login')
+  } catch (error) {
+    ElMessage.error('退出失败，请检查网络后重试')
+  }
 }
 </script>
 
@@ -240,30 +459,84 @@ body {
   flex: 1;
   width: 100%;
   border-right: none !important;
+  padding: 6px 0;
+  box-sizing: border-box;
+  --el-menu-item-height: 40px;
 }
 
-/* 2. 菜单项文字统一样式 */
-.el-menu-item {
-  margin: 4px 12px;
+/* 紧凑菜单：统一高度和间距，仅影响左侧导航。 */
+.left-menu .el-menu-item {
+  position: relative;
+  margin: 2px 10px;
   border-radius: 8px;
-  height: 48px;
-  line-height: 48px;
+  height: 40px;
+  line-height: 40px;
+  padding-left: 14px !important;
+  padding-right: 12px !important;
   
   /* 文字样式 */
-  color: #495462;
+  color: #303640;
   font-size: 14px;
-  font-weight: 550;
-  letter-spacing: 0.3px;
-  transition: all 0.3s ease;
+  font-weight: 400;
+  letter-spacing: 0;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
-.el-menu-item.is-active {
-  background-color: #e6f1fc !important;
-  font-weight: bold;
+/* 统一图标占位，让各菜单文字的起始位置一致。 */
+.left-menu .el-menu-item > i {
+  display: inline-block;
+  flex: 0 0 22px;
+  width: 22px;
+  margin-right: 10px;
+  text-align: center;
+  font-size: 19px;
 }
 
-.el-menu-item:hover {
-  background-color: #f5f7fa !important;
+.left-menu .el-menu-item:hover {
+  background-color: #f0f5fb !important;
+}
+
+/* 浅蓝底色和左侧细线表示当前页面，选中时不改变字重。 */
+.left-menu .el-menu-item.is-active {
+  color: #409eff;
+  background-color: #eaf4ff !important;
+  font-weight: 400;
+}
+
+.left-menu .el-menu-item.is-active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 2px;
+  border-radius: 2px;
+  background-color: #409eff;
+}
+
+/* 菜单红点：紧贴「审批查阅」四个字的右上角
+   关键：把文字包进 .menu-label，红点定位的基准就从「按钮」变成了「文字」 */
+.menu-label {
+  position: relative;
+  display: inline-block;
+  line-height: 1.4;   /* 使用文字本身的高度定位红点，避免菜单行高影响位置。 */
+}
+/* 微调开关：
+   top  越小越往上（负值 = 越过文字顶边继续往上）
+   right 越大越往左（负值 = 往文字右侧外面挪）
+   当前值让红点压在文字的右上角上，略微探出文字右边 */
+.menu-label .menu-badge {
+  position: absolute;
+  top: -9px;
+  right: -14px;
+  margin: 0;
+}
+
+/* el-badge 默认会给数字加 translateY(-50%) translateX(100%)，
+   即把数字甩到盒子右侧外面；这里取消，让数字老老实实待在自己盒子的右上角，
+   位置就只由上面的 top / right 决定，一位数两位数都不会跑偏 */
+.menu-label .menu-badge .el-badge__content {
+  transform: none;
 }
 
 /* ================= 右侧顶部栏 (原样保留) ================= */

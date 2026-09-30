@@ -28,6 +28,10 @@
           <PersonnelManagement ref="pmRef" />
         </el-tab-pane>
 
+        <el-tab-pane label="信息管理" name="information" lazy>
+          <InformationManagement @changed="pmRef?.fetchAllData()" />
+        </el-tab-pane>
+
         <el-tab-pane label="计算得分系数" name="score">
           <div class="score-rule-wrapper">
             <el-alert
@@ -177,6 +181,7 @@ import { ElMessage } from 'element-plus'
 import { getComputedScoreDimensionsApi, putComputedScoreDimensionsApi, getLevelDefsApi, putLevelDefsApi } from '../api'
 import { useUserStore } from '../stores/user'
 import PersonnelManagement from './PersonnelManagement.vue'
+import InformationManagement from './InformationManagement.vue'
 
 const userStore = useUserStore()
 const activeTab = ref('users')
@@ -351,6 +356,10 @@ onMounted(() => {
 .admin-panel-page {
   padding: 20px;
   animation: fadeIn 0.4s ease;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  box-sizing: border-box;
 }
 
 @keyframes fadeIn {

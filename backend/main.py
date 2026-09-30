@@ -3,13 +3,14 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from exceptions import BusinessError, PermissionDenied, NotFound
 import sys
 import logging, os
 
-from database import engine, Base
-from routers import auth, work_logs, review, admin, tasks, score_board, complete_review
+from database import engine, Base, SessionLocal
+from routers import auth, work_logs, review, admin, tasks, score_board, complete_review, pending, analytics, announcement, information
 
 log_file = os.path.join(os.path.dirname(sys.executable), 'calculate_score.log')
 logging.basicConfig(level=logging.DEBUG,
@@ -18,6 +19,10 @@ logging.basicConfig(level=logging.DEBUG,
 
 # 建表 + 轻量迁移（为旧库补列，如 projects.level）
 Base.metadata.create_all(bind=engine)
+
+# 建立统一科室字典，并收录旧人员记录中的科室；不修改已有人员内容。
+with SessionLocal() as db:
+    information.seed_departments(db)
 
 app = FastAPI(
     title="工作内容统计系统 API",
@@ -42,6 +47,24 @@ app.include_router(admin.router)
 app.include_router(tasks.router)
 app.include_router(score_board.router)
 app.include_router(complete_review.router)
+app.include_router(pending.router)
+app.include_router(analytics.router)
+app.include_router(announcement.router)
+app.include_router(information.router)
+
+@app.exception_handler(BusinessError)
+async def handle_business_error(request, exc):
+    if isinstance(exc, PermissionDenied):
+        status_code = 403
+    elif isinstance(exc, NotFound):
+        status_code = 404
+    else:
+        status_code = 400
+
+    return JSONResponse(
+        status_code=status_code,
+        content={"detail": str(exc)},
+    )
 
 # ---- 前端静态托管（方案A：无 Nginx，由后端托管 dist）----
 # 前端构建产物：backend 的上一级 frontend/dist

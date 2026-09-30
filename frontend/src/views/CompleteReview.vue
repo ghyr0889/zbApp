@@ -132,7 +132,6 @@ const filteredRequests = computed(() =>
   statusFilter.value ? requests.value.filter(r => r.status === statusFilter.value) : requests.value
 )
 
-
 // 是否轮到我审核：我就是该工作项的技术负责人
 const isMyReview = (row) => {
   const techOwnerId = row.complete_item?.tech_owner_id || ''
@@ -153,6 +152,8 @@ const fetchRequests = async () => {
   try {
     const res = await getCompleteRequestsApi(currentUser.value.id)
     if (res.data?.code === 200) requests.value = res.data.data || []
+    // 列表变化后同步全局待办计数（菜单红点 / 完成申请角标）
+    userStore.refreshPendingCount()
   } catch (err) {
     console.error(err)
     ElMessage.error(err.response?.data?.detail || '获取完成申请失败')
@@ -171,6 +172,7 @@ const submitReview = async (row, action, comment) => {
     })
     if (res.data?.code === 200) {
       ElMessage.success(res.data.message || '操作成功')
+      // fetchRequests 内部会同步全局待办计数
       await fetchRequests()
       return true
     }
@@ -194,6 +196,8 @@ const handleApprove = async (row) => {
   }
   await submitReview(row, 'APPROVE', '')
 }
+
+
 
 const openReject = (row) => {
   rejectTarget.value = row

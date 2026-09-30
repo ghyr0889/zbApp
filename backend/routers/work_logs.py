@@ -388,6 +388,8 @@ def get_work_items(work_package_id: str, month: str = None, db: Session = Depend
                 "objective": pkg.objective or "",
                 "owner_id": pkg.owner_id or "",
                 "owner_name": pkg.owner.username if pkg.owner else "",
+                "tech_owner_id": pkg.tech_owner_id or "",
+                "tech_owner_name": (pkg.tech_owner.username if pkg.tech_owner else ""),
                 "deducted_score": deducted,
                 "name": pkg.name or "-",
                 "closed_status": bool(pkg.isclosed),

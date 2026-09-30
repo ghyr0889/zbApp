@@ -225,6 +225,18 @@ def process_transfer(
         else:
             # 部分转出：原工作项减分保留（已填月度分值留在原工作项），新建一个工作项给接收人
             item.score = round((item.score or 0.0) - score, 2)
+            # 拆分转办优先保留原工作项的技术负责人；
+            # 原工作项没有设置时，默认采用工作包的技术负责人。
+            tech_owner_id = item.tech_owner_id or (
+                item.work_package.tech_owner_id
+                if item.work_package else None
+            )
+            # 在修改原工作项之前检查，避免到数据库提交时才报错。
+            if not tech_owner_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="请先设置工作项或所属工作包的技术负责人，再接受转办",
+                )
             db.flush()                        # 先让新的满分落库，SUM 查询才准
             # 新工作项没有任何月度分值（累计 0 < score），必定未完成，completed_at 保持 None
             new_item = models.WorkItem(
@@ -237,6 +249,7 @@ def process_transfer(
                 deadline=item.deadline,
                 score=score,
                 owner_id=transfer.to_user_id,
+                tech_owner_id=tech_owner_id, 
                 complete_status=False,
             )
             db.add(new_item)

@@ -31,11 +31,32 @@
             刷新
           </el-button>
         </div>
+        <el-alert
+          v-if="myPendingCount > 0"
+          type="warning"
+          show-icon
+          :closable="false"
+          class="pending-alert">
+          <template #title>
+            您有 <strong style="color: #f56c6c; font-size: 16px;">{{ myPendingCount }}</strong> 条待处理的拆分申请
+          </template>
+          <template #default>
+            <el-button type="primary" link size="small" @click="goToMyPending">
+              去处理
+            </el-button>
+          </template>
+        </el-alert>
       </template>
 
       <!-- 标签页：审批查阅 / 工作包转办 -->
       <el-tabs v-model="activeTab" class="custom-tabs">
       <el-tab-pane label="审批查阅" name="review">
+         <template #label>
+            <!-- 读拆分申请的待办数 -->
+            <el-badge :value="myPendingCount" :hidden="!myPendingCount" :max="99">
+              <span>审批查阅</span>
+            </el-badge>
+          </template>
         <div class="table-container">
           <el-table 
             ref="tableRef"
@@ -116,6 +137,18 @@
                   </template>
                 </el-table-column>
 
+                <el-table-column prop="tech_owner_id" label="技术负责人" min-width="160" align="center" >
+                  <template #default="{ row: itemRow }">
+                    <!-- 沿用当前申请的编辑权限，不额外开放其他人的修改权限。 -->
+                    <el-select v-if="canEditRequest(row) && row.isEditing" v-model="itemRow.tech_owner_id" filterable placeholder="请选择技术负责人" size="small" style="width: 100%">
+                      <el-option v-for="user in userOptions" :key="user.id" :label="`${user.username}（${user.id}）`" :value="user.id" />
+                    </el-select>
+                    <span v-else class="employee-text">
+                      {{ ownerName(itemRow.tech_owner_id)|| itemRow.tech_owner_id || '未设置' }}
+                    </span>
+                  </template>
+                </el-table-column>
+
                 <el-table-column prop="deadline" label="截止时间" min-width="130" align="center">
                   <template #default="{ row: itemRow }">
                     <el-date-picker
@@ -179,24 +212,26 @@
           </el-table-column>
 
           <!-- 2. 外层表格列 -->
-          <el-table-column prop="project_name" label="项目名称" min-width="160" show-overflow-tooltip />
           <el-table-column label="工作包编号" min-width="100">
             <template #default="{ row }">
               <span>{{ row.work_package_code }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="工作包名称" min-width="180">
-            <template #default="{ row }">
-              <span>{{ row.work_package_name }}</span>
-            </template>
-          </el-table-column>
+          <el-table-column prop="project_name" label="项目名称" min-width="160" show-overflow-tooltip />
           <el-table-column label="工作包目标" min-width="180">
             <template #default="{ row }">
               <span>{{ row.work_package_objective }}</span>
             </template>
           </el-table-column>
           <el-table-column prop="project_owner_name" label="项目负责人" min-width="100" />
-          <el-table-column prop="applicant_name" label="申请人" min-width="100" />        
+          <el-table-column prop="applicant_name" label="申请人" min-width="100" /> 
+         <!-- 只有已驳回的才显示原因：判断必须放在作用域插槽里，不能写在 el-table-column 的 v-if 上 -->
+          <el-table-column label="驳回原因" min-width="150" >
+            <template #default="{ row }">
+              <span v-if="row.status === 'REJECTED'" class="rejected-text">{{ row.review_comment || '-' }}</span>
+              <span v-else class="muted-text">-</span>
+            </template>
+          </el-table-column>
           <el-table-column prop="created_at" label="提交时间" min-width="160" align="center">
             <template #default="{ row }">
               <span class="date-text">{{ row.created_at }}</span>
@@ -243,7 +278,13 @@
 
       
        <!-- 工作项完成申请 -->
-        <el-tab-pane label="完成申请" name="complete" lazy>
+        <el-tab-pane name="complete">
+          <template #label>
+            <!-- 完成申请的待办数在子组件里，统一由 store 提供（与菜单红点同源） -->
+            <el-badge :value="userStore.pending.complete" :hidden="!userStore.pending.complete" :max="99">
+              <span>完成申请</span>
+            </el-badge>
+          </template>
           <div class="complete-review-embed">
             <CompleteReview />
           </div>
@@ -251,6 +292,11 @@
 
         <!-- 工作包转办标签页：收件箱（接收/拒绝）+ 发件箱（状态） -->
         <el-tab-pane label="工作包转办" name="transfers">
+          <template #label>
+            <el-badge :value="incomingTransfers.length" :hidden="!incomingTransfers.length" :max="99">
+              <span>工作包转办</span>
+            </el-badge>
+          </template>
           <div class="transfers-container">
             <!-- 收到的转办申请 -->
             <div class="transfer-section">
@@ -354,8 +400,9 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useRoute } from 'vue-router'
 import { getIncomingTransfersApi, 
          getMyOutgoingTransfersApi,
          getSplitRequestsApi,
@@ -367,8 +414,22 @@ import { getIncomingTransfersApi,
          getAllUsersApi 
         } from '../api'
 import CompleteReview from './CompleteReview.vue'
+import { useUserStore } from '../stores/user'
+
+const userStore = useUserStore()
+const route = useRoute()
 
 const activeTab = ref('review')
+
+// 待办提醒点一下会跳到 /review?tab=complete 这类地址，这里对应用户要看的页签
+const TAB_NAMES = ['review', 'complete', 'transfers']
+const applyTabFromQuery = () => {
+  const tab = String(route.query.tab || '')
+  if (TAB_NAMES.includes(tab)) activeTab.value = tab
+}
+// 已经在 /review 页面上时点通知只会变 query、组件不会重建，所以还得监听一次
+watch(() => route.query.tab, applyTabFromQuery)
+
 const searchKeyword = ref('')
 const searchStatus = ref('')
 const requests = ref([])
@@ -436,6 +497,7 @@ const handleSaveEdit = async (row) => {
     if (!it.importance) return ElMessage.warning('请选择重要度')
     if (!it.innovation) return ElMessage.warning('请选择创新度')
     if (!it.deadline) return ElMessage.warning('请选择截止时间')
+    if (!String(it.tech_owner_id ?? '').trim()) {return ElMessage.warning( `请为「${it.name || '未命名工作项'}」选择技术负责人`)}
   }
   if (!row.split_items || !row.split_items.some(it => (it.name || '').trim())) {
     return ElMessage.warning('请至少保留一个有名的工作项')
@@ -484,6 +546,40 @@ const fetchLevelDefs = async () => {
   } catch { /* 档位加载失败不影响主流程 */ }
 }
 
+//我的代办 计算
+//根据角色，计算当前用户需要处理的「目标状态」
+const myPendingStatus = computed(() => {
+  if (isDepartment.value) return 'PENDING'
+  if (isLeader.value || isAdmin.value) return 'SUBMITTED'
+  // 默认是申请人角色（或者其他人），需要处理被驳回的
+  return 'REJECTED'
+})
+//基于原始 requests 计算「我的待办列表」（不要用 filteredRequests）
+const myPendingList = computed(() => {
+  if (!requests.value || requests.value.length === 0) return []
+  const targetStatus = myPendingStatus.value
+  return requests.value.filter(r => {
+    // 状态必须匹配
+    if (r.status !== targetStatus) return false
+    // 如果是申请人角色，必须保证这条申请是自己提交的
+    if (targetStatus === 'REJECTED') {
+      return isApplicant(r)
+    }
+    return true
+  })
+})
+//直接计算数量（Vue 中 computed 会缓存，性能很好）
+const myPendingCount = computed(() => myPendingList.value.length)
+const goToMyPending = () => {
+  if (myPendingCount.value === 0) return
+  // 1. 设置搜索状态为对应的状态
+  searchStatus.value = myPendingStatus.value
+  // 2. 切换到审核/待办 tab
+  activeTab.value = 'review'
+  // 如果列表有分页，这里可能还需要重置页码，比如：
+  // currentPage.value = 1
+}
+
 // 在收到数据后，确保每条记录都有client_id
 const normalizeSplitItems = (items) => {
   return (items || []).map(item => ({
@@ -502,6 +598,8 @@ const fetchRequests = async () => {
         split_items: normalizeSplitItems(req.split_items),
         isEditing: false // 初始化编辑状态
       }))
+      // 列表变化后同步全局待办计数，保证菜单红点与页内角标同源
+      userStore.refreshPendingCount()
     }
   } catch (err) {
     ElMessage.error(err.response?.data?.detail || '获取申请列表失败')
@@ -546,6 +644,16 @@ const handleSubmit = (row) => {
 }
 
 const handlePass = (row) => {
+  if (row.isEditing) {
+    return ElMessage.warning('请先保存修改，再点击通过')}
+
+  const missing = (row.split_items || []).find(
+    item => !String(item.tech_owner_id ?? '').trim())
+
+  if (missing) {
+    return ElMessage.warning(
+      `「${missing.name || '未命名工作项'}」未设置技术负责人，请先修改并保存` )}
+
   ElMessageBox.confirm('确认通过该申请？通过后将为该工作包生成/更新工作项。', '确认通过', {
     confirmButtonText: '确定通过',
     cancelButtonText: '取消',
@@ -679,6 +787,7 @@ const fetchIncomingTransfers = async () => {
   try {
     const res = await getIncomingTransfersApi(currentUser.value.id)
     if (res.data?.code === 200) incomingTransfers.value = res.data.data || []
+    userStore.refreshPendingCount()   // 转办数量可能变了，同步全局计数
   } catch (err) {
     ElMessage.error(err.response?.data?.detail || '获取转办申请失败')
   } finally {
@@ -749,6 +858,7 @@ const handleRefresh = () => {
 }
 
 onMounted(() => {
+  applyTabFromQuery()
   fetchRequests()
   fetchIncomingTransfers()
   fetchOutgoingTransfers()
@@ -898,6 +1008,11 @@ onMounted(() => {
 }
 .muted-text { 
   color: #94a3b8; 
+  font-size: 13px; 
+}
+.rejected-text{
+  color: #f56c6c; 
+  font-weight: 600;
   font-size: 13px; 
 }
 

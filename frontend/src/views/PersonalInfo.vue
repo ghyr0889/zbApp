@@ -24,6 +24,9 @@
         <el-descriptions-item label="角色">
           {{ roleDisplayName }}
         </el-descriptions-item>
+        <el-descriptions-item label="所属科室">
+          {{ userInfo.department || '未分配' }}
+        </el-descriptions-item>
       </el-descriptions>
 
       <el-empty v-else description="暂无登录信息" />
@@ -51,11 +54,11 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '../stores/user'
-import { changePasswordApi } from '../api/index'
+import { changePasswordApi, getCurrentUserApi } from '../api/index'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -124,10 +127,34 @@ const roleDisplayName = computed(() => {
   return '普通员工'
 })
 
-const logout = () => {
-  userStore.clearUser()
-  ElMessage.success('已安全退出登录')
-  router.push('/login')
+//实时拉取最新个人信息
+const refreshProfile = async () => {
+  const userId = userStore.userInfo?.id
+  if (!userId) return
+
+  try {
+    const res = await getCurrentUserApi() // 通过登录令牌查询自己，不再传入用户 ID。
+    if (res.data?.code === 200) {
+      if (userStore.userInfo?.id !== userId) return
+      userStore.setUser(res.data.data)
+    }
+  } catch (err) {
+    ElMessage.error(
+      err.response?.data?.detail || '获取最新个人信息失败'
+    )
+  }
+}
+
+onMounted(refreshProfile)
+
+const logout = async () => {
+  try {
+    await userStore.logout()
+    ElMessage.success('已安全退出登录')
+    router.push('/login')
+  } catch (error) {
+    ElMessage.error('退出失败，请检查网络后重试')
+  }
 }
 </script>
 
