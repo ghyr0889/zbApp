@@ -1,4 +1,4 @@
-# backend/exceptions.py
+# 获取异常
 
 class BusinessError(Exception):
     pass

@@ -178,8 +178,8 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getComputedScoreDimensionsApi, putComputedScoreDimensionsApi, getLevelDefsApi, putLevelDefsApi } from '../api'
-import { useUserStore } from '../stores/user'
+import { getComputedScoreDimensionsApi, putComputedScoreDimensionsApi, getLevelDefsApi, putLevelDefsApi } from '../../api'
+import { useUserStore } from '../../stores/user'
 import PersonnelManagement from './PersonnelManagement.vue'
 import InformationManagement from './InformationManagement.vue'
 

@@ -1,7 +1,7 @@
 <template>
   <div class="information-management">
     <el-alert
-      title="在此统一维护科室和工作包类型。修改名称后，相关人员或工作包会同步更新。"
+      title="在此统一维护科室和工作包类型。改名会同步关联数据；未被使用的科室或类型可以删除。"
       type="info" :closable="false" show-icon
     />
     <div class="information-grid">
@@ -26,10 +26,11 @@
               <el-input v-model="row.name" :maxlength="group.maxLength" :disabled="group.saving" />
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="140" align="center">
+          <el-table-column label="操作" width="190" align="center">
             <template #default="{ row }">
               <el-button link type="primary" :disabled="group.saving || row.name.trim() === row.originalName" @click="saveEntry(group, row)">保存</el-button>
               <el-button link :disabled="group.saving || row.name === row.originalName" @click="row.name = row.originalName">还原</el-button>
+              <el-button link type="danger" :disabled="group.loading || group.saving" @click="deleteEntry(group, row)">删除</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -41,8 +42,8 @@
 
 <script setup>
 import { onMounted, reactive } from 'vue'
-import { ElMessage } from 'element-plus'
-import { getInformationApi, createInformationApi, updateInformationApi } from '../api'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { getInformationApi, createInformationApi, updateInformationApi, deleteInformationApi } from '../../api'
 
 const emit = defineEmits(['changed'])
 const groups = reactive([
@@ -103,6 +104,26 @@ async function saveEntry(group, row) {
     ElMessage.success(`保存成功，已同步 ${data.data.affected_count} 条关联记录`)
     emit('changed', group.kind)
   } catch (error) { ElMessage.error(errorMessage(error, '保存失败')) }
+  finally { group.saving = false }
+}
+
+async function deleteEntry(group, row) {
+  if (group.loading || group.saving) return
+  // 确认期间锁定本组编辑，提示使用已保存名称，避免误认未保存的输入。
+  group.saving = true
+  try {
+    try {
+      await ElMessageBox.confirm(
+        `确定删除${group.title}“${row.originalName}”吗？删除后将从下拉选项中移除，已被使用的条目无法删除。`,
+        '确认删除', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
+      )
+    } catch { return }
+    await deleteInformationApi(group.kind, row.id)
+    // 只移除成功删除的行，保留其他行未保存的编辑。
+    group.items = group.items.filter(item => item.id !== row.id)
+    ElMessage.success('删除成功')
+    emit('changed', group.kind)
+  } catch (error) { ElMessage.error(errorMessage(error, '删除结果未确认，请刷新列表检查')) }
   finally { group.saving = false }
 }
 

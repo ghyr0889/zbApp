@@ -5,6 +5,46 @@ from datetime import datetime
 from database import Base
 import enum
 
+class WorkTimeSession(Base):
+    """一次个人计时。快照保留历史归属，工作项删除后仍可查询和结束计时。"""
+    __tablename__ = "work_time_sessions"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(50), ForeignKey("users.id"), nullable=False, index=True)
+    work_item_id = Column(Integer, ForeignKey("work_items.id", ondelete="SET NULL"), nullable=True, index=True)
+    original_item_id = Column(Integer, nullable=False, index=True) #工作项id历史备份
+    work_item_name = Column(String(100), nullable=False)
+    work_package_id = Column(Integer, nullable=False, index=True)
+    work_package_name = Column(String(100), nullable=False)
+    project_id = Column(Integer, nullable=False, index=True)
+    project_name = Column(String(100), nullable=False)
+    department = Column(String(255), nullable=False, default="")
+    username = Column(String(50), nullable=False)
+    status = Column(String(20), nullable=False, default="RUNNING")
+    started_at = Column(DateTime, nullable=False)
+    ended_at = Column(DateTime, nullable=True)
+    total_seconds = Column(Float, nullable=False, default=0)
+    version = Column(Integer, nullable=False, default=1)
+    # 非空时唯一，从数据库层保证每人最多一条未结束记录，结束时清空。
+    active_user_id = Column(String(50), nullable=True, unique=True)
+    # 同一次开始操作重试使用相同请求号，防止超时重试重复创建。
+    request_key = Column(String(64), nullable=False)
+    segments = relationship("WorkTimeSegment", back_populates="session", cascade="all, delete-orphan")
+    __table_args__ = (UniqueConstraint("user_id", "request_key", name="uq_time_start_request"),)
+
+
+class WorkTimeSegment(Base):
+    """连续工作的时间段；保留旧版多段历史，所有时间按 UTC 保存。"""
+    __tablename__ = "work_time_segments"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(Integer, ForeignKey("work_time_sessions.id"), nullable=False, index=True)
+    started_at = Column(DateTime, nullable=False, index=True)
+    ended_at = Column(DateTime, nullable=True)
+    # 一个会话最多一个开放时间段，结束时清空。
+    open_session_id = Column(Integer, nullable=True, unique=True)
+    session = relationship("WorkTimeSession", back_populates="segments")
+
+
 class LogStatus(str, enum.Enum):
     PENDING = "PENGING"
     APPROVED = "APPROVED"

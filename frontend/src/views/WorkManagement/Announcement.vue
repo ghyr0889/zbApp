@@ -228,7 +228,7 @@
 <script setup>
 import { computed, onMounted, onBeforeUnmount, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { useUserStore } from '../stores/user'
+import { useUserStore } from '../../stores/user'
 import {
   getAnnouncementsApi,
   getMyAnnouncementsApi,
@@ -236,7 +236,7 @@ import {
   createAnnouncementApi,
   publishAnnouncementApi,
   withdrawAnnouncementApi,
-} from '../api'
+} from '../../api'
 
 const userStore = useUserStore()
 

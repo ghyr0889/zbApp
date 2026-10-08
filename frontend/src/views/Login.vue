@@ -3,7 +3,7 @@
   <div class="login-container">
     <el-card class="login-card" shadow="always">
       <div class="login-header">
-        <h2>综保工作内容统计系统</h2>
+        <h2>综保工作管理系统</h2>
       </div>
 
       <!-- 1. 新增：登录身份切换卡片 -->
@@ -96,7 +96,7 @@ const handleLogin = async () => {
       const user = res.data.data
       // 先保存令牌，再更新用户；后续待办等请求才能携带本次登录凭证。
       userStore.setUser(user, res.data.access_token)
-      router.push('/project-overview')
+      router.replace('/home')
     }
   } catch (error) {
     console.error('登录异常:', error)

@@ -131,7 +131,7 @@ import {
   updateUserApi,
   getLevelDefsApi,
   getDepartmentOptionsApi
-} from '../api'
+} from '../../api'
 
 const activeTab = ref('users')
 

@@ -1,4 +1,4 @@
-# routers/announcements.py
+# 公告板
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 

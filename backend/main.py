@@ -10,7 +10,8 @@ import sys
 import logging, os
 
 from database import engine, Base, SessionLocal
-from routers import auth, work_logs, review, admin, tasks, score_board, complete_review, pending, analytics, announcement, information
+from routers import auth, work_logs, review, admin, tasks, score_board, complete_review, pending, announcement, information
+from routers import work_time
 
 log_file = os.path.join(os.path.dirname(sys.executable), 'calculate_score.log')
 logging.basicConfig(level=logging.DEBUG,
@@ -48,9 +49,9 @@ app.include_router(tasks.router)
 app.include_router(score_board.router)
 app.include_router(complete_review.router)
 app.include_router(pending.router)
-app.include_router(analytics.router)
 app.include_router(announcement.router)
 app.include_router(information.router)
+app.include_router(work_time.router)
 
 @app.exception_handler(BusinessError)
 async def handle_business_error(request, exc):

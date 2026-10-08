@@ -9,7 +9,7 @@ from schemas import UserCreate, ProjectCreate, WorkPackageCreate, ScoreRuleUpdat
 from datetime import datetime
 from utils import (ensure_open, effective_complete,
                    package_effective_complete, project_effective_complete)
-from routers.score_board import compute_calc_score, monthly_quality_score
+from services.score_board_service import compute_calc_score, monthly_quality_score
 
 router = APIRouter(prefix="/api/v1/admin", tags=["Admin Management"])
 

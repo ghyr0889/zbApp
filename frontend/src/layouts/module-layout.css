@@ -1,0 +1,132 @@
+/* ================= 左侧导航栏整体布局 (原样保留) ================= */
+.module-layout { display: flex; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
+.module-sidebar { flex: 0 0 200px; width: 200px; min-height: 0; display: flex; flex-direction: column; background: #fff; border-right: 1px solid #ebeef5; box-sizing: border-box; }
+.module-content { flex: 1; min-width: 0; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+@media (max-width: 800px) { .module-sidebar { flex-basis: 150px; width: 150px; } }
+
+/* 品牌 Logo 文字 */
+.brand-logo {
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 17px;
+  font-weight: 700;
+  color: #010203;
+  letter-spacing: 2px;
+  border-bottom: 1px solid #f0f2f5;
+  background: linear-gradient(135deg, #ffffff, #f8fafc);
+}
+
+.logo-icon {
+  margin-right: 8px;
+  font-size: 22px;
+}
+
+.logo-text {
+  letter-spacing: 1px;
+}
+
+/* 左侧菜单 */
+.left-menu {
+  flex: 1;
+  width: 100%;
+  border-right: none !important;
+  padding: 6px 0;
+  box-sizing: border-box;
+  --el-menu-item-height: 40px;
+}
+
+/* 紧凑菜单：统一高度和间距，仅影响左侧导航。 */
+.left-menu .el-menu-item {
+  position: relative;
+  margin: 2px 10px;
+  border-radius: 8px;
+  height: 40px;
+  line-height: 40px;
+  padding-left: 14px !important;
+  padding-right: 12px !important;
+  
+  /* 文字样式 */
+  color: #303640;
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* 统一图标占位，让各菜单文字的起始位置一致。 */
+.left-menu .el-menu-item > i {
+  display: inline-block;
+  flex: 0 0 22px;
+  width: 22px;
+  margin-right: 10px;
+  text-align: center;
+  font-size: 19px;
+}
+
+.left-menu .el-menu-item:hover {
+  background-color: #f0f5fb !important;
+}
+
+/* 浅蓝底色和左侧细线表示当前页面，选中时不改变字重。 */
+.left-menu .el-menu-item.is-active {
+  color: #409eff;
+  background-color: #eaf4ff !important;
+  font-weight: 400;
+}
+
+.left-menu .el-menu-item.is-active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 2px;
+  border-radius: 2px;
+  background-color: #409eff;
+}
+
+/* 菜单红点：紧贴「审批查阅」四个字的右上角
+   关键：把文字包进 .menu-label，红点定位的基准就从「按钮」变成了「文字」 */
+.menu-label {
+  position: relative;
+  display: inline-block;
+  line-height: 1.4;   /* 使用文字本身的高度定位红点，避免菜单行高影响位置。 */
+}
+/* 微调开关：
+   top  越小越往上（负值 = 越过文字顶边继续往上）
+   right 越大越往左（负值 = 往文字右侧外面挪）
+   当前值让红点压在文字的右上角上，略微探出文字右边 */
+.menu-label .menu-badge {
+  position: absolute;
+  top: -9px;
+  right: -14px;
+  margin: 0;
+}
+
+/* el-badge 默认会给数字加 translateY(-50%) translateX(100%)，
+   即把数字甩到盒子右侧外面；这里取消，让数字老老实实待在自己盒子的右上角，
+   位置就只由上面的 top / right 决定，一位数两位数都不会跑偏 */
+.menu-label .menu-badge .el-badge__content {
+  transform: none;
+}
+
+/* 标题保持原高度，不被菜单挤压 */
+.module-sidebar > .brand-logo {
+  flex-shrink: 0;
+}
+
+/* 上方菜单占用剩余空间，内容过多时自行滚动 */
+.module-sidebar > .left-menu:not(.bottom-menu) {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* 底部菜单保持自身高度，固定在侧边栏底部 */
+.module-sidebar > .bottom-menu {
+  flex: 0 0 auto;
+  border-top: 1px solid #ebeef5;
+  padding: 8px 0 12px;
+}

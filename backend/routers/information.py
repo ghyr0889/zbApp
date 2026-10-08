@@ -1,4 +1,4 @@
-"""后台信息管理：新增、改名科室及工作包类型，不提供删除接口。"""
+"""后台信息管理：新增、改名及删除未使用的科室和工作包类型。"""
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -66,6 +66,36 @@ def list_information(kind: Kind, db: Session = Depends(get_db), current_user=Dep
     Model = model_for(kind)
     rows = db.query(Model).order_by(Model.name, Model.id).all()
     return {"code": 200, "data": [{"id": row.id, "name": row.name} for row in rows]}
+
+
+@router.delete("/information/{kind}/{entry_id}")
+def delete_information(kind: Kind, entry_id: int, db: Session = Depends(get_db), current_user=Depends(require_admin)):
+    """仅删除未被使用的字典项，不级联删除人员或工作包。"""
+    Model = model_for(kind)
+    try:
+        row = db.query(Model).filter(Model.id == entry_id).with_for_update().first()
+        if row is None:
+            raise HTTPException(404, "记录不存在，请刷新后重试")
+        if kind == "departments":
+            # 包含已停用人员，避免恢复人员或启动收录科室时重新出现被删除名称。
+            used = db.query(models.User.id).filter(func.trim(models.User.department) == row.name).with_for_update().first()
+            if used:
+                raise HTTPException(409, "该科室仍有人员使用（含已停用人员），请先调整人员所属科室后再删除")
+        else:
+            # 包含已完成、已关闭工作包，保留历史工作包的类型关联。
+            used = db.query(models.WorkPackage.id).filter(models.WorkPackage.category_name == row.name).with_for_update().first()
+            if used:
+                raise HTTPException(409, "该类型仍被工作包使用，请先调整工作包类型后再删除")
+        # 直接删除字典行，避免 ORM 尝试把关联工作包的类型置空。
+        db.query(Model).filter(Model.id == entry_id).delete(synchronize_session=False)
+        db.commit()
+        return {"code": 200, "message": "删除成功", "data": {"id": entry_id}}
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "该信息仍有关联数据，无法删除，请刷新后检查")
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.post("/information/{kind}")

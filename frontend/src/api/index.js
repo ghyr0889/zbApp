@@ -134,11 +134,22 @@ export const withdrawAnnouncementApi = announcementId => api.post(`/announcement
 
 export default api
 
+// 工时操作不传用户 ID 或浏览器时间，身份和计时均由后端确定。
+export const startWorkTimeApi = data => api.post('/work-time/start', data)
+export const finishWorkTimeApi = (id, version) => api.post(`/work-time/${id}/finish`, { version })
+export const getCurrentWorkTimeApi = () => api.get('/work-time/current')
+export const getWorkTimeOptionsApi = () => api.get('/work-time/options')
+export const getMyWorkTimeApi = params => api.get('/work-time/mine', { params })
+// 工作列表只读展示该工作项的全部累计工时。
+export const getWorkItemTimeSummaryApi = id => api.get(`/work-time/work-items/${id}/summary`)
+export const getWorkTimeReportApi = params => api.get('/work-time/report', { params, timeout: 30000 })
+
 // 后台信息管理：统一的科室选项与工作包类型维护。
 export const getDepartmentOptionsApi = () => api.get('/admin/departments')
 export const getInformationApi = kind => api.get(`/admin/information/${kind}`)
 export const createInformationApi = (kind, data) => api.post(`/admin/information/${kind}`, data)
 export const updateInformationApi = (kind, id, data) => api.put(`/admin/information/${kind}/${id}`, data)
+export const deleteInformationApi = (kind, id) => api.delete(`/admin/information/${kind}/${id}`)
 
 export const getChartOptionsApi = (userId) => api.get('/analytics/options', { params: { user_id: userId }, timeout: 30000 })
 export const getCustomChartApi = (data) => api.post('/analytics/chart', data, { timeout: 30000 })

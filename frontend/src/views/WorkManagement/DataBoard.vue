@@ -174,8 +174,8 @@ import {
   getAllProjectsApi,
   getWorkCategoriesApi,
   getProjectSummaryApi
-} from '../api'
-import { useUserStore } from '../stores/user'
+} from '../../api'
+import { useUserStore } from '../../stores/user'
 
 const userStore = useUserStore()
 const currentUser = computed(() => userStore.userInfo)
@@ -368,6 +368,9 @@ onMounted(() => {
 
 <style scoped>
 .data-board-page {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
   padding: 20px;
   animation: fadeIn 0.4s ease;
 }

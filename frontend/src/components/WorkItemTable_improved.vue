@@ -29,6 +29,11 @@
       :row-class-name="rowClassName"
     >
       <el-table-column type="index" label="序号" width="52" align="center" fixed="left" />
+      <el-table-column label="累计工时" min-width="120">
+        <template #default="{ row }">
+          <WorkItemTimer :item="row" :locked="pkgLocked" />
+        </template>
+      </el-table-column>
       <el-table-column prop="name" label="名称" min-width="150">
         <template #default="{ row }">
           <el-input v-if="row.isEdit" v-model="row.name" size="small" placeholder="请输入名称" />
@@ -203,8 +208,7 @@
                 <el-dropdown-menu>
                   <el-dropdown-item v-if="row.isStaged" command="cancelStage" >
                     <span>取消暂存</span>
-                  </el-dropdown-item>
-                  
+                  </el-dropdown-item>            
 
                   <el-dropdown-item v-if="isItemOwner(row) && !isLocked(row) && row.id" command="transfer" >
                     <span class="transfer-menu-item">转办</span>
@@ -313,6 +317,7 @@
 </template>
 
 <script setup>
+import WorkItemTimer from './WorkItemTimer.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -766,7 +771,7 @@ const cancelStaged = (row, index) => {
     row.isStaged = false
     row.isEdit = false
   }
-  syncCache()                             // ← 必须，见下面第 ③ 点
+  syncCache()
   ElMessage.success('已取消修改')
 }
 

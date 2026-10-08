@@ -354,11 +354,11 @@ import {
   initiateTransferApi,
   confirmCompletionApi,
   confirmClosedApi
-} from '../api'
-import { useUserStore } from '../stores/user'
+} from '../../api'
+import { useUserStore } from '../../stores/user'
 import { useRouter } from 'vue-router'
-import { confirmClose, confirmCancelClose } from '../components/confirm'
-import WorkItemTable_improved from '../components/WorkItemTable_improved.vue'
+import { confirmClose, confirmCancelClose } from '../../components/confirm'
+import WorkItemTable_improved from '../../components/WorkItemTable_improved.vue'
 import { ArrowDown, Loading, CircleCheck, CircleClose, Lock } from '@element-plus/icons-vue'
 
 const userStore = useUserStore()

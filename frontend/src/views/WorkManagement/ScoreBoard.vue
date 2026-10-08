@@ -291,8 +291,8 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getPublicScoreBoardApi, updateMonthlyExtraScoreApi } from '../api'
-import { useUserStore } from '../stores/user'
+import { getPublicScoreBoardApi, updateMonthlyExtraScoreApi } from '../../api'
+import { useUserStore } from '../../stores/user'
 
 const userStore = useUserStore()
 const currentUser = computed(() => userStore.userInfo)

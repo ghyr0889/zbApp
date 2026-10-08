@@ -1,65 +1,14 @@
 ﻿<template>
   <div id="app">
-    <!-- 顶部导航栏容器：使用 flex 布局强行左右分栏 -->
-    <div class="header-layout" v-if="$route.path !== '/login'">
-      
-      <!-- 品牌标识区 -->
-      <div class="brand-logo">
-        <span class="logo-text">综保工作管理系统</span>
-      </div>
-
-      <!-- 左侧：功能菜单 -->
-      <el-menu 
-        class="left-menu"
-        mode="vertical" 
-        router 
-        :default-active="$route.path"
-        :ellipsis="false" 
-        active-text-color="#409EFF"
-      >
-        <el-menu-item index="/project-overview">
-          <i class="el-icon-menu"></i>
-          <span>项目总览</span>
-        </el-menu-item>
-        <el-menu-item index="/review">
-          <i class="el-icon-s-check"></i>
-          <!-- 红点锚在文字上（不是按钮上），所以放进这个 span 里 -->
-          <span class="menu-label">
-            审批查阅
-            <el-badge
-              v-if="pendingTotal"
-              :value="pendingTotal"
-              :max="99"
-              class="menu-badge"/>
-          </span>
-        </el-menu-item>
-        <el-menu-item index="/score-board">
-          <i class="el-icon-data-line"></i>
-          <span>积分查看</span>
-        </el-menu-item>
-        <el-menu-item index="/personal-info">
-          <i class="el-icon-user"></i>
-          <span>个人信息</span>
-        </el-menu-item>
-        <el-menu-item index="/announcements">
-          <i class="el-icon-bell" aria-hidden="true"></i>
-          <span>公告板</span>
-        </el-menu-item>
-        <!-- 数据看板只对领导/管理员开放（内部两个看板都是这个口径） -->
-        <el-menu-item index="/data-board" v-if="isLEADER || isAdmin">
-          <i class="el-icon-data-analysis"></i>
-          <span>数据看板</span>
-        </el-menu-item>
-        <el-menu-item index="/admin-panel" v-if="isAdmin">
-          <i class="el-icon-setting"></i>
-          <span>后台管理</span>
-        </el-menu-item>
-      </el-menu>
-    </div>
-
     <!-- 右侧：永远常显的个人信息与下拉退出 -->
     <div class="right-profile" v-if="$route.path !== '/login' && userInfo">
-      <el-dropdown @command="handleUserCommand" trigger="hover">
+      <!-- 公共顶部导航：所有模块共用入口与登录身份。 -->
+      <router-link class="portal-brand" to="/home">综保工作管理系统</router-link>
+      <nav class="portal-nav" aria-label="系统导航">
+        <router-link to="/home" :class="{ active: isPortal && $route.path !== '/applications' }">主页面</router-link>
+        <router-link to="/applications" :class="{ active: !isPortal || $route.path === '/applications' }">应用中心</router-link>
+      </nav>
+      <el-dropdown @command="handleUserCommand" trigger="click">
         
         <!-- 常显触发区：直接展示头像、姓名、工号、角色 -->
         <div class="user-info-trigger">
@@ -78,6 +27,8 @@
         <!-- 只有点击后才出现的下拉菜单 -->
         <template #dropdown>
           <el-dropdown-menu>
+            <el-dropdown-item command="profile">个人信息</el-dropdown-item>
+            <el-dropdown-item command="announcements">公告板</el-dropdown-item>
             <el-dropdown-item command="toggle-notify">
               {{ notifyEnabled ? '关闭待办提醒' : '开启待办提醒' }}
             </el-dropdown-item>
@@ -92,8 +43,9 @@
       </el-dropdown>
     </div>
 
-    <div :class="$route.path === '/login' ? 'login-body' : 'main-body'">
+    <div :class="[$route.path === '/login' ? 'login-body' : 'main-body', { 'portal-body': isPortal }]">
       <div class="page-container">
+        <WorkTimeStatus v-if="userStore.isLoggedIn && $route.path !== '/login'" />
         <router-view />
       </div>
     </div>
@@ -101,20 +53,20 @@
 </template>
 
 <script setup>
-// 脚本部分保持原样，未做修改以保证逻辑稳定
+// 公共布局保留原有待办提醒和全局工时同步。
 import { ElMessage, ElNotification } from 'element-plus'
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from './stores/user'
+import WorkTimeStatus from './components/WorkTimeStatus.vue'
 
 const router = useRouter()
+const route = useRoute()
+// 门户及公共页面不展示工时管理的业务侧栏。
+const isPortal = computed(() => route.meta.layout === 'portal')
 const userStore = useUserStore()
 const userInfo = computed(() => userStore.userInfo)
 
-const isAdmin = computed(() => userStore.isAdmin)
-const isLEADER = computed(() => userStore.isLEADER)
-
-const pendingTotal = computed(() => userStore.pendingTotal)
 
 // ================= 待办提醒（站内浮层 + 提示音 + 标题闪烁） =================
 // 不依赖 Notification 权限：局域网 http 下浏览器不允许系统通知，这种方案任何环境都能用
@@ -307,6 +259,8 @@ const roleTagType = computed(() => {
 })
 
 const handleUserCommand = (command) => {
+  if (command === 'profile') return router.push('/personal-info')
+  if (command === 'announcements') return router.push('/announcements')
   if (command === 'logout') {
     logout()
     return
@@ -356,7 +310,7 @@ body {
 }
 
 .main-body { 
-  margin-left: 200px;
+  margin-left: 0;
   height: 100vh;
   /* 顶部50px给顶部栏占位;左右/底部空隙统一由各页面根 div 的 padding(20px)控制 */
   padding: 64px 0 0;
@@ -417,143 +371,24 @@ body {
   padding-bottom: 4px !important;
 }
 
-/* ================= 左侧导航栏整体布局 (原样保留) ================= */
-.header-layout {
-  position: fixed;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  z-index: 1001;
-  width: 200px;
-  background-color: #ffffff;
-  box-shadow: 2px 0 8px 0 rgba(29, 35, 41, 0.05);
-  display: flex;
-  flex-direction: column;
-}
-
-/* 品牌 Logo 文字 */
-.brand-logo {
-  height: 64px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 17px;
-  font-weight: 700;
-  color: #010203;
-  letter-spacing: 2px;
-  border-bottom: 1px solid #f0f2f5;
-  background: linear-gradient(135deg, #ffffff, #f8fafc);
-}
-
-.logo-icon {
-  margin-right: 8px;
-  font-size: 22px;
-}
-
-.logo-text {
-  letter-spacing: 1px;
-}
-
-/* 左侧菜单 */
-.left-menu {
-  flex: 1;
-  width: 100%;
-  border-right: none !important;
-  padding: 6px 0;
-  box-sizing: border-box;
-  --el-menu-item-height: 40px;
-}
-
-/* 紧凑菜单：统一高度和间距，仅影响左侧导航。 */
-.left-menu .el-menu-item {
-  position: relative;
-  margin: 2px 10px;
-  border-radius: 8px;
-  height: 40px;
-  line-height: 40px;
-  padding-left: 14px !important;
-  padding-right: 12px !important;
-  
-  /* 文字样式 */
-  color: #303640;
-  font-size: 14px;
-  font-weight: 400;
-  letter-spacing: 0;
-  transition: background-color 0.2s ease, color 0.2s ease;
-}
-
-/* 统一图标占位，让各菜单文字的起始位置一致。 */
-.left-menu .el-menu-item > i {
-  display: inline-block;
-  flex: 0 0 22px;
-  width: 22px;
-  margin-right: 10px;
-  text-align: center;
-  font-size: 19px;
-}
-
-.left-menu .el-menu-item:hover {
-  background-color: #f0f5fb !important;
-}
-
-/* 浅蓝底色和左侧细线表示当前页面，选中时不改变字重。 */
-.left-menu .el-menu-item.is-active {
-  color: #409eff;
-  background-color: #eaf4ff !important;
-  font-weight: 400;
-}
-
-.left-menu .el-menu-item.is-active::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 10px;
-  bottom: 10px;
-  width: 2px;
-  border-radius: 2px;
-  background-color: #409eff;
-}
-
-/* 菜单红点：紧贴「审批查阅」四个字的右上角
-   关键：把文字包进 .menu-label，红点定位的基准就从「按钮」变成了「文字」 */
-.menu-label {
-  position: relative;
-  display: inline-block;
-  line-height: 1.4;   /* 使用文字本身的高度定位红点，避免菜单行高影响位置。 */
-}
-/* 微调开关：
-   top  越小越往上（负值 = 越过文字顶边继续往上）
-   right 越大越往左（负值 = 往文字右侧外面挪）
-   当前值让红点压在文字的右上角上，略微探出文字右边 */
-.menu-label .menu-badge {
-  position: absolute;
-  top: -9px;
-  right: -14px;
-  margin: 0;
-}
-
-/* el-badge 默认会给数字加 translateY(-50%) translateX(100%)，
-   即把数字甩到盒子右侧外面；这里取消，让数字老老实实待在自己盒子的右上角，
-   位置就只由上面的 top / right 决定，一位数两位数都不会跑偏 */
-.menu-label .menu-badge .el-badge__content {
-  transform: none;
-}
-
 /* ================= 右侧顶部栏 (原样保留) ================= */
+/* 公共顶栏；子系统菜单由各自布局负责。 */
 .right-profile {
   position: fixed;
   top: 0;
-  left: 200px;
+  left: 0;
   right: 0;
   height: 64px;
-  padding: 0 24px;
+  padding: 0 max(24px, calc((100vw - 1240px) / 2));
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  background-color: #ffffff;
-  box-shadow: 0 1px 4px rgba(0, 21, 41, 0.08);
-  z-index: 1000;
+  gap: 28px;
+  background: #fff; box-shadow: 0 1px 4px rgba(0, 21, 41, 0.08);
+  z-index: 1002;
 }
+.right-profile .user-name { color: #303133; }
+.right-profile .user-id { color: #909399; }
+.right-profile .user-info-trigger:hover { background: #f5f7fa; border-color: #e4e7ed; }
 
 /* 常显区域鼠标样式 */
 .user-info-trigger {
@@ -609,5 +444,31 @@ body {
 .logout-item:hover {
   background-color: #fef0f0 !important;
   color: #f56c6c !important;
+}
+
+/* 公共导航恢复白底与原有蓝色选中效果。 */
+.portal-brand { color: #010203; font-size: 19px; font-weight: 700; text-decoration: none; white-space: nowrap; }
+.portal-nav { display: flex; align-self: stretch; gap: 8px; margin-right: auto; }
+.portal-nav a { display: flex; align-items: center; padding: 0 22px; color: #303640; font-size: 17px; text-decoration: none; border-bottom: 2px solid transparent; }
+.portal-nav a:hover, .portal-nav a.active { color: #409eff; background: #eaf4ff; }
+.portal-nav a.active { border-bottom-color: #409eff; }
+.portal-body { margin-left: 0; background: #f0f2f5; }
+.page-container { min-height: 0; min-width: 0; }
+.portal-body .page-container { overflow-y: auto; }
+.portal-body .page-container > :not(.work-time-status) { flex-shrink: 0; }
+@media (max-width: 800px) {
+  .right-profile { padding: 0 12px; gap: 10px; }
+  .portal-brand { font-size: 15px; }
+  .portal-nav { gap: 0; }
+  .portal-nav a { padding: 0 10px; font-size: 14px; }
+  .right-profile .role-tag, .right-profile .user-text-info { display: none; }
+  .user-info-trigger { padding: 4px; }
+}
+/* 窄屏将导航放到第二行，避免标题和用户头像互相挤压。 */
+@media (max-width: 480px) {
+  .right-profile { height: 104px; flex-wrap: wrap; align-content: center; gap: 0; justify-content: space-between; }
+  .portal-nav { order: 3; width: 100%; height: 44px; margin: 0; justify-content: center; }
+  .portal-nav a { padding: 0 24px; }
+  .main-body { padding-top: 104px; }
 }
 </style>

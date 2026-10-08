@@ -110,8 +110,8 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getCompleteRequestsApi, reviewCompleteRequestApi } from '../api'
-import { useUserStore } from '../stores/user'
+import { getCompleteRequestsApi, reviewCompleteRequestApi } from '../../api'
+import { useUserStore } from '../../stores/user'
 
 const userStore = useUserStore()
 const currentUser = computed(() => userStore.userInfo)

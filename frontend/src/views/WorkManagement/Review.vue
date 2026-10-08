@@ -412,9 +412,9 @@ import { getIncomingTransfersApi,
          editSplitRequestApi, 
          getLevelDefsApi, 
          getAllUsersApi 
-        } from '../api'
+        } from '../../api'
 import CompleteReview from './CompleteReview.vue'
-import { useUserStore } from '../stores/user'
+import { useUserStore } from '../../stores/user'
 
 const userStore = useUserStore()
 const route = useRoute()

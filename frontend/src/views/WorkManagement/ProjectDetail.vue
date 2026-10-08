@@ -219,10 +219,10 @@ import {
   confirmCompletionApi,
   confirmClosedApi,
   getWorkCategoriesApi
-} from '../api'
-import WorkItemTable_improved from '../components/WorkItemTable_improved.vue'
-import { useUserStore } from '../stores/user'
-import { confirmClose, confirmCancelClose } from '../components/confirm'
+} from '../../api'
+import WorkItemTable_improved from '../../components/WorkItemTable_improved.vue'
+import { useUserStore } from '../../stores/user'
+import { confirmClose, confirmCancelClose } from '../../components/confirm'
 import { ArrowDown, Loading, CircleCheck, CircleClose, Lock } from '@element-plus/icons-vue'
 
 const route = useRoute()
