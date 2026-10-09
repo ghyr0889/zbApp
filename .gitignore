@@ -1,4 +1,4 @@
-node_models/ 
+node_modules/ 
 __pycache__/
 *.pyc
 workstat-backend/
@@ -6,3 +6,8 @@ workstat-backend/
 .env
 部署文件/
 *.sql
+docs/
+.venv/
+venv/
+/backend/build/
+/backend/dist/
