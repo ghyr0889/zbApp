@@ -32,7 +32,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='workstat-backend',
+    name='workmanagement-backend',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

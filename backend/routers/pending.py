@@ -1,5 +1,5 @@
 # 待办消息提醒
-"""待办数量汇总：一次请求驱动左侧菜单红点与三个页签的角标。
+"""待办数量汇总：一次请求驱动左侧菜单红点与各页签的角标。
 
 口径与各页面列表保持一致（前端「红点」= 页内能看到的待处理条数）：
 - review    审批查阅 → 拆分申请：按角色取 PENDING / SUBMITTED / REJECTED
@@ -58,9 +58,16 @@ def _transfer_pending(db: Session, user_id: str) -> int:
     ).count()
 
 
+def _package_changes_pending(db: Session, role: str) -> int:
+    """只有领导能审核工作包变更，因此仅给领导计入待办。"""
+    if role != 'LEADER':
+        return 0
+    return db.query(models.WorkPackageChangeRequest).filter_by(status='PENDING').count()
+
+
 @router.get("/summary")
 def get_pending_summary(user_id: str = Query(...), db: Session = Depends(get_db)):
-    """返回当前用户的待办汇总：{review, complete, transfers, total}。"""
+    """返回当前用户的待办汇总：{review, complete, transfers, packageChanges, total}。"""
     viewer = db.query(models.User).filter(models.User.id == user_id).first()
     if not viewer:
         raise HTTPException(status_code=404, detail="用户不存在")
@@ -69,6 +76,7 @@ def get_pending_summary(user_id: str = Query(...), db: Session = Depends(get_db)
     review = _review_pending(db, viewer, role)
     complete = _complete_pending(db, role, user_id)
     transfers = _transfer_pending(db, user_id)
+    package_changes = _package_changes_pending(db, role)
 
     return {
         "code": 200,
@@ -76,6 +84,7 @@ def get_pending_summary(user_id: str = Query(...), db: Session = Depends(get_db)
             "review": review,
             "complete": complete,
             "transfers": transfers,
-            "total": review + complete + transfers,
+            "packageChanges": package_changes,
+            "total": review + complete + transfers + package_changes,
         },
     }

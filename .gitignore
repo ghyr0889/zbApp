@@ -6,6 +6,7 @@ workstat-backend/
 .env
 部署文件/
 *.sql
+!backend/migrations/work_package_changes_nullable.sql
 docs/
 .venv/
 venv/

@@ -124,6 +124,28 @@ class WorkPackage(Base):
     tech_owner = relationship("User", foreign_keys=[tech_owner_id])#技术负责人
     split_requests = relationship("WorkPackageSplitRequest", back_populates="work_package", cascade="all, delete-orphan")
 
+class WorkPackageChangeRequest(Base):
+    """工作包变更申请：科室或管理员申请增删改，只有领导可以通过或驳回。"""
+    __tablename__ = "work_package_change_requests"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    action = Column(String(20), nullable=False)  # 变更动作：update / delete / create
+    work_package_id = Column(Integer, ForeignKey("work_packages.id"), nullable=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    applicant_id = Column(String(50), ForeignKey("users.id"), nullable=False)  # 申请人
+    reviewer_id = Column(String(50), ForeignKey("users.id"), nullable=True)  # 审核人
+    status = Column(String(20), default="PENDING")  # PENDING / APPROVED / REJECTED
+    reason = Column(Text, nullable=True)  # 申请原因；兼容旧记录，新申请由服务层强制填写
+    before_data = Column(Text, nullable=True)  # 变更前内容（JSON）
+    after_data = Column(Text, nullable=True)  # 变更后内容（JSON）
+    base_version = Column(Integer, nullable=False, default=1)  # 保留现有字段；当前使用 before_data 校验字段冲突
+    review_comment = Column(Text, nullable=True)  # 审核意见 / 驳回原因
+    created_at = Column(DateTime, default=datetime.now) # 提交时间
+    reviewed_at = Column(DateTime, nullable=True)  # 审核时间
+
+    work_package = relationship("WorkPackage")
+    applicant = relationship("User", foreign_keys=[applicant_id])
+
 
 
 class WorkItem(Base):

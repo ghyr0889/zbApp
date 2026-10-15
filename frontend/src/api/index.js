@@ -67,7 +67,7 @@ export const adminLoginApi = (data) => api.post('/auth/admin-login', data)
 // 工作项管理（工作包 → 工作项）
 export const getWorkItemsApi = (workPackageId, params) =>
   api.get(`/work-logs/work-packages/${workPackageId}/work-items`, { params })
-export const deleteWorkPackageApi = (workPackageId, userId) => api.delete(`/admin/work-packages/${workPackageId}`,{params: { user_id: userId}})
+export const deleteWorkPackageApi = (workPackageId, reason) => api.delete(`/admin/work-packages/${workPackageId}`, { data: { reason } })
 export const deleteWorkItemApi = (workItemId) => api.delete(`/work-logs/work-items/${workItemId}`)
 
 // 确认/取消完成（负责人手动标记）
@@ -153,3 +153,10 @@ export const deleteInformationApi = (kind, id) => api.delete(`/admin/information
 
 export const getChartOptionsApi = (userId) => api.get('/analytics/options', { params: { user_id: userId }, timeout: 30000 })
 export const getCustomChartApi = (data) => api.post('/analytics/chart', data, { timeout: 30000 })
+
+// 新版看板同时返回工作项数量及配置分值。
+export const getDashboardOverviewApi = params => api.get('/dashboard/overview', { params })
+
+// 工作包变更申请：领导可查看全部申请，其他人员仅查看自己的申请。
+export const getWorkPackageChangesApi = () => api.get('/work-package-changes')
+export const reviewWorkPackageChangeApi = (id, data) => api.post(`/work-package-changes/${id}/review`, data)

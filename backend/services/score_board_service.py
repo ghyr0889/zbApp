@@ -309,7 +309,7 @@ def get_public_score_board(period: str = "all",
             "total_calculated": total_calculated,
             "total_score": total_calculated,   # 计算总分（季度/年度=各月计算总分之和）
             "converted_score": 0.0,            # 折算得分（月度），下方计算
-            "final_calculated": 0.0,           # 计算得分（季度/年度），下方计算
+            "final_calculated": 0.0,           # 折算得分（季度/年度），下方计算
             "grade": "-",
             "period_scores": period_scores,
             # 动态切片求和：如果是年度，则把12个月的数据按季度(每3个月)累加；否则正常取单月值

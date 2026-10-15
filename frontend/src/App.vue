@@ -76,8 +76,8 @@ const SOUND_KEY = 'pending_notify_sound'
 const notifyEnabled = ref(localStorage.getItem(NOTIFY_KEY) !== '0')  // 默认开启
 const soundEnabled = ref(localStorage.getItem(SOUND_KEY) !== '0')    // 默认开启
 
-const TAB_KEYS = ['review', 'complete', 'transfers']
-const TAB_LABEL = { review: '审批查阅', complete: '完成申请', transfers: '工作包转办' }
+const TAB_KEYS = ['review', 'complete', 'transfers', 'packageChanges']
+const TAB_LABEL = { review: '审批查阅', complete: '完成申请', transfers: '工作包转办', packageChanges: '工作包变更' }
 const BASE_TITLE = '综保工作管理系统'   // 与 index.html 的 <title> 保持一致
 
 let lastPending = null         // 上一次的待办快照；null = 还没建基线

@@ -3,8 +3,8 @@ import { getPendingSummaryApi, getCurrentUserApi, logoutApi } from '../api'
 
 const STORAGE_KEY = 'user_info'
 
-// 三个页签各自的待办数量，初始全 0
-const emptyPending = () => ({ review: 0, complete: 0, transfers: 0 })
+// 各页签各自的待办数量，初始全 0
+const emptyPending = () => ({ review: 0, complete: 0, transfers: 0, packageChanges: 0 })
 
 function readStoredUser() {
   // 用户与令牌按标签页配对，避免另一标签页登录其他账号后串用身份。
@@ -25,16 +25,16 @@ export const useUserStore = defineStore('user', {
     userInfo: readStoredUser(),
     accessToken: sessionStorage.getItem('access_token') || '',
     sessionChecked: false,
-    // 菜单红点 / 三个页签角标共用的待办计数（不持久化）
+    // 菜单红点 / 各页签角标共用的待办计数（不持久化）
     pending: emptyPending()
   }),
 
   getters: {
     isLoggedIn: (state) => !!state.userInfo && !!state.accessToken,
     role: (state) => String(state.userInfo?.role || '').toUpperCase(),
-    // 菜单红点 = 三个页签待办之和
+    // 菜单红点 = 各页签待办之和
     pendingTotal: (state) =>
-      (state.pending.review || 0) + (state.pending.complete || 0) + (state.pending.transfers || 0),
+      (state.pending.review || 0) + (state.pending.complete || 0) + (state.pending.transfers || 0) + (state.pending.packageChanges || 0),
     isAdmin() {
       return this.role === 'ADMIN'
     },
@@ -114,7 +114,8 @@ export const useUserStore = defineStore('user', {
         this.pending = {
           review: d.review ?? 0,
           complete: d.complete ?? 0,
-          transfers: d.transfers ?? 0
+          transfers: d.transfers ?? 0,
+          packageChanges: d.packageChanges ?? 0
         }
       } catch (e) {
         // 拉取失败保留上一次的值，避免红点误闪消失

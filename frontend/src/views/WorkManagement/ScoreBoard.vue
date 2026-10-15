@@ -1,40 +1,53 @@
-<!-- xiangmu/frontend/src/views/ScoreBoard.vue -->
+<!-- 积分查看 -->
 <template>
   <div class="score-board-page">
     <el-card class="box-card" shadow="never">
-      <!-- 全局查询区：选择查看哪个月 / 哪个季度 / 哪一年 -->
-      <div class="global-filter">
-        <span v-if="showPeriodFilter" class="filter-label">查询维度：</span>
-        <el-select v-if="showPeriodFilter" v-model="queryMode" size="default" style="width: 120px" @change="onQueryChange">
-          <el-option label="按月份" value="month" />
-          <el-option label="按季度" value="quarter" />
-          <el-option label="按年份" value="year" />
-        </el-select>
-        <el-date-picker
-          v-if="queryMode === 'month' && showPeriodFilter"
-          v-model="selectedMonth"
-          type="month"
-          value-format="YYYY-MM"
-          size="default"
-          style="width: 150px"
-          placeholder="选择月份"
-          @change="onPeriodChange"
-        />
-        <template v-else-if="queryMode === 'quarter' && showPeriodFilter">
-          <el-select v-model="selectedYear" size="default" style="width: 110px" @change="onPeriodChange">
-            <el-option v-for="y in yearOptions" :key="y" :label="`${y}年`" :value="y" />
-          </el-select>
-          <el-select v-model="selectedQuarter" size="default" style="width: 100px" @change="onPeriodChange">
-            <el-option label="第1季度" :value="1" />
-            <el-option label="第2季度" :value="2" />
-            <el-option label="第3季度" :value="3" />
-            <el-option label="第4季度" :value="4" />
-          </el-select>
-        </template>
-        <el-select v-else-if="queryMode === 'year' && showPeriodFilter" v-model="selectedYear" size="default" style="width: 110px" @change="onPeriodChange">
-          <el-option v-for="y in yearOptions" :key="y" :label="`${y}年`" :value="y" />
-        </el-select>
-        <span v-if="showPeriodFilter" class="period-label">当前查看：{{ periodLabel }}</span>
+      <!-- 与数据看板一致：周期分段按钮、前后切换和弹出日期选择。 -->
+      <div v-if="showPeriodFilter" class="global-filter">
+        <div class="period-segments" aria-label="统计周期">
+          <button v-for="p in periodOptions" :key="p.value" :class="{ selected: queryMode === p.value }" @click="changeQueryMode(p.value)">
+            {{ p.label }}
+          </button>
+        </div>
+        <div class="period-navigation">
+          <el-button text :icon="ArrowLeft" aria-label="上一周期" :disabled="atStart" @click="shiftPeriod(-1)" />
+          <button class="period-label" @click="openPeriodPicker">{{ pickerLabel }} <el-icon><ArrowDown /></el-icon></button>
+          <el-dialog v-model="pickerOpen" title="选择统计时间" width="min(480px, 92vw)" align-center append-to-body class="score-period-dialog" @opened="scrollToSelectedYear">
+            <div class="scroll-period-picker" :class="{ 'year-only': queryMode === 'year' }">
+              <!-- 年份倒序排列，可用滚轮或触摸上下滑动；滚动不会直接发起查询。 -->
+              <div ref="yearList" class="year-list" tabindex="0" aria-label="年份列表，可上下滚动">
+                <button 
+                  v-for="y in pickerYears" 
+                  :key="y" 
+                  :data-year="y" 
+                  :class="{ selected: draftYear === y }" 
+                  :aria-pressed="draftYear === y" 
+                  @click="selectPickerYear(y)"
+                >{{ y }}年
+                </button>
+              </div>
+              <div v-if="queryMode !== 'year'" class="period-grid" aria-label="选择月份或季度">
+                <button 
+                  v-for="n in queryMode === 'month' ? 12 : 4" 
+                  :key="n" 
+                  :class="{ selected: draftYear === selectedYear && n === (queryMode === 'month' ? monthNumber : selectedQuarter) }" 
+                  @click="choosePeriod(n)">{{ queryMode === 'month' ? `${n}月` : `第${n}季度` }}
+                </button>
+              </div>
+            </div>
+          </el-dialog>
+          <el-button text :icon="ArrowRight" aria-label="下一周期" :disabled="atEnd" @click="shiftPeriod(1)" />
+          <el-button text :icon="Refresh" :loading="loading" @click="onPeriodChange">刷新</el-button>
+        </div>
+        <el-button
+          v-if="activeTab === 'all'"
+          class="export-excel-button"
+          :icon="Download"
+          :loading="exporting"
+          :disabled="loading || savingRow || !peopleList.length"
+          @click="exportExcel"
+        >导出 Excel
+        </el-button>
       </div>
 
     <!-- 主体内容区：Tabs 顶格显示 -->
@@ -136,7 +149,13 @@
         <!-- 页面二：所有人员积分 -->
         <el-tab-pane label="所有人员积分" name="all">
           <div class="tab-content">
-            
+            <p class="score-formula-tip">
+              计算总分＝工作项计算得分＋技术提升＋日常管理－进度扣分；
+              折算总分＝计算总分÷折算系数，
+              折算系数＝本周期第5名计算总分÷90.01
+              （不足5人取最高分，基准为0时系数取1）。
+            </p>
+
             <!-- 【表格 1：月度表】当查询维度为“月份”时显示 -->
             <el-table
               v-if="queryMode === 'month'"
@@ -263,12 +282,12 @@
               </el-table-column>
 
               <!-- 汇总列 -->
-              <el-table-column prop="total_score" label="得分" min-width="100" align="center">
+              <el-table-column prop="total_score" label="计算总分" min-width="100" align="center">
                 <template #default="{ row }">
                   <span class="score-text">{{ row.total_score || 0 }}</span>
                 </template>
               </el-table-column>
-              <el-table-column prop="final_calculated" label="计算得分" min-width="100" align="center" />
+              <el-table-column prop="final_calculated" label="折算总分" min-width="100" align="center" />
               
               <el-table-column prop="grade" label="等级" width="90" align="center" fixed="right">
                 <template #default="{ row }">
@@ -289,10 +308,12 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
+import { ArrowLeft, ArrowRight, ArrowDown, Refresh, Download } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { getPublicScoreBoardApi, updateMonthlyExtraScoreApi } from '../../api'
 import { useUserStore } from '../../stores/user'
+import { createScoreSnapshot, downloadScoreExcel } from '../../utils/scoreExport'
 
 const userStore = useUserStore()
 const currentUser = computed(() => userStore.userInfo)
@@ -300,17 +321,85 @@ const currentUser = computed(() => userStore.userInfo)
 const activeTab = ref('personal')
 const peopleList = ref([])
 const loading = ref(false)
+const exporting = ref(false)
+
+async function exportExcel() {
+  if (exporting.value || loading.value || savingRow.value || !peopleList.value.length) return
+  // 未保存的附加分与接口返回的总分可能不一致，先完成编辑再导出。
+  if (peopleList.value.some(row => row.isEditing)) {
+    ElMessage.warning('请先保存或取消正在编辑的积分，再导出 Excel')
+    return
+  }
+  exporting.value = true
+  try {
+    const snapshot = createScoreSnapshot(peopleList.value, queryMode.value, periodLabel.value, selectedQuarter.value)
+    await downloadScoreExcel(snapshot)
+    ElMessage.success('已生成 Excel 文件，请查看浏览器下载记录')
+  } catch (error) {
+    console.error('导出积分失败:', error)
+    ElMessage.error(error.message || '导出失败，请稍后重试')
+  } finally {
+    exporting.value = false
+  }
+}
 
 // 查询维度与具体选择：默认按月份看当前月
 const now = new Date()
 const queryMode = ref('month')
 const selectedMonth = ref(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`)
 const selectedYear = ref(now.getFullYear())
-const selectedQuarter = ref(1)
-const yearOptions = computed(() => {
-  const cur = now.getFullYear()
-  return [cur - 3, cur - 2, cur - 1, cur, cur + 1]
-})
+const selectedQuarter = ref(Math.ceil((now.getMonth() + 1) / 3))
+const periodOptions = [{ value: 'month', label: '月' }, { value: 'quarter', label: '季' }, { value: 'year', label: '年' }]
+const pickerOpen = ref(false)
+const draftYear = ref(selectedYear.value)
+const yearList = ref(null)
+const pickerYears = Array.from({ length: 101 }, (_, i) => 2100 - i)
+function openPeriodPicker() {
+  draftYear.value = selectedYear.value
+  pickerOpen.value = true
+}
+function scrollToSelectedYear() {
+  // 每次打开都定位到已选年份，仅滚动列表本身，不移动背景页面。
+  const list = yearList.value
+  const selected = list?.querySelector(`[data-year="${draftYear.value}"]`)
+  if (selected) list.scrollTop = selected.offsetTop - list.clientHeight / 2 + selected.offsetHeight / 2
+}
+function selectPickerYear(year) {
+  draftYear.value = year
+  if (queryMode.value === 'year') choosePeriod(1)
+}
+const monthNumber = computed(() => Number(selectedMonth.value.slice(5, 7)))
+const pickerLabel = computed(() => queryMode.value === 'month' ? selectedMonth.value : periodLabel.value)
+const atStart = computed(() => selectedYear.value === 2000 && (queryMode.value === 'year' || (queryMode.value === 'quarter' ? selectedQuarter.value === 1 : monthNumber.value === 1)))
+const atEnd = computed(() => selectedYear.value === 2100 && (queryMode.value === 'year' || (queryMode.value === 'quarter' ? selectedQuarter.value === 4 : monthNumber.value === 12)))
+
+// 三种周期共享所选年月，切换模式时不会意外跳回当前年份。
+function setSelectedDate(year, month) {
+  selectedYear.value = year
+  selectedMonth.value = `${year}-${String(month).padStart(2, '0')}`
+  selectedQuarter.value = Math.ceil(month / 3)
+}
+function changeQueryMode(mode) {
+  if (queryMode.value === mode) return
+  queryMode.value = mode
+  pickerOpen.value = false
+  onPeriodChange()
+}
+function shiftPeriod(direction) {
+  const step = queryMode.value === 'year' ? 12 : queryMode.value === 'quarter' ? 3 : 1
+  const next = new Date(selectedYear.value, monthNumber.value - 1 + direction * step, 1)
+  if (next.getFullYear() < 2000 || next.getFullYear() > 2100) return
+  setSelectedDate(next.getFullYear(), next.getMonth() + 1)
+  pickerOpen.value = false
+  onPeriodChange()
+}
+function choosePeriod(n) {
+  if (!Number.isInteger(draftYear.value) || draftYear.value < 2000 || draftYear.value > 2100) return
+  const month = queryMode.value === 'month' ? n : queryMode.value === 'quarter' ? (n - 1) * 3 + 1 : monthNumber.value
+  setSelectedDate(draftYear.value, month)
+  pickerOpen.value = false
+  onPeriodChange()
+}
 
 // 当前查看周期文案
 const periodLabel = computed(() => {
@@ -402,18 +491,17 @@ const groupedMyDetails = computed(() => {
   return Object.values(map)
 })
 
-// 切换查询维度时按当前标签页分发（季度/年份/月份选择器绑定 onPeriodChange）
-const onQueryChange = () => {
-  onPeriodChange()
-}
-
 // 周期（年/季/月）变化时重新查询积分数据
 const onPeriodChange = () => {
   fetchPublicScoreBoard()
 }
 
 // 按所选维度与具体年月/季/年拉取积分数据
+let scoreRequestId = 0
+onBeforeUnmount(() => { scoreRequestId++ })
 const fetchPublicScoreBoard = async () => {
+  const requestId = ++scoreRequestId
+  peopleList.value = []
   loading.value = true
   try {
     let year = '', month = '', quarter = ''
@@ -427,14 +515,16 @@ const fetchPublicScoreBoard = async () => {
       year = selectedYear.value
     }
     const res = await getPublicScoreBoardApi(queryMode.value, year, month, quarter)
+    if (requestId !== scoreRequestId) return
     if (res?.data?.code === 200) {
       peopleList.value = res.data.data.people || []
     }
   } catch (err) {
+    if (requestId !== scoreRequestId) return
     console.error('获取公开积分数据报错:', err)
     ElMessage.error('获取公开积分数据失败')
   } finally {
-    loading.value = false
+    if (requestId === scoreRequestId) loading.value = false
   }
 }
 
@@ -552,22 +642,153 @@ onMounted(() => {
   animation: fadeIn 0.3s ease;
 }
 
+/* 顶部栏使用 flex 布局，自动占用按钮左侧空白，将按钮推到右侧 */
+.global-filter > .export-excel-button {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 /* 表格固定高度内部滚动，不受全局 flex:1 拉伸影响 */
 :deep(.el-table) { flex: none !important; }
 
-/* 全局查询区样式 */
-.global-filter {
+/* 仅修改积分查看的周期选择，不影响积分表格和编辑按钮。 */
+.global-filter { 
+  display: flex; 
+  align-items: center;
+   gap: 14px; 
+   padding: 8px 4px 12px; 
+   overflow-x: auto; 
+  }
+
+.period-segments { 
+  display: inline-flex; 
+  flex-shrink: 0; 
+  padding: 3px; 
+  background: #f1f2f4; 
+  border-radius: 8px; 
+  gap: 2px; 
+}
+
+.period-segments button, .period-grid button { 
+  border: 0; 
+  border-radius: 9px; 
+  background: transparent; 
+  padding: 9px 23px; 
+  cursor: pointer; 
+  font-size: 14px; 
+  color: #8b929c; 
+}
+
+.period-segments button {
+  padding: 5px 14px;
+  font-size: 13px;
+  border-radius: 6px;
+}
+
+.period-segments button.selected {
+  color: #20242a;
+  background: #fff;
+  box-shadow: 0 2px 6px #00000008;
+}
+
+.period-navigation {
   display: flex;
   align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  padding: 12px 4px 8px;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.period-navigation :deep(.el-button) {
+  height: 28px;
+  padding: 5px 8px;
+  font-size: 13px;
+  margin-left: 0;
 }
 
 .period-label {
-  color: #475569;
+  background: transparent;
+  border: 0;
+  color: #20242a;
+  font-size: 14px;
   font-weight: 600;
-  margin-left: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.scroll-period-picker {
+  display: grid;
+  grid-template-columns: 38% 62%;
+  height: min(360px, 60vh);
+  background: #fff;
+}
+
+.year-list {
+  position: relative;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  scrollbar-width: thin;
+  padding: 8px 12px;
+  border-right: 1px solid #f0f1f3;
+}
+
+.year-list button {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  border-radius: 28px;
+  padding: 11px 0;
+  margin: 7px 0;
+  font-size: 19px;
+  color: #20242a;
+  cursor: pointer;
+}
+
+.year-list button.selected {
+  background: #409eff;
+  color: #fff;
+}
+
+.period-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: minmax(52px, 1fr);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  padding: 8px 10px;
+}
+
+.period-grid button {
+  padding: 10px 4px;
+  color: #20242a;
+  font-size: 19px;
+}
+
+.period-grid button.selected {
+  color: #409eff;
+  background: transparent;
+}
+
+.year-only {
+  grid-template-columns: 1fr;
+}
+
+.year-only .year-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-content: start;
+  border: 0;
+  gap: 4px 10px;
+}
+
+.period-segments button:focus-visible, .period-label:focus-visible, .period-grid button:focus-visible, .year-list button:focus-visible {
+  outline: 2px solid #409eff;
+  outline-offset: -2px;
 }
 
 .employee-text {
@@ -694,5 +915,14 @@ onMounted(() => {
     flex-direction: column;
     gap: 16px;
   }
+}
+/* 积分计算说明：小号灰色文字，窄屏时自动换行 */
+.score-formula-tip {
+  margin: 0 0 12px;
+  padding: 0 2px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
 }
 </style>

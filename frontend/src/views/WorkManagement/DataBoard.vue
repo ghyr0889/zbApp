@@ -1,466 +1,413 @@
-<!-- xiangmu/frontend/src/views/DataBoard.vue -->
-<!-- 数据看板：由「积分查看」页拆分而出，承载 完成情况 / 项目汇总 两个看板 -->
+<!-- 数据看板 -->
 <template>
-  <div class="data-board-page">
-    <el-card class="box-card" shadow="never">
-      <!-- 无权限提示：两个看板都只对领导/管理员开放 -->
-      <el-alert
-        v-if="!canViewBoard"
-        type="warning"
-        show-icon
-        :closable="false"
-        title="数据看板仅对领导 / 管理员开放"
-        description="当前角色没有查看完成情况和项目汇总的权限。" />
-
-      <template v-else>
-        <!-- 项目汇总：查看方式 + 查询维度 + 周期 -->
-        <div v-if="showPeriodFilter" class="global-filter">
-          <el-select v-model="summaryViewType" size="default"
-            style="width: 150px" @change="fetchProjectSummary">
-            <el-option label="查看项目" value="project" />
-            <el-option label="查看工作包" value="work_package" />
-          </el-select>
-          <span class="filter-label">查询维度：</span>
-          <el-select v-model="queryMode" size="default" style="width: 120px" @change="onPeriodChange">
-            <el-option label="按月份" value="month" />
-            <el-option label="按季度" value="quarter" />
-            <el-option label="按年份" value="year" />
-          </el-select>
-          <el-date-picker
-            v-if="queryMode === 'month'"
-            v-model="selectedMonth"
-            type="month"
-            value-format="YYYY-MM"
-            size="default"
-            style="width: 150px"
-            placeholder="选择月份"
-            @change="onPeriodChange"
-          />
-          <template v-else-if="queryMode === 'quarter'">
-            <el-select v-model="selectedYear" size="default" style="width: 110px" @change="onPeriodChange">
-              <el-option v-for="y in yearOptions" :key="y" :label="`${y}年`" :value="y" />
-            </el-select>
-            <el-select v-model="selectedQuarter" size="default" style="width: 100px" @change="onPeriodChange">
-              <el-option label="第1季度" :value="1" />
-              <el-option label="第2季度" :value="2" />
-              <el-option label="第3季度" :value="3" />
-              <el-option label="第4季度" :value="4" />
-            </el-select>
-          </template>
-          <el-select v-else-if="queryMode === 'year'" v-model="selectedYear" size="default" style="width: 110px" @change="onPeriodChange">
-            <el-option v-for="y in yearOptions" :key="y" :label="`${y}年`" :value="y" />
-          </el-select>
-          <span class="period-label">当前查看：{{ periodLabel }}</span>
+  <div class="dashboard-page">
+    <el-alert v-if="!allowed" title="数据看板仅对领导和管理员开放" type="warning" :closable="false" />
+    <template v-else>
+      <!-- 顶部切换数据源 -->
+      <header class="board-toolbar">
+        <div class="toolbar-groups">
+          <div class="segments" aria-label="统计周期">
+            <button v-for="p in periods" :key="p.value" :class="{ selected: period === p.value }" @click="changePeriod(p.value)">
+              {{ p.label }}
+            </button>
+          </div>
+          <div class="segments" aria-label="统计维度">
+            <button v-for="d in availableDimensions" :key="d.value" :class="{ selected: dimension === d.value }" @click="dimension = d.value">
+              {{ d.label }}
+            </button>
+          </div>
+          <!-- 只有“年＋时间”时，才允许选择横轴粒度。 -->
+          <div v-if="period === 'year' && dimension === 'time'" class="segments" aria-label="时间粒度">
+            <button :class="{ selected: yearGranularity === 'month' }" @click="yearGranularity = 'month'">
+              按月
+            </button>
+            <button :class="{ selected: yearGranularity === 'quarter' }" @click="yearGranularity = 'quarter'">
+              按季度
+            </button>
+          </div>
+          <div class="segments" aria-label="统计单位">
+            <button :class="{ selected: metric === 'count' }" @click="metric = 'count'">数量</button>
+            <button :class="{ selected: metric === 'score' }" @click="metric = 'score'">分值</button>
+          </div>
         </div>
+        
+        <div class="period-navigation">
+          <el-button text :icon="ArrowLeft" aria-label="上一周期" :disabled="atStart" @click="shiftPeriod(-1)" />
+          <button class="period-label" @click="openPeriodPicker">
+            {{ periodLabel }} <el-icon><ArrowDown /></el-icon>
+          </button>
+          <el-dialog v-model="pickerOpen" width="min(480px, 92vw)" align-center append-to-body class="dashboard-period-dialog" @opened="scrollToSelectedYear">
+            <div class="scroll-period-picker" :class="{ 'year-only': period === 'year' }">
+              <!-- 年份倒序排列，可用滚轮或触摸上下滑动；滚动不会直接发起查询。 -->
+              <div ref="yearList" class="year-list" tabindex="0" aria-label="年份列表，可上下滚动">
+                <button v-for="y in pickerYears" :key="y" :data-year="y" :class="{ selected: draftYear === y }" :aria-pressed="draftYear === y" @click="selectPickerYear(y)">
+                  {{ y }}年
+                </button>
+              </div>
 
-        <!-- 完成情况：查询对象与月份 -->
-        <div v-if="activeTab === 'situation'" class="view-controls">
-          <el-select v-model="viewType" size="default" style="width: 150px" @change="onViewChange" placeholder="选择查看方式">
-            <el-option label="查看项目" value="project" />
-            <el-option label="查看工作包类别" value="category" />
-          </el-select>
-          <!-- 对象选择 -->
-          <el-select v-model="situationTarget" filterable
-            :placeholder="viewType === 'project' ? '选择项目' : '选择工作包类别'"
-            style="width: 220px; margin-left: 12px" @change="fetchSituation">
-            <el-option v-for="opt in situationOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
-          </el-select>
-          <!-- 月份（可选：空 = 累计全部月份） -->
-          <el-date-picker v-model="situationMonth" type="month" value-format="YYYY-MM" clearable
-            placeholder="全部月份（累计）" style="width: 160px; margin-left: 12px" @change="fetchSituation" />
-        </div>
-
-        <!-- 主体内容区：Tabs 顶格显示 -->
-        <el-tabs v-model="activeTab" class="custom-tabs">
-          <el-tab-pane label="自定义图表" name="custom" lazy>
-            <CustomChartBoard v-if="activeTab === 'custom'" />
-          </el-tab-pane>
-          <!-- 完成情况 -->
-          <el-tab-pane v-if="canViewSituation" label="完成情况" name="situation">
-            <div class="tab-content">
-              <el-table
-                :data="situationPeople"
-                v-loading="loading"
-                border
-                style="width: 100%"
-                height="calc(100vh - 330px)"
-                empty-text="该对象下暂无人员数据"
-                :header-cell-style="{ background: '#f8fafc', color: '#334155' }"
-                show-summary
-                :summary-method="situationSummary">
-                <el-table-column prop="username" label="人员" min-width="140" align="center" fixed="left" />
-                <el-table-column prop="total_score" label="总分值" min-width="110" align="center">
-                  <template #default="{ row }"><span class="score-text">{{ row.total_score ?? 0 }}</span></template>
-                </el-table-column>
-                <el-table-column prop="filled_score" label="已填分" min-width="110" align="center">
-                  <template #default="{ row }"><span class="score-text">{{ row.filled_score ?? 0 }}</span></template>
-                </el-table-column>
-                <el-table-column prop="unfilled_score" label="未填分" min-width="110" align="center">
-                  <template #default="{ row }">
-                    <span :class="(row.unfilled_score ?? 0) < 0 ? 'penalty-text' : 'muted-text'">{{ row.unfilled_score ?? 0 }}</span>
-                  </template>
-                </el-table-column>
-              </el-table>
-            </div>
-          </el-tab-pane>
-
-          <!-- 项目汇总：项目 / 工作包 分值汇总（按 月/季/年） -->
-          <el-tab-pane v-if="canViewSummary" label="项目汇总" name="summary">
-            <div class="tab-content">
-              <el-table
-                :data="pagedSummaryItems"
-                v-loading="loading"
-                border
-                style="width: 100%"
-                height="calc(100vh - 330px)"
-                :empty-text="summaryViewType === 'project' ? '暂无项目数据' : '暂无工作包数据'"
-                :header-cell-style="{ background: '#f8fafc', color: '#334155' }"
-                show-summary
-                :summary-method="summaryTableSummary">
-                <el-table-column :label="summaryViewType === 'project' ? '项目名称' : '工作包名称'" min-width="200" fixed="left" show-overflow-tooltip>
-                  <template #default="{ row }"><span class="employee-text">{{ row.name }}</span></template>
-                </el-table-column>
-                <el-table-column prop="code" label="编号" min-width="150" align="center" show-overflow-tooltip />
-                <el-table-column v-if="summaryViewType === 'work_package'" prop="parent_code" label="所属项目" min-width="150" show-overflow-tooltip />
-                <el-table-column v-if="summaryViewType === 'work_package'" prop="category_name" label="类别" min-width="110" align="center" />
-                <el-table-column prop="child_count" :label="summaryViewType === 'project' ? '所含工作包数' : '所含工作项数'" width="120" align="center">
-                  <template #default="{ row }"><span class="score-text">{{ row.child_count || 0 }}</span></template>
-                </el-table-column>
-                <el-table-column v-if="summaryViewType === 'project'" prop="work_item_count" label="工作项总数" width="110" align="center">
-                  <template #default="{ row }"><span class="score-text">{{ row.work_item_count || 0 }}</span></template>
-                </el-table-column>
-                <el-table-column prop="total_score" label="总分值" width="110" align="center">
-                  <template #default="{ row }"><span class="score-text">{{ row.total_score ?? 0 }}</span></template>
-                </el-table-column>
-                <el-table-column prop="filled_score" label="已填分值" width="110" align="center">
-                  <template #default="{ row }"><span class="score-text">{{ row.filled_score ?? 0 }}</span></template>
-                </el-table-column>
-                <el-table-column prop="unfilled_score" label="未填分值" width="120" align="center">
-                  <template #default="{ row }">
-                    <span :class="(row.unfilled_score ?? 0) < 0 ? 'penalty-text' : 'muted-text'">{{ row.unfilled_score ?? 0 }}</span>
-                  </template>
-                </el-table-column>
-                <el-table-column label="状态" width="100" align="center">
-                  <template #default="{ row }">
-                    <el-tag v-if="row.closed_status" type="danger" size="small">已关闭</el-tag>
-                    <el-tag v-else-if="row.complete_status" type="success" size="small">已完成</el-tag>
-                    <el-tag v-else type="primary" size="small">进行中</el-tag>
-                  </template>
-                </el-table-column>
-              </el-table>
-              <div class="pagination-bar">
-                <el-pagination
-                  background layout="total, prev, pager, next, sizes"
-                  :total="summaryItems.length"
-                  :current-page="summaryPage"
-                  :page-size="summaryPageSize"
-                  :page-sizes="[10, 20, 50]"
-                  @current-change="(p) => summaryPage = p"
-                  @size-change="(s) => { summaryPageSize = s; summaryPage = 1 }" />
+              <div v-if="period !== 'year'" class="period-grid" aria-label="选择月份或季度">
+                <button v-for="n in period === 'month' ? 12 : 4" :key="n" :class="{ selected: draftYear === year && n === (period === 'month' ? month : quarter) }" @click="choosePeriod(n)">
+                  {{ period === 'month' ? `${n}月` : `第${n}季度` }}
+                </button>
               </div>
             </div>
-          </el-tab-pane>
-        </el-tabs>
-      </template>
-    </el-card>
+          </el-dialog>
+          <el-button text :icon="ArrowRight" aria-label="下一周期" :disabled="atEnd" @click="shiftPeriod(1)" />
+          <el-button text :icon="Refresh" :loading="loading" @click="fetchData">刷新</el-button>
+        </div>
+      </header>
+      
+      <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
+      <p class="calculation-note">按工作项截止日期归入周期，按当前负责人／科室／所属项目统计；完成情况为当前状态。分值为工作项配置分值，不是月度已填分。</p>
+      <div v-loading="loading" class="board-content">
+        <!-- 工作总览模块 -->
+        <section class="board-card overview-report">
+          <div class="card-heading">
+            <h2>工作总览 
+              <span class="overview-unit">单位：{{ unit }}</span>
+            </h2>
+            <el-input v-model="search" clearable :placeholder="`搜索${dimensionLabel}`" :prefix-icon="Search" style="width: 220px" />
+          </div>
+          <el-table :data="pagedRows" :empty-text="error ? '数据加载失败' : '暂无匹配数据'" style="width:100%">
+            <el-table-column prop="name" :label="dimensionLabel" min-width="200" show-overflow-tooltip />
+            <el-table-column label="总计" min-width="110" align="right">
+              <template #default="{ row }">{{ format(row.total) }}</template>
+            </el-table-column>
+            <el-table-column label="已完成" min-width="110" align="right">
+              <template #default="{ row }">
+                <span class="green">{{ format(row.completed) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="未完成" min-width="110" align="right">
+              <template #default="{ row }">
+                <span class="coral">{{ format(row.pending) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="完成占比" min-width="110" align="right">
+              <template #default="{ row }">
+                {{ row.total > 0 ? (row.completed / row.total * 100).toFixed(1) + '%' : '—' }}
+              </template>
+            </el-table-column>
+          </el-table>
+
+          <el-pagination 
+            v-model:current-page="page" 
+            :page-size="20" 
+            :total="filteredRows.length" 
+            layout="total, prev, pager, next" 
+            class="report-pagination" />
+        </section>
+
+        <!-- 工作量统计模块 -->
+        <div class="chart-grid">
+          <section class="board-card">
+            <div class="card-heading">
+              <h2>工作量统计</h2>
+              <div class="chart-tools">
+                <el-button text :icon="Download" :disabled="loading || !!error || !rows.length" @click="exportChart('workload')">导出图片</el-button>
+                <el-button 
+                  text 
+                  :icon="chartType === 'bar' ? TrendCharts : Histogram" 
+                  :aria-label="chartType === 'bar' ? '切换折线图' : '切换柱状图'" 
+                  @click="chartType = chartType === 'bar' ? 'line' : 'bar'">
+                  {{ chartType === 'bar' ? '折线' : '柱状' }}
+                </el-button>
+                <el-button text :icon="FullScreen" aria-label="放大查看工作量图表" @click="expanded = true" />
+              </div>
+            </div>
+
+            <DashboardChart ref="workloadChartRef" 
+              v-if="rows.length && !error" 
+              :option="barOption" 
+              :label="`${dimensionLabel}工作量${chartType === 'bar' ? '柱状' : '折线'}图`" 
+            />
+            <el-empty v-else :description="error ? '数据加载失败，请重试' : '所选周期暂无工作项'" :image-size="100" />
+          </section>
+
+          <section class="board-card report-card">
+            <div class="card-heading">
+              <h2>{{ dimensionLabel }}报表</h2>
+              <el-button text :icon="Download" :disabled="loading || !!error || reportTotal <= 0" @click="exportChart('report')">导出图片</el-button>
+            </div>
+            <DashboardChart ref="reportChartRef" v-if="reportTotal > 0 && !error" :option="pieOption" :label="`${dimensionLabel}${reportLabel}占比`" />
+            <el-empty v-else :description="error ? '数据加载失败' : '暂无可展示的占比数据'" :image-size="100" />
+            <div class="segments report-switch">
+              <button 
+                v-for="r in reportModes" 
+                :key="r.value" 
+                :class="{ selected: reportMode === r.value }" 
+                @click="reportMode = r.value">{{ r.label }}
+              </button>
+            </div>
+          </section>
+        </div>
+
+      </div>
+      <el-dialog v-model="expanded" title="工作量统计" fullscreen destroy-on-close>
+        <p>{{ periodLabel }} · 按{{ dimensionLabel }} · 单位：{{ unit }}</p>
+        <DashboardChart v-if="expanded" :option="barOption" label="工作量统计放大图" style="height:calc(100vh - 150px)" />
+      </el-dialog>
+    </template>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
-import {
-  getCompletedSituationApi,
-  getAllProjectsApi,
-  getWorkCategoriesApi,
-  getProjectSummaryApi
-} from '../../api'
+import { ArrowLeft, ArrowRight, ArrowDown, Refresh, FullScreen, Histogram, TrendCharts, Search, Download } from '@element-plus/icons-vue'
+import DashboardChart from '../../components/DashboardChart.vue'
+import { getDashboardOverviewApi } from '../../api'
 import { useUserStore } from '../../stores/user'
+// 两个 ref 分别对应两张图表，避免导出错图。
+const workloadChartRef = ref(null)
+const reportChartRef = ref(null)
+async function exportChart(kind) {
+  if (loading.value || error.value) return
+  try {
+    // 等待 Vue 将最近的数量、分值或图形切换同步到子组件。
+    await nextTick() // nextTick用来等待 Vue 完成本轮界面更新。
+    if (loading.value || error.value) return
+    const isReport = kind === 'report' // 扇形图
 
-const userStore = useUserStore()
-const currentUser = computed(() => userStore.userInfo)
+    if (isReport ? reportTotal.value <= 0 : !rows.value.length) return
 
-const activeTab = ref('custom')
-const loading = ref(false)
-
-// ====================== 周期（年 / 季 / 月） ======================
-const now = new Date()
-const queryMode = ref('month')
-const selectedMonth = ref(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`)
-const selectedYear = ref(now.getFullYear())
-const selectedQuarter = ref(1)
-const yearOptions = computed(() => {
-  const cur = now.getFullYear()
-  return [cur - 3, cur - 2, cur - 1, cur, cur + 1]
-})
-
-// 当前查看周期文案
-const periodLabel = computed(() => {
-  if (queryMode.value === 'month') {
-    const [y, m] = selectedMonth.value.split('-')
-    return `${y}年${+m}月`
+    const instance = isReport ? reportChartRef.value : workloadChartRef.value 
+    const name = isReport ? `${reportLabel.value}占比` : `工作量${chartType.value === 'bar' ? '柱状图' : '折线图'}`
+    const granularity = dimension.value === 'time' && period.value === 'year'
+      ? `_${yearGranularity.value === 'month' ? '按月' : '按季度'}` : ''
+    const filename = `${periodLabel.value}_${dimensionLabel.value}${granularity}_${name}_${unit.value}`
+    
+    if (!instance?.exportImage(filename)) ElMessage.warning('暂无可导出的图表')
+  } catch (e) {
+    console.error('导出图表失败', e)
+    ElMessage.error('图片导出失败，请重试')
   }
-  if (queryMode.value === 'quarter') return `${selectedYear.value}年第${selectedQuarter.value}季度`
-  if (queryMode.value === 'year') return `${selectedYear.value}年`
-  return ''
-})
-
-// 周期选择器只服务于「项目汇总」：完成情况用的是它自己的月份选择器
-const showPeriodFilter = computed(() => activeTab.value === 'summary')
-
-// 两个看板的权限口径一致，额外给一个总开关用于整页提示
-const canViewSituation = computed(() => ['LEADER', 'ADMIN'].includes(String(currentUser.value?.role || '').toUpperCase()))
-const canViewSummary = computed(() => ['LEADER', 'ADMIN'].includes(String(currentUser.value?.role || '').toUpperCase()))
-const canViewBoard = computed(() => canViewSituation.value || canViewSummary.value)
-
-const onPeriodChange = () => {
-  if (activeTab.value === 'summary') handleFilterChange()
+}
+const user = useUserStore()
+const allowed = computed(() => user.isAdmin || user.isLEADER)
+const today = new Date()
+const period = ref('month'), dimension = ref('department'), metric = ref('count'), yearGranularity = ref('month') //周期/维度/分值还是数量
+const year = ref(today.getFullYear()), month = ref(today.getMonth() + 1)
+const quarter = computed(() => Math.ceil(month.value / 3))
+const draftYear = ref(year.value), pickerOpen = ref(false)
+const yearList = ref(null)
+const pickerYears = Array.from({ length: 101 }, (_, i) => 2100 - i) //生成年份列表
+function openPeriodPicker() {
+  draftYear.value = year.value
+  pickerOpen.value = true
+}
+function scrollToSelectedYear() {
+  // 每次打开都定位到已选年份，仅滚动列表本身，不移动背景页面。
+  const list = yearList.value
+  const selected = list?.querySelector(`[data-year="${draftYear.value}"]`)
+  if (selected) list.scrollTop = selected.offsetTop - list.clientHeight / 2 + selected.offsetHeight / 2
+}
+function selectPickerYear(year) {
+  //点击年份
+  draftYear.value = year
+  if (period.value === 'year') {
+    choosePeriod(1)
+  }
+}
+function changePeriod(newPeriod) {
+  if (newPeriod === period.value) return
+  period.value = newPeriod
+  if (newPeriod === 'month' && dimension.value === 'time') dimension.value = 'department'
+  pickerOpen.value = false
 }
 
-// ====================== 项目汇总（项目 / 工作包 → 分值进度） ======================
-const summaryItems = ref([])                 // 当前视图的行数据（项目 或 工作包）
-const summaryTotals = ref({})
-const summaryViewType = ref('project')       // project | work_package
-const summaryPage = ref(1)
-const summaryPageSize = ref(20)
-const pagedSummaryItems = computed(() => {
-  const start = (summaryPage.value - 1) * summaryPageSize.value
-  return summaryItems.value.slice(start, start + summaryPageSize.value)
+const periods = [
+  { value: 'month', label: '月' }, 
+  { value: 'quarter', label: '季' }, 
+  { value: 'year', label: '年' }
+]
+const dimensions = [
+  { value: 'department', label: '科室' }, 
+  { value: 'person', label: '人员' }, 
+  { value: 'project', label: '项目' },
+  { value: 'time', label: '时间' }, 
+]
+const availableDimensions = computed(() => {
+  if (period.value === 'month') return dimensions.filter(d => d.value !== 'time')
+  return dimensions
 })
+const reportModes = [{ value: 'total', label: '总计' }, { value: 'completed', label: '已完成' }, { value: 'pending', label: '未完成' }]
+const dimensionLabel = computed(() => dimensions.find(d => d.value === dimension.value).label)
+const unit = computed(() => metric.value === 'count' ? '项' : '分')
+const periodLabel = computed(() => period.value === 'year' ? `${year.value}年` : period.value === 'quarter' ? `${year.value}年第${quarter.value}季度` : `${year.value}-${String(month.value).padStart(2, '0')}`)
+const atStart = computed(() => year.value === 2000 && (period.value === 'year' || (period.value === 'quarter' ? quarter.value === 1 : month.value === 1)))
+const atEnd = computed(() => year.value === 2100 && (period.value === 'year' || (period.value === 'quarter' ? quarter.value === 4 : month.value === 12)))
 
-const fetchProjectSummary = async () => {
-  if (!currentUser.value || !canViewSummary.value) return
+function shiftPeriod(direction) {
+  // 上一周期或下一周期
+  const step = period.value === 'year' ? 12 : period.value === 'quarter' ? 3 : 1
+  const next = new Date(year.value, month.value - 1 + direction * step, 1)
+  if (next.getFullYear() < 2000 || next.getFullYear() > 2100) return
+  year.value = next.getFullYear(); month.value = next.getMonth() + 1
+}
+
+watch(pickerOpen, value => { if (value) draftYear.value = year.value })
+
+function choosePeriod(n) {
+  //选择月份或季度
+  if (!Number.isInteger(draftYear.value) || draftYear.value < 2000 || draftYear.value > 2100) return
+  year.value = draftYear.value
+  if (period.value !== 'year') month.value = period.value === 'quarter' ? (n - 1) * 3 + 1 : n
+  pickerOpen.value = false
+}
+const raw = ref([]), loading = ref(false), error = ref('')
+let requestId = 0
+
+async function fetchData() {
+  //向后端查询，加载数据
+  const request = ++requestId
+  raw.value = []; error.value = ''; page.value = 1
+  if (!allowed.value) { loading.value = false; return }
   loading.value = true
   try {
-    const params = {
-      currentUserId: currentUser.value.id,
-      target_type: summaryViewType.value,
-      period: queryMode.value,
-      year: selectedYear.value
+    const { data } = await getDashboardOverviewApi(
+      { period: period.value, 
+        year: year.value, 
+        month: month.value, 
+        quarter: quarter.value, 
+        dimension: dimension.value,
+        year_granularity: period.value === 'year' && dimension.value === 'time' ? yearGranularity.value : undefined
+      }
+    )
+    if (request === requestId) raw.value = data.data.items
+  } catch (e) {
+    if (request === requestId){ 
+      error.value = typeof e.response?.data?.detail === 'string' ? e.response.data.detail : '加载失败，请确认后端已更新并重启后重试'
     }
-    if (queryMode.value === 'month' && selectedMonth.value) {
-      params.month = Number(String(selectedMonth.value).split('-')[1])
-    }
-    if (queryMode.value === 'quarter') {
-      params.quarter = selectedQuarter.value
-    }
-    const res = await getProjectSummaryApi(params)
-    if (res?.data?.code === 200) {
-      const data = res.data.data || {}
-      summaryTotals.value = data.totals || {}
-      summaryItems.value = data.items || []
-    }
-  } catch (err) {
-    console.error('获取项目汇总失败:', err)
-    ElMessage.error(err.response?.data?.detail || '获取项目汇总失败')
-  } finally {
-    loading.value = false
-  }
+  } finally { if (request === requestId) loading.value = false }
 }
 
-const handleFilterChange = () => {
-  summaryPage.value = 1        // ← 关键：重置到第 1 页
-  fetchProjectSummary()
-}
-
-// 项目汇总表格底部合计（个数 / 总分值 / 已填 / 未填）
-const summaryTableSummary = ({ columns }) => {
-  const sums = []
-  columns.forEach((col, idx) => {
-    if (idx === 0) { sums[idx] = '合计'; return }
-    const key = col.property
-    if (['child_count', 'work_item_count', 'total_score', 'filled_score', 'unfilled_score'].includes(key)) {
-      const totalKey = col.property === 'child_count'
-        ? (summaryViewType.value === 'project' ? 'work_package_count' : 'work_item_count')
-        : col.property
-      const val = summaryTotals.value?.[totalKey]
-      sums[idx] = val == null ? '' : parseFloat(Number(val).toFixed(2))
-    } else sums[idx] = ''
-  })
-  return sums
-}
-
-// ====================== 完成情况（项目/类别 → 人员分值进度） ======================
-const viewType = ref('project')        // project | category
-const situationTarget = ref('')        // 当前选中的 项目id 或 类别名
-const situationMonth = ref('')         // 空 = 累计全部月份
-const situationOptions = ref([])       // 项目或类别下拉选项
-const situationPeople = ref([])        // 接口返回的人员行
-
-const loadSituationOptions = async () => {
-  try {
-    if (viewType.value === 'project') {
-      const res = await getAllProjectsApi()
-      const list = res.data?.data || []
-      situationOptions.value = list.map(p => ({ label: `${p.name}（${p.code || p.id}）`, value: String(p.id) }))
-    } else {
-      const res = await getWorkCategoriesApi()
-      situationOptions.value = (res.data?.data || []).map(c => ({ label: c, value: c }))
+const rows = computed(() => raw.value.map(
+  //两种数据（分值/数量）统一格式
+  r => (
+    { id: r.id,
+      name: r.name, 
+      total: r[metric.value], 
+      completed: r[`completed_${metric.value}`], 
+      pending: r[`pending_${metric.value}`] 
     }
-    situationTarget.value = situationOptions.value[0]?.value || ''
-    situationPeople.value = []
-    if (situationTarget.value) fetchSituation()
-  } catch (err) {
-    console.error(err)
-    ElMessage.error('获取项目/类别列表失败')
-  }
-}
+  )
+).sort((a,b) => b.total - a.total))
 
-const onViewChange = () => {
-  situationTarget.value = ''
-  situationPeople.value = []
-  loadSituationOptions()
-}
-
-const fetchSituation = async () => {
-  if (!currentUser.value || !canViewSituation.value) return
-  if (!situationTarget.value) return
-  loading.value = true
-  try {
-    const params = {
-      target_type: viewType.value,
-      currentUserId: currentUser.value.id,
-      month: situationMonth.value || undefined
+const totals = computed(
+  //总量和数据格式
+  () => rows.value.reduce(
+    (sum, r) => (
+      { total: sum.total + r.total, 
+        completed: sum.completed + r.completed, 
+        pending: sum.pending + r.pending 
+      }
+    ), 
+    { total: 0, 
+      completed: 0, 
+      pending: 0 
     }
-    if (viewType.value === 'project') params.target_id = Number(situationTarget.value)
-    else params.category_name = situationTarget.value
-    const res = await getCompletedSituationApi(params)
-    if (res?.data?.code === 200) {
-      situationPeople.value = res.data.data.people || []
-    }
-  } catch (err) {
-    console.error(err)
-    ElMessage.error(err.response?.data?.detail || '获取完成情况失败')
-  } finally {
-    loading.value = false
-  }
-}
+  )
+)
 
-// 表格底部合计（总分值 / 已填 / 未填）
-const situationSummary = ({ columns, data }) => {
-  const sums = []
-  columns.forEach((col, idx) => {
-    if (idx === 0) { sums[idx] = '合计'; return }
-    const key = col.property
-    if (['total_score', 'filled_score', 'unfilled_score'].includes(key)) {
-      sums[idx] = parseFloat(data.reduce((s, r) => s + (Number(r[key]) || 0), 0).toFixed(2))
-    } else sums[idx] = ''
-  })
-  return sums
-}
+const format = value => Number(value).toLocaleString('zh-CN', { maximumFractionDigits: metric.value === 'score' ? 2 : 0 }) //格式化函数
+const chartType = ref('bar'), expanded = ref(false), reportMode = ref('total') //图标类型
+const reportLabel = computed(() => reportModes.find(r => r.value === reportMode.value).label)
+const reportTotal = computed(() => totals.value[reportMode.value])
+const ranking = computed(() => [...rows.value].sort((a,b) => b[reportMode.value] - a[reportMode.value]))
+const colors = ['#ffad3b', '#ff7046', '#26bf8c', '#8ed163', '#4389f9', '#16b4d9', '#9377dc']
+const colorOf = id => colors[raw.value.findIndex(r => r.id === id) % colors.length]
+// 图例、总览和明细共用 rows，数量／分值切换不重复请求且口径保持一致。
+const barOption = computed(() => ({
+  //描述图标内容和样式
+  color: ['#4389f9', '#26bf8c', '#f16d73'], 
+  tooltip: { trigger: 'axis', renderMode: 'richText' }, //鼠标悬停时的提示
+  legend: { top: 6, icon: 'circle' }, //总计、已完成、未完成图例
+  grid: { left: 55, right: 24, top: 65, bottom: rows.value.length > 8 ? 85 : 60 }, //坐标绘图区的边距
+  xAxis: { 
+    type: 'category', 
+    data: rows.value.map(r => r.name), 
+    axisTick: { show: false }, 
+    axisLabel: { width: 85, overflow: 'truncate' }, 
+    axisLine: { lineStyle: { color: '#b7bdc5' } } 
+  }, //横轴名称
+  yAxis: { 
+    type: 'value', 
+    name: `工作量（${unit.value}）`, 
+    minInterval: metric.value === 'count' ? 1 : undefined, 
+    splitLine: { lineStyle: { color: '#f0f1f4' } } 
+  }, //纵轴刻度和单位
+  dataZoom: rows.value.length > 8 ? [{ type: 'slider', startValue: 0, endValue: 7, bottom: 8 }] : [], //数据较多时的滚动选择条
+  series: reportModes.map(
+    r => (
+      { name: r.label, 
+        type: chartType.value, 
+        data: rows.value.map(row => row[r.value]), 
+        barMaxWidth: 24, 
+        itemStyle: { borderRadius: chartType.value === 'bar' ? [4,4,0,0] : 0 }, 
+        smooth: false }
+      )
+    ) //真正要绘制的数据系列
+}))
 
-// 切标签页时按需加载
-watch(activeTab, (tab) => {
-  if (tab === 'summary' && canViewSummary.value) {
-    fetchProjectSummary()
-  }
-  if (tab === 'situation' && canViewSituation.value && !situationOptions.value.length) {
-    loadSituationOptions()
-  }
-})
+const pieOption = computed(() => ({
+  tooltip: { trigger: 'item', renderMode: 'richText' },
+  title: { text: `${reportLabel.value}占比`, left: 'center', top: '47%', textStyle: { fontSize: 15, fontWeight: 500 } },
+  series: [{ type: 'pie', radius: ['43%', '65%'], center: ['50%', '50%'], minShowLabelAngle: 8,
+    label: { formatter: '{b}\n{d}%', overflow: 'truncate', width: 80, fontSize: 11 },
+    data: ranking.value.filter(r => r[reportMode.value] > 0).map(r => ({ name: r.name, value: r[reportMode.value], itemStyle: { color: colorOf(r.id) } })) }]
+}))
+const search = ref(''), page = ref(1)
+const filteredRows = computed(
+  //搜索结果
+  () => rows.value.filter(r => r.name.toLowerCase().includes(search.value.trim().toLowerCase()))
+)
+const pagedRows = computed(() => filteredRows.value.slice((page.value - 1) * 20, page.value * 20)) //分页
+watch(search, () => { page.value = 1 })
 
-onMounted(() => {
-  if (!canViewBoard.value) return
-  if (activeTab.value === 'situation') loadSituationOptions()
-  else if (activeTab.value === 'summary') fetchProjectSummary()
-})
+watch([period, year, month, dimension, allowed, yearGranularity], fetchData, { immediate: true })
+
+onBeforeUnmount(() => { requestId++ })
 </script>
 
 <style scoped>
-.data-board-page {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding: 20px;
-  animation: fadeIn 0.4s ease;
-}
+.dashboard-page { flex: 1; min-height: 0; overflow: auto; background: #f5f6f8; color: #20242a; padding: 24px; }
+.board-toolbar { background: #fff; border-radius: 16px; padding: 22px 26px 14px; }
+.board-title { display: flex; align-items: baseline; gap: 16px; margin-bottom: 20px; }
+h1 { margin: 0; font-size: 23px; } .board-title span { font-size: 13px; color: #90969e; }
+.toolbar-groups { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.segments { display: inline-flex; padding: 5px; background: #f1f2f4; border-radius: 12px; gap: 4px; }
+.segments button, .period-grid button { border: 0; border-radius: 9px; background: transparent; padding: 9px 23px; cursor: pointer; font-size: 14px; color: #8b929c; }
+.segments button.selected { color: #20242a; background: #fff; box-shadow: 0 2px 6px #00000008; }
+button:focus-visible { outline: 2px solid #409eff; outline-offset: 2px; }
+.period-navigation { display: flex; justify-content: center; align-items: center; gap: 12px; padding-top: 14px; }
+.period-label { background: transparent; border: 0; color: #20242a; font-size: 20px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 10px; }
+.scroll-period-picker { display: grid; grid-template-columns: 38% 62%; height: min(360px, 60vh); background: #fff; }
+.year-list { position: relative; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; scrollbar-width: thin; padding: 8px 12px; border-right: 1px solid #f0f1f3; }
+.year-list button { display: block; width: 100%; border: 0; background: transparent; border-radius: 28px; padding: 11px 0; margin: 7px 0; font-size: 19px; color: #20242a; cursor: pointer; }
+.year-list button.selected { background: #409eff; color: #fff; }
+.period-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: minmax(52px, 1fr); overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; padding: 8px 10px; }
+.period-grid button { padding: 10px 4px; color: #20242a; font-size: 19px; }
+.period-grid button.selected { color: #409eff; background: transparent; }
+.year-only { grid-template-columns: 1fr; }
+.year-only .year-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-content: start; border: 0; gap: 4px 10px; }
+.segments button:focus-visible, .period-label:focus-visible, .period-grid button:focus-visible, .year-list button:focus-visible { outline: 2px solid #409eff; outline-offset: -2px; }
 
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.box-card {
-  border-radius: 12px;
-  border: none;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
-  min-height: calc(100vh - 120px);
-}
-
-.custom-tabs :deep(.el-tabs__item) {
-  font-size: 16px;
-  padding: 0 24px;
-  height: 48px;
-  line-height: 48px;
-  font-weight: 600;
-}
-
-.custom-tabs :deep(.el-tabs__nav-wrap::after) {
-  height: 1px;
-  background-color: #e2e8f0;
-}
-
-.tab-content {
-  padding: 16px 4px;
-  animation: fadeIn 0.3s ease;
-}
-
-/* 表格固定高度内部滚动，不受全局 flex:1 拉伸影响 */
-:deep(.el-table) { flex: none !important; }
-
-/* 全局查询区样式 */
-.global-filter {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  padding: 12px 4px 8px;
-}
-
-.view-controls {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  padding: 0 4px 8px;
-}
-
-.filter-label {
-  font-size: 14px;
-  color: #475569;
-  font-weight: 500;
-  margin-right: 12px;
-}
-
-.period-label {
-  color: #475569;
-  font-weight: 600;
-  margin-left: 8px;
-}
-
-.pagination-bar {
-  display: flex;
-  justify-content: flex-end;
-  padding: 12px 4px 0;
-}
-
-.employee-text {
-  color: #1e293b;
-  font-weight: 500;
-}
-
-/* 文字与数字样式 */
-.score-text {
-  color: #10b981;
-  font-weight: 700;
-  font-size: 15px;
-}
-
-.penalty-text {
-  color: #ef4444;
-  font-weight: 600;
-}
-
-.muted-text {
-  color: #94a3b8;
-}
+.calculation-note { margin: 14px 4px; color: #8b929c; font-size: 12px; line-height: 1.8; }
+.board-content { display: flex; flex-direction: column; gap: 22px; }
+.board-card { background: #fff; border-radius: 16px; padding: 24px; min-width: 0; }
+h2 { font-size: 18px; margin: 0; font-weight: 600; }
+.report-card > h2 { text-align: center; }
+.green { color: #26b886; } .coral { color: #ed6d75; }
+.chart-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 22px; align-items: start; }
+.card-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+.chart-tools { display: flex; flex-wrap: wrap; justify-content: flex-end; } .chart-tools .el-button { margin: 0; color: #9299a2; }
+.report-switch { display: flex; width: fit-content; margin: 0 auto 24px; }
+.report-switch button { padding: 8px 12px; }
+.report-pagination { justify-content: flex-end; margin-top: 20px; overflow-x: auto; }
+.overview-unit { margin-left: 12px; font-size: 12px; font-weight: 400; color: #9399a2; }
+.overview-report :deep(.el-table th.el-table__cell) { background: #fff; color: #303133; padding: 16px 0 !important; }
+.overview-report :deep(.el-table td.el-table__cell) { padding: 14px 0 !important; }
+@media (max-width: 1150px) { .chart-grid { grid-template-columns: 1fr; } }
+@media (max-width: 650px) { .dashboard-page { padding: 12px; } .board-toolbar, .board-card { padding: 18px 12px; } .segments button { padding: 8px 13px; } .board-title { flex-wrap: wrap; gap: 8px; } .card-heading { flex-wrap: wrap; } }
 </style>

@@ -8,7 +8,7 @@
             <span class="page-title">项目详情</span>
           </div>
           <div class="header-actions">
-            <el-button v-if="canManage" type="success" plain :disabled="projectInfo?.closed_status" @click="handleAddWorkPackage">新增工作包</el-button>
+            <el-button v-if="canRequestPackageChange" type="success" plain :disabled="projectInfo?.closed_status" @click="handleAddWorkPackage">申请新增工作包</el-button>
             <el-button type="primary" @click="refreshAll"><i class="el-icon-refresh"></i> 刷新</el-button>
           </div>
         </div>
@@ -145,11 +145,11 @@
         <el-table-column v-if="canManage" label="操作" min-width="140" align="center" fixed="right">
           <template #default="{ row: pkg, $index }">
             <template v-if="pkg.isEdit">
-              <el-button type="success" link size="small" :loading="saving" @click="handleSaveWorkPackage(pkg)">保存</el-button>
+              <el-button type="success" link size="small" :loading="saving" @click="handleSaveWorkPackage(pkg)">提交申请</el-button>
               <el-button type="info" link size="small" @click="cancelWpEdit(pkg, $index)">取消</el-button>
             </template>
             <template v-else>
-              <el-button v-if="!pkg.closed_status && !projectInfo?.closed_status" type="primary" link size="small" @click="pkg.isEdit = true">编辑</el-button>
+              <el-button v-if="canRequestPackageChange && !pkg.closed_status && !projectInfo?.closed_status" type="primary" link size="small" @click="pkg.isEdit = true">申请修改</el-button>
             </template>
             <el-dropdown trigger="click" @command="(command) => handleMoreCommand(command, pkg)">
               <el-button type="info" link size="small">更多
@@ -158,8 +158,8 @@
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item
-                    v-if="!pkg.closed_status && !projectInfo?.closed_status" command="delete" divided >
-                    <span class="danger-menu-item">删除</span>
+                    v-if="canRequestPackageChange && !pkg.closed_status && !projectInfo?.closed_status" command="delete" divided >
+                    <span class="danger-menu-item">申请删除</span>
                   </el-dropdown-item>
 
                   <!-- 完成/取消完成：按手动原始状态 -->
@@ -247,6 +247,7 @@ const isDepartment = computed(() => userStore.isDEPARTMENT)
 const currentUserId = computed(() => String(userStore.userInfo?.id || ''))
 
 // 管理权限：管理员 / 领导 / 科室主任 / 项目负责人
+const canRequestPackageChange = computed(() => isAdmin.value || isDepartment.value)
 const canManage = computed(() => {
   if (isAdmin.value || isLeader.value || isDepartment.value) return true
   return String(projectInfo.value?.owner_id || '') === currentUserId.value
@@ -434,34 +435,37 @@ const fetchWorkPackages = async (p = 1) => {
   }
 }
 
-//删除工作包
+// 三类申请统一收集原因；取消弹窗不会提交，纯空白不允许通过。
+const askPackageReason = (title, message = '请填写本次工作包变更的申请原因') =>
+  ElMessageBox.prompt(message, title, {
+    inputType: 'textarea',
+    inputPlaceholder: '请输入原因（最多2000字）',
+    confirmButtonText: '提交申请',
+    cancelButtonText: '取消',
+    inputValidator: value => {
+      const reason = (value || '').trim()
+      return reason.length > 0 && reason.length <= 2000 || '原因不能为空且不能超过2000字'
+    },
+  })
+
+// 删除只提交申请，原因与申请一同保存，领导审核后才生效。
 const removeWorkPackage = async (row) => {
+  if (saving.value) return
+  saving.value = true
   try {
-    //弹出确认框
-    await ElMessageBox.confirm(
-      '确定要删除该工作包吗？此操作会一并删除改工作包下所有工作项以及拆包请求，且无法撤销。',
-      '确认删除',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning',
-      }
-    )
-    // 用户点击确定后，执行原有的删除逻辑
-    const res = await deleteWorkPackageApi(row.id, currentUserId.value)
-    
+    const { value } = await askPackageReason('申请删除工作包', '请填写删除原因。领导通过后才会删除；有工作项或历史记录时请使用关闭功能。')
+    const res = await deleteWorkPackageApi(row.id, value.trim())
     if (res.data?.code === 200) {
-      ElMessage.success('工作包已删除')
+      ElMessage.success('删除申请已提交，等待领导审核')
       await fetchWorkPackages(page.value)
-      await fetchProjectInfo()
+      await userStore.refreshPendingCount()
     }
   } catch (err) {
-    //  区分是用户取消了弹窗，还是接口报错
-    if (err === 'cancel') {
-      ElMessage.info('已取消删除')
-    } else {
-      ElMessage.error(err.response?.data?.detail || '删除失败')
+    if (err !== 'cancel' && err !== 'close') {
+      ElMessage.error(err.response?.data?.detail || '删除申请提交失败')
     }
+  } finally {
+    saving.value = false
   }
 }
 
@@ -483,13 +487,16 @@ const handleAddWorkPackage = () => {
 }
 
 const handleSaveWorkPackage = async (pkg) => {
+  if (saving.value) return
   if (!(pkg.code || '').trim()) {
     ElMessage.error('保存失败，工作包编号不能为空')
     return          // 直接不发请求
   }
   saving.value = true
   try {
+    const { value } = await askPackageReason(pkg.isNew ? '申请新增工作包' : '申请修改工作包')
     const res = await createWorkPackageApi({
+      reason: value.trim(),
       id: pkg.id,
       work_package_code: pkg.code,
       project_id: projectId,
@@ -501,14 +508,15 @@ const handleSaveWorkPackage = async (pkg) => {
       name: pkg.name ? pkg.name.trim() : ''
     })
     if (res.data?.code === 200) {
-      ElMessage.success('工作包保存成功')
+      ElMessage.success('申请已提交，等待领导审核')
       pkg.isEdit = false
       pkg.isNew = false
       await fetchWorkPackages(page.value)
       await fetchProjectInfo()
+      await userStore.refreshPendingCount()
     }
   } catch (err) {
-    ElMessage.error(err.response?.data?.detail || '工作包保存失败')
+    if (err !== 'cancel' && err !== 'close') ElMessage.error(err.response?.data?.detail || '工作包申请提交失败')
   } finally {
     saving.value = false
   }

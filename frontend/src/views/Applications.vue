@@ -11,14 +11,13 @@
         <p>工作项计时、工时记录及相关工作管理功能</p>
         <router-link to="/work" class="application-link">进入应用 →</router-link>
       </el-card>
-      <el-card shadow="never" class="application-card">
+      <el-card shadow="hover" class="application-card">
         <div class="application-heading">
           <div class="application-icon ledger-icon" aria-hidden="true"><el-icon><Document /></el-icon></div>
           <h2>台账系统</h2>
-          <el-tag type="info" size="small">建设中</el-tag>
         </div>
         <p>台账信息查询与管理</p>
-        <!-- 先进入独立的台账布局，业务功能将在该模块下继续开发。 -->
+        <!-- 进入台账入口页，由该页携带登录令牌跳转到独立的台账管理系统。 -->
         <router-link to="/ledger" class="application-link">进入应用 →</router-link>
       </el-card>
     </div>

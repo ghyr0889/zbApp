@@ -55,8 +55,13 @@ class ProjectCreate(BaseModel):
     level: Optional[str] = Field("C", description="项目级别：A/B/C/D（可扩展）")
 
 
+class WorkPackageDeleteRequest(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=2000, description="删除工作包的申请原因")
+
+
 class WorkPackageCreate(BaseModel):
     """创建/更新工作包。 """
+    reason: str = Field(..., min_length=1, max_length=2000, description="工作包变更申请原因")
     id: Optional[int] = None
     work_package_code: str = Field(None, description="工作包code")
     project_id: Optional[int] = Field(None, description="所属项目 ID")

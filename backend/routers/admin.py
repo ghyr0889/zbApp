@@ -4,8 +4,10 @@ from sqlalchemy.orm import Session, selectinload
 import traceback
 
 import models
+from dependencies import get_current_user
+from services import work_package_change_service as package_changes
 from database import get_db
-from schemas import UserCreate, ProjectCreate, WorkPackageCreate, ScoreRuleUpdate, LevelDefsUpdate, UserUpdate
+from schemas import WorkPackageDeleteRequest, UserCreate, ProjectCreate, WorkPackageCreate, ScoreRuleUpdate, LevelDefsUpdate, UserUpdate
 from datetime import datetime
 from utils import (ensure_open, effective_complete,
                    package_effective_complete, project_effective_complete)
@@ -219,98 +221,18 @@ def get_work_categories(db: Session = Depends(get_db)):
     return {"code": 200, "data": [c[0] for c in cats]}
 
 
+# 保留原请求地址，但改为提交申请，不能再直接修改正式工作包。
 @router.post("/work-packages")
-def create_or_update_work_package(pkg_in: WorkPackageCreate, db: Session = Depends(get_db)):
-    valid_cats = {c[0] for c in db.query(models.WorkPackageCategory.name).all()}
-    if not valid_cats or pkg_in.category_name not in valid_cats:
-        raise HTTPException(status_code=400, detail="工作类型只能从已有类别中选择")
-
-    work_package_code = (pkg_in.work_package_code or "").strip()
-    if not work_package_code:
-        raise HTTPException(status_code=400, detail="工作包编号不能为空")
-
-    # 确定所属项目：优先用 project_id，其次按 project_name 反查
-    project = None
-    if pkg_in.project_id:
-        project = db.query(models.Project).filter(
-            models.Project.id == pkg_in.project_id
-        ).first()
-    if not project and pkg_in.project_name:
-        project = db.query(models.Project).filter(
-            models.Project.name == pkg_in.project_name.strip()
-        ).first()
-    if not project:
-        raise HTTPException(status_code=400, detail="所属项目不存在，请先选择正确的项目")
-    ensure_open(project)  # 已关闭的项目不能再新增/修改工作包
-
-    try:
-        if pkg_in.id:
-            pkg = db.query(models.WorkPackage).filter(
-                models.WorkPackage.id == pkg_in.id
-            ).first()
-            if not pkg:
-                raise HTTPException(status_code=404, detail="未找到要修改的工作包")
-            ensure_open(pkg)  # 已关闭的工作包不能再编辑
-
-            pkg.project_id = project.id
-            pkg.code = pkg_in.work_package_code
-            pkg.category_name = pkg_in.category_name
-            new_owner = pkg_in.owner_id
-            pkg.owner_id = new_owner or None
-            new_tech_owner = pkg_in.tech_owner_id
-            pkg.tech_owner_id = new_tech_owner or None
-            pkg.objective = (pkg_in.objective or "").strip()
-            pkg.name = (pkg_in.name or "-").strip()
-            message = "工作包更新成功"
-        else:
-            pkg = models.WorkPackage(
-                code=work_package_code,
-                project_id=project.id,
-                category_name=pkg_in.category_name,
-                owner_id=pkg_in.owner_id or None,
-                tech_owner_id=pkg_in.tech_owner_id or None,
-                objective=pkg_in.objective or "",
-                name=pkg_in.name or "-"
-            )
-            db.add(pkg)
-            message = "工作包创建成功"
-
-        db.flush()  # 先落库拿到 pkg.id，供关系使用
-        # 把前端传的 分值/节点 保存到默认工作项
-        db.commit()
-        db.refresh(pkg)
-        return {"code": 200, "message": message, "data": {"id": pkg.id}}
-    except HTTPException:
-        db.rollback()
-        raise
-    except Exception as e:
-        db.rollback()
-        print("❌ 保存工作包报错详情:")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"保存工作包失败: {str(e)}")
+def create_or_update_work_package(pkg_in: WorkPackageCreate, db: Session = Depends(get_db),
+                                  user=Depends(get_current_user)):
+    return package_changes.submit(db, user, body=pkg_in)
 
 
 @router.delete("/work-packages/{work_package_id}")
-def delete_work_package(work_package_id: int, user_id: str, db: Session = Depends(get_db)):
-    """删除工作包"""
-    work_package = db.query(models.WorkPackage).options(
-        selectinload(models.WorkPackage.work_items).selectinload(models.WorkItem.monthly_scores),
-    ).filter(models.WorkPackage.id == work_package_id).first()
-    user = db.query(models.User).filter(models.User.id == user_id).first()
-    if not work_package:
-        raise HTTPException(status_code=404, detail="工作包不存在")
-    if not user:
-        raise HTTPException(status_code=404, detail=f"查不到对应的用户 (接收到的 user_id: {user_id})")
-    if user.role not in ["LEADER", "DEPARTMENT", "ADMIN"] and (not work_package or work_package.owner_id != user.id):
-        raise HTTPException(status_code=405, detail="只有改工作包负责人和部门领导、科室主任、管理员可以删除项目")
-    if package_effective_complete(work_package):
-        raise HTTPException(status_code=400, detail="工作包已完成，不能删除")
-    if work_package.isclosed or (work_package.project and work_package.project.isclosed):
-        raise HTTPException(status_code=403, detail="工作包或所属项目已关闭，不能删除")
+def delete_work_package(work_package_id: int, body: WorkPackageDeleteRequest, db: Session = Depends(get_db),
+                        user=Depends(get_current_user)):
+    return package_changes.submit(db, user, package_id=work_package_id, reason=body.reason)
 
-    db.delete(work_package)
-    db.commit()
-    return {"code": 200, "message": "工作包删除成功"}
 
 # ---------------------------------------------------------------- 计算得分：评分维度与档位
 @router.get("/computed-score-dimensions")

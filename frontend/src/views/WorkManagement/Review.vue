@@ -1,4 +1,4 @@
-﻿<!-- xiangmu/frontend/src/views/Review.vue -->
+﻿<!-- 审批查阅-->
 <template>
   <div class="review-page">
     <el-card class="box-card" shadow="never">
@@ -48,13 +48,14 @@
         </el-alert>
       </template>
 
-      <!-- 标签页：审批查阅 / 工作包转办 -->
+      
       <el-tabs v-model="activeTab" class="custom-tabs">
-      <el-tab-pane label="审批查阅" name="review">
+        <!-- 标签页：工作项变更 -->
+        <el-tab-pane label="工作项变更" name="review">
          <template #label>
             <!-- 读拆分申请的待办数 -->
             <el-badge :value="myPendingCount" :hidden="!myPendingCount" :max="99">
-              <span>审批查阅</span>
+              <span>工作项变更</span>
             </el-badge>
           </template>
         <div class="table-container">
@@ -69,10 +70,8 @@
             height="calc(100vh - 300px)"
             empty-text="当前没有需要处理的申请"
             :header-cell-style="{ background: '#f8fafc', color: '#1e293b', fontWeight: '600', height: '48px' }"
-            :row-style="{ height: '56px' }"
-          >
-          
-          <!-- 1. 内层表格：美化展开行 -->
+            :row-style="{ height: '56px' }">
+          <!-- 点击行首箭头展开工作项明细和申请原因。 -->
           <el-table-column type="expand">
             <template #default="{ row }">
               <div class="expand-wrapper">
@@ -82,7 +81,7 @@
                 </div>
                 
                 <el-table 
-                  :data="row.split_items" 
+                  :data="row.split_items"
                   border 
                   size="small" 
                   style="width: 100%; margin-bottom: 20px;"
@@ -205,9 +204,10 @@
                 <!-- 编辑模式下的保存/取消 -->
                 <div v-if="canEditRequest(row) && row.isEditing" class="edit-actions">
                   <el-button type="success" size="small" :loading="savingEdit" @click="handleSaveEdit(row)">保存修改</el-button>
-                  <el-button type="info" size="small" @click="row.isEditing = false">取消</el-button>
+                  <el-button type="info" size="small" :disabled="savingEdit || removingItem" @click="cancelRequestEdit(row)">取消</el-button>
                 </div>
               </div>
+
             </template>
           </el-table-column>
 
@@ -275,8 +275,17 @@
         </el-table>
       </div>
       </el-tab-pane>
-
       
+        <!-- 标签页：工作包变更 -->
+        <el-tab-pane label="工作包变更" name="packageChanges">
+          <template #label>
+            <el-badge :value="userStore.pending.packageChanges" :hidden="!userStore.pending.packageChanges" :max="99">
+              <span>工作包变更</span>
+            </el-badge>
+          </template>
+          <WorkPackageChanges v-if="activeTab === 'packageChanges'" ref="packageChangesRef" />
+        </el-tab-pane>
+        
        <!-- 工作项完成申请 -->
         <el-tab-pane name="complete">
           <template #label>
@@ -377,7 +386,7 @@
     </el-card>
 
     <!-- ============ 驳回原因弹窗 ============ -->
-    <el-dialog v-model="rejectDialogVisible" title="填写驳回原因" width="460px" custom-class="custom-dialog" draggable>
+    <el-dialog v-model="rejectDialogVisible" title="填写驳回原因" width="460px" custom-class="custom-dialog" draggable append-to-body>
       <el-form label-position="top">
         <el-form-item label="请详细说明驳回原因（必填）：" required>
           <el-input 
@@ -400,6 +409,7 @@
 </template>
 
 <script setup>
+import WorkPackageChanges from '../../components/WorkPackageChanges.vue'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute } from 'vue-router'
@@ -422,7 +432,7 @@ const route = useRoute()
 const activeTab = ref('review')
 
 // 待办提醒点一下会跳到 /review?tab=complete 这类地址，这里对应用户要看的页签
-const TAB_NAMES = ['review', 'complete', 'transfers']
+const TAB_NAMES = ['review', 'complete', 'transfers', 'packageChanges']
 const applyTabFromQuery = () => {
   const tab = String(route.query.tab || '')
   if (TAB_NAMES.includes(tab)) activeTab.value = tab
@@ -466,6 +476,14 @@ const statusTagType = (s) => ({ PENDING: 'warning', SUBMITTED: 'primary', APPROV
 
 // ============ 申请内容编辑（按角色×状态可改） ============
 const tableRef = ref(null)
+const cancelRequestEdit = (row) => {
+  if (row._editBackup) {
+    row.reason = row._editBackup.reason
+    row.split_items = JSON.parse(JSON.stringify(row._editBackup.split_items))
+  }
+  row.isEditing = false
+  delete row._editBackup
+}
 const savingEdit = ref(false)
 // 工作项档位选项（编辑时下拉用）
 const levelDefs = ref({ difficulty: [], importance: [], innovation: [] })
@@ -481,12 +499,11 @@ const canEditRequest = (row) => {
   return false
 }
 
-// 进入编辑模式（并展开该行）
+// 进入编辑时自动展开明细，取消时从备份还原。
 const startEdit = (row) => {
+  row._editBackup = JSON.parse(JSON.stringify({ reason: row.reason, split_items: row.split_items }))
   row.isEditing = true
-  nextTick(() => {
-    tableRef.value?.toggleRowExpansion(row, true)
-  })
+  nextTick(() => tableRef.value?.toggleRowExpansion(row, true))
 }
 
 // 保存修改后的申请内容
@@ -852,10 +869,16 @@ const handleRejectTransfer = (row) => {
 }
 
 const handleRefresh = () => {
+  if (activeTab.value === 'packageChanges') {
+    packageChangesRef.value?.refresh()
+    return
+  }
   fetchRequests()
   fetchIncomingTransfers()
   fetchOutgoingTransfers()
 }
+
+const packageChangesRef = ref(null)
 
 onMounted(() => {
   applyTabFromQuery()
