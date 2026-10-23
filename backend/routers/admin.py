@@ -151,12 +151,18 @@ def create_or_update_project(project_in: ProjectCreate, db: Session = Depends(ge
 
     try:
         if project_in.id:
-            project = db.query(models.Project).filter(
+            project = db.query(models.Project).options(
+                selectinload(models.Project.work_packages).selectinload(
+                    models.WorkPackage.work_items
+                )
+            ).filter(
                 models.Project.id == project_in.id
             ).first()
             if not project:
                 raise HTTPException(status_code=404, detail="项目不存在")
             ensure_open(project)  # 已关闭的项目不能再编辑
+            if project_effective_complete(project):
+                raise HTTPException(status_code=403, detail="项目已完成，不能编辑")
             project.name = project_in.name
             project.code = project_in.code
             project.owner_id = project_in.owner_id or None
@@ -180,6 +186,9 @@ def create_or_update_project(project_in: ProjectCreate, db: Session = Depends(ge
                 "message": "项目配置成功", 
                 "data": {"id": project.id, 
                          "name": project.name}}
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
         print("❌ 保存项目报错详情:")

@@ -2,29 +2,17 @@
 <template>
   <div class="admin-panel-page">
     <el-card shadow="never" class="box-card">
-      <template #header>
-        <div class="card-header">
-          <span class="title">后台管理</span>
-          <el-button
-            v-if="activeTab === 'score'"
-            type="primary"
-            size="small"
-            :loading="saving"
-            @click="handleSaveScoreRules"
-          >保存系数配置</el-button>
-          <el-button
+
+      <el-tabs v-model="activeTab">
+        <!-- 人员管理 -->
+        <el-tab-pane label="人员管理" name="users">
+         <el-button
             v-if="activeTab === 'users'"
             type="primary"
             size="small"
             @click="pmRef?.fetchAllData()"
             icon="Refresh"
           >刷新数据</el-button>
-        </div>
-      </template>
-
-      <el-tabs v-model="activeTab">
-        <!-- 人员管理 -->
-        <el-tab-pane label="人员管理" name="users">
           <PersonnelManagement ref="pmRef" />
         </el-tab-pane>
 
@@ -44,7 +32,7 @@
 
             <!-- 顶部筛选操作区 -->
             <div class="filter-container" style="display: flex; gap: 24px; margin: 16px 0; align-items: center;">
-              
+                          
               <!-- 1. 变量下拉框 -->
               <div class="filter-item">
                 <span style="margin-right: 12px; font-weight: 600; color: #334155;">请选择变量:</span>
@@ -78,7 +66,14 @@
                     :value="item.value"
                   />
                 </el-select>
-              </div>
+              </div>            
+              <el-button
+              v-if="activeTab === 'score'"
+              type="primary"
+              size="small"
+              :loading="saving"
+              @click="handleSaveScoreRules"
+            >保存系数配置</el-button>
 
             </div>
 

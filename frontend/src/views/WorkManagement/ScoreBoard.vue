@@ -74,16 +74,22 @@
                   <span class="stat-title">{{ periodLabel }}计算得分：</span>
                   <span class="stat-value" style="color: #475569;">{{ periodCalculatedScore || 0 }}</span>
                 </div>
+                <div class="divider"></div>
+                <div class="stat-item">
+                  <span class="stat-title">{{ periodLabel }}进度扣分：</span>
+                  <span class="stat-value penalty-text">{{ Number(currentPeriodPersonalData?.deducted_score || 0).toFixed(1) }} 分</span>
+                </div>
               </div>
             </div>
 
+            <p class="muted-text">进度扣分随所选周期显示：已入账月份采用确认时保存的结果，未入账月份显示实时预览；季、年可查看周期内各月扣分，正式总分仍以入账结果为准。已完成工作项的扣分计算至完成日期。</p>
             <!-- 个人积分详情：嵌套展开表格 -->
             <el-table
               :data="groupedMyDetails"
               v-loading="loading"
               border
               style="width: 100%"
-              height="calc(100vh - 380px)"
+              height="calc(100vh - 409px)"
               empty-text="当前周期暂无您的积分记录"
               :header-cell-style="{ background: '#f8fafc', color: '#334155' }"
             >
@@ -94,6 +100,7 @@
                     <el-table :data="row.items" border size="small" :header-cell-style="{ background: '#f1f5f9' }">
                       <el-table-column prop="work_item_name" label="工作项名称" />
                       <el-table-column prop="work_item_standard" label="工作项标准" />
+                      <el-table-column prop="deadline" label="截止时间" />
                       <el-table-column prop="difficulty" label="难度" width="80" align="center">
                       <template #default="{ row: item }">
                         <span>{{ item.difficulty || '-' }}</span>
@@ -138,17 +145,26 @@
               </el-table-column>
 
               <!-- 外层表格：显示项目及工作包信息 -->
-              <el-table-column prop="project_name" label="所属项目名称" min-width="150" show-overflow-tooltip />
-              <el-table-column prop="project_code" label="所属项目编号" min-width="150" show-overflow-tooltip />
+              <el-table-column prop="project_name" label="所属项目名称" min-width="150" />
+              <el-table-column prop="project_code" label="所属项目编号" min-width="150" />
               <el-table-column prop="work_package_code" label="所属工作包" width="180" align="center" />
               <el-table-column prop="work_package_category" label="所属工作包类型" width="180" align="center" />
+              <el-table-column prop="deducted_score" label="本周期进度扣分" width="150" align="center">
+                <template #default="{ row }">
+                  <span :class="row.deducted_score > 0 ? 'penalty-text' : 'muted-text'">{{ Number(row.deducted_score || 0).toFixed(1) }} 分</span>
+                </template>
+              </el-table-column>
             </el-table>
           </div>
         </el-tab-pane>
 
         <!-- 页面二：所有人员积分 -->
         <el-tab-pane label="所有人员积分" name="all">
+          <HistoricalScoreEntry v-if="String(currentUser?.role).toUpperCase() === 'ADMIN'" />
+
+          <el-button type="primary" plain @click="openMyConfirmations">积分与自评提醒</el-button>
           <div class="tab-content">
+            <p class="score-formula-tip">月度未入账时显示实时分数，仅供核对；入账后显示冻结结果。季度、年度仅汇总正式入账及历史数据。月度折算分在确认时锁定。</p>
             <p class="score-formula-tip">
               计算总分＝工作项计算得分＋技术提升＋日常管理－进度扣分；
               折算总分＝计算总分÷折算系数，
@@ -164,11 +180,24 @@
               stripe
               border
               style="width: 100%"
-              height="calc(100vh - 330px)"
+              height="calc(100vh - 332px)"
               empty-text="当前月份暂无积分数据"
               :header-cell-style="{ background: '#f8fafc', color: '#334155' }"
             >
               <el-table-column prop="username" label="人员" width="100" align="center" fixed="left" />
+              <el-table-column label="入账状态" width="140">
+                <template #default="{ row }">
+                  <el-button v-if="isOwnScore(row) && row.confirmation_status === 'PENDING'" link type="primary" @click="runScoreAction('confirm')">确认积分</el-button>
+                  <span v-else>{{ ({ IMPORTED: '历史补录已入账', PENDING: '待确认（未入账）', CONFIRMED: '本人已确认', AUTO: '逾期自动入账', PARTIAL: '部分月份未确认', SETTLED: '已入账', HISTORY: '历史积分', UNCONFIRMED: '暂存（未入账）' })[row.confirmation_status] || '历史积分' }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="月度自评" width="160" align="center">
+                <template #default="{ row }">
+                  <el-button v-if="isOwnScore(row) && ['REQUIRED', 'SUBMITTED'].includes(row.self_evaluation?.status)" link type="primary" @click="runScoreAction('evaluate')">{{ row.self_evaluation.status === 'SUBMITTED' ? '查看／修改自评' : '填写自评' }}</el-button>
+                  <el-button v-else-if="row.self_evaluation?.status === 'SUBMITTED'" link type="primary" @click="evaluationDetail = row; evaluationVisible = true">查看自评</el-button>
+                  <span v-else>{{ ({ REQUIRED: '待填写', WAITING: '待全员入账', NOT_REQUIRED: '无需填写' })[row.self_evaluation?.status] || '—' }}</span>
+                </template>
+              </el-table-column>
               <!-- 工作项基础分 -->
               <el-table-column label="工作项" align="center">
                 <el-table-column prop="month_score" label="基础得分" min-width="80" align="center" />
@@ -177,43 +206,45 @@
               </el-table-column>
               <!-- 额外加分项 -->
               <el-table-column label="技术提升" align="center">
+                <el-table-column prop="tech_improve" label="合计" min-width="80" />
                 <el-table-column prop="patent_score" label="专利" min-width="80" align="center">
                   <template #default="{ row }">
                     <el-input-number v-if="row.isEditing" v-model="row.patent_score" :step="0.5" size="small" style="width: 80px" controls-position="right" />
-                    <span v-else>{{ row.patent_score || 0 }}</span>
+                    <span v-else>{{ row.summary_only ? '—' : (row.patent_score || 0) }}</span>
                   </template>
                 </el-table-column>
                 <el-table-column prop="knowledge_score" label="知识库" min-width="80" align="center" >
                   <template #default="{ row }">
                     <el-input-number v-if="row.isEditing" v-model="row.knowledge_score" :step="0.5" size="small" style="width: 80px" controls-position="right" />
-                    <span v-else>{{ row.knowledge_score || 0 }}</span>
+                    <span v-else>{{ row.summary_only ? '—' : (row.knowledge_score || 0) }}</span>
                   </template>
                 </el-table-column>
                 <el-table-column prop="train_score" label="培训" min-width="80" align="center">
                   <template #default="{ row }">
                     <el-input-number v-if="row.isEditing" v-model="row.train_score" :step="0.5" size="small" style="width: 80px" controls-position="right" />
-                    <span v-else>{{ row.train_score || 0 }}</span>
+                    <span v-else>{{ row.summary_only ? '—' : (row.train_score || 0) }}</span>
                   </template>
                 </el-table-column>
               </el-table-column>
 
               <el-table-column label="日常管理" align="center">
+                <el-table-column prop="daily_manage" label="合计" min-width="80" />
                 <el-table-column prop="deduct_score" label="扣分" min-width="80" align="center">
                   <template #default="{ row }">
                     <el-input-number v-if="row.isEditing" v-model="row.deduct_score" :step="0.5" size="small" style="width: 80px" controls-position="right" />
-                    <span v-else>{{ row.deduct_score || 0 }}</span>
+                    <span v-else>{{ row.summary_only ? '—' : (row.deduct_score || 0) }}</span>
                   </template>
                 </el-table-column>
                 <el-table-column prop="quality_event_score" label="质量事件" min-width="80" align="center">
                   <template #default="{ row }">
                     <el-input-number v-if="row.isEditing" v-model="row.quality_event_score" :step="0.5" size="small" style="width: 80px" controls-position="right" />
-                    <span v-else>{{ row.quality_event_score || 0 }}</span>
+                    <span v-else>{{ row.summary_only ? '—' : (row.quality_event_score || 0) }}</span>
                   </template>
                 </el-table-column>
                 <el-table-column prop="carrier_inspection_score" label="载体检查" min-width="80" align="center">
                   <template #default="{ row }">
                     <el-input-number v-if="row.isEditing" v-model="row.carrier_inspection_score" :step="0.5" size="small" style="width: 80px" controls-position="right" />
-                    <span v-else>{{ row.carrier_inspection_score || 0 }}</span>
+                    <span v-else>{{ row.summary_only ? '—' : (row.carrier_inspection_score || 0) }}</span>
                   </template>
                 </el-table-column>
               </el-table-column>
@@ -234,7 +265,7 @@
               <el-table-column label="操作" width="80" align="center" fixed="right" v-if="isEdit">
                 <template #default="{ row }">
                   <template v-if="!row.isEditing">
-                    <el-button type="primary" link size="small" @click="startEdit(row)">编辑</el-button>
+                    <el-button v-if="!row.month_locked" type="primary" link size="small" @click="startEdit(row)">编辑</el-button><span v-else>已锁定</span>
                   </template>
                   <template v-else>
                     <el-button type="success" link size="small" :loading="savingRow" @click="saveRow(row)">保存</el-button>
@@ -257,6 +288,9 @@
               :header-cell-style="{ background: '#f8fafc', color: '#334155' }"
             >
               <el-table-column prop="username" label="人员" width="100" align="center" fixed="left" />
+              <el-table-column label="入账状态" width="130">
+                <template #default="{ row }">{{ ({ IMPORTED: '历史补录已入账', PENDING: '待确认（未入账）', CONFIRMED: '本人已确认', AUTO: '逾期自动入账', PARTIAL: '部分月份未确认', SETTLED: '已入账', HISTORY: '历史积分', UNCONFIRMED: '暂存（未入账）' })[row.confirmation_status] || '历史积分' }}</template>
+              </el-table-column>
               
               <!-- 动态生成的子周期列：季度显示3个月，年度可根据后端返回显示12个月或4个季度 -->
               <el-table-column prop="period_1" :label="queryMode === 'quarter' ? '该季度第一个月' : '第一季度'" min-width="130" align="center">
@@ -304,22 +338,40 @@
         <!-- 完成情况 / 项目汇总 已迁至「数据看板」页面 -->
       </el-tabs>
     </el-card>
+    <el-dialog v-model="evaluationVisible" title="月度自评" width="min(720px, 94vw)" draggable append-to-body>
+      <template v-if="evaluationDetail">
+        <p>{{ evaluationDetail.username }} · 等级 {{ evaluationDetail.grade }}</p>
+        <p>最近保存：{{ evaluationDetail.self_evaluation.submitted_at?.replace('T', ' ') }}</p>
+        <div style="white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; max-height: 55vh; overflow-y: auto">{{ evaluationDetail.self_evaluation.content }}</div>
+      </template>
+      <template #footer><el-button @click="evaluationVisible = false">关闭</el-button></template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import HistoricalScoreEntry from '../../components/HistoricalScoreEntry.vue'
+import { useRoute } from 'vue-router'
 import { ArrowLeft, ArrowRight, ArrowDown, Refresh, Download } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { getPublicScoreBoardApi, updateMonthlyExtraScoreApi } from '../../api'
+import { getPublicScoreBoardApi, getMyPeriodProgressDeductionsApi, updateMonthlyExtraScoreApi } from '../../api'
 import { useUserStore } from '../../stores/user'
 import { createScoreSnapshot, downloadScoreExcel } from '../../utils/scoreExport'
 
+const route = useRoute()
+const evaluationVisible = ref(false), evaluationDetail = ref(null)
+const openMyConfirmations = () => window.dispatchEvent(new Event('open-score-confirmations'))
 const userStore = useUserStore()
 const currentUser = computed(() => userStore.userInfo)
+const isOwnScore = row => currentUser.value?.id != null && String(row.user_id) === String(currentUser.value.id)
+function runScoreAction(action) {
+  window.dispatchEvent(new CustomEvent('score-row-action', { detail: { action, month: selectedMonth.value } }))
+}
 
 const activeTab = ref('personal')
 const peopleList = ref([])
+const personalProgress = ref(null)
 const loading = ref(false)
 const exporting = ref(false)
 
@@ -434,16 +486,35 @@ const periodCalculatedScore = computed(() => {
 // 提取当前选中周期下登录人的数据总览（用于下方详情展示的基础数据）
 const currentPeriodPersonalData = computed(() => {
   if (!currentUser.value) return null
-  return peopleList.value.find(p => String(p.user_id) === String(currentUser.value.id)) || null
+  const person = peopleList.value.find(p => String(p.user_id) === String(currentUser.value.id))
+  if (!person || !personalProgress.value) return person || null
+
+  const penalties = new Map(personalProgress.value.details.map(detail =>
+    [`${detail.month}:${detail.work_item_id}`, detail]))
+  const matched = new Set()
+  const details = (person.details || []).map(detail => {
+    const key = `${detail.month}:${detail.work_item_id}`
+    const penalty = penalties.get(key)
+    if (penalty) matched.add(key)
+    return { ...detail, deducted_score: penalty?.deducted_score || 0 }
+  })
+  for (const [key, detail] of penalties) {
+    if (!matched.has(key)) details.push(detail)
+  }
+  return { ...person, deducted_score: personalProgress.value.deducted_score, details }
 })
 
 // 计算个人的分组详情数据（外层项目/工作包，内层具体工作项+扣分）
 const groupedMyDetails = computed(() => {
-  if (!currentPeriodPersonalData.value || !currentPeriodPersonalData.value.details) return []
+  const scoreDetails = currentPeriodPersonalData.value?.details || []
+  // 旧版历史季度/年度直接按工作项去重；启用确认后的季度/年度则汇总各月快照。
+  const legacyAggregate = queryMode.value !== 'month' &&
+    currentPeriodPersonalData.value && !('confirmation_status' in currentPeriodPersonalData.value)
+  const legacyDeductedItems = new Set()
   const map = {}
   const itemRows = {}   // work_item_id -> 行对象（跨月合并用）
 
-  currentPeriodPersonalData.value.details.forEach(item => {
+  scoreDetails.forEach((item, index) => {
     const pName = item.project_name || '未归属项目'
     const pCode = item.project_code || '无项目编号'
     const wpId = item.work_package_id || '无编号'
@@ -461,26 +532,31 @@ const groupedMyDetails = computed(() => {
       }
     }
 
-    // 按工作项合并：同一工作项跨月只显示一行；本月得分/计算得分累加；扣除分取该工作项判定（超期1/未超期0）
-    const iid = item.work_item_id
+    // 同一工作项跨月只显示一行；得分与各月已入账进度扣分分别累加。
+    const iid = item.work_item_id ?? `missing-${index}`
     if (!itemRows[iid]) {
       const row = {
         work_item_name: item.work_item_name || item.work_package_name || '未命名工作项',
         work_item_standard: item.work_item_standard || '-',
+        deadline: item.work_item_deadline ? String(item.work_item_deadline).slice(0, 10) : '-',
         score: 0,
         quality_score: item.quality_score || 0,
         difficulty: item.work_item_difficulty || null,
         importance: item.work_item_importance || null,
         innovation: item.work_item_innovation || null,
         calculate_score: 0,
-        deducted_score: item.deducted_score || 0
+        deducted_score: 0
       }
       itemRows[iid] = row
       map[key].items.push(row)
     }
     const row = itemRows[iid]
-    row.score += item.score || 0
-    row.calculate_score += item.calculate_score || 0
+    row.score += Number(item.score || 0)
+    row.calculate_score += Number(item.calculate_score || 0)
+    if (!legacyAggregate || !legacyDeductedItems.has(iid)) {
+      row.deducted_score += Number(item.deducted_score || 0)
+      legacyDeductedItems.add(iid)
+    }
     // 质量分：同一工作项不同月可能不同，保留该工作项最近一条的值
     row.quality_score = item.quality_score ?? row.quality_score
     row.difficulty = item.work_item_difficulty
@@ -488,7 +564,22 @@ const groupedMyDetails = computed(() => {
     row.innovation = item.work_item_innovation
   })
 
-  return Object.values(map)
+  const groups = Object.values(map).map(group => ({
+    ...group,
+    deducted_score: group.items.reduce((sum, item) => sum + Number(item.deducted_score || 0), 0)
+  }))
+  const periodDeduction = Number(currentPeriodPersonalData.value?.deducted_score || 0)
+  const detailedDeduction = groups.reduce((sum, group) => sum + group.deducted_score, 0)
+  const summaryOnlyDeduction = Number((periodDeduction - detailedDeduction).toFixed(2))
+  if (summaryOnlyDeduction > 0) {
+    groups.push({
+      project_name: '周期汇总数据', project_code: '-', work_package_id: 'summary-only',
+      work_package_code: '-', work_package_category: '-', deducted_score: summaryOnlyDeduction,
+      items: [{ work_item_name: '仅有汇总数据，无工作项明细', work_item_standard: '-', deadline: '-',
+        score: 0, quality_score: 0, calculate_score: 0, deducted_score: summaryOnlyDeduction }]
+    })
+  }
+  return groups
 })
 
 // 周期（年/季/月）变化时重新查询积分数据
@@ -502,6 +593,7 @@ onBeforeUnmount(() => { scoreRequestId++ })
 const fetchPublicScoreBoard = async () => {
   const requestId = ++scoreRequestId
   peopleList.value = []
+  personalProgress.value = null
   loading.value = true
   try {
     let year = '', month = '', quarter = ''
@@ -514,10 +606,20 @@ const fetchPublicScoreBoard = async () => {
     } else if (queryMode.value === 'year') {
       year = selectedYear.value
     }
-    const res = await getPublicScoreBoardApi(queryMode.value, year, month, quarter)
+    const [boardResult, progressResult] = await Promise.allSettled([
+      getPublicScoreBoardApi(queryMode.value, year, month, quarter),
+      getMyPeriodProgressDeductionsApi(queryMode.value, year, month, quarter)
+    ])
     if (requestId !== scoreRequestId) return
+    if (boardResult.status === 'rejected') throw boardResult.reason
+    const res = boardResult.value
     if (res?.data?.code === 200) {
       peopleList.value = res.data.data.people || []
+    }
+    if (progressResult.status === 'fulfilled' && progressResult.value?.data?.code === 200) {
+      personalProgress.value = progressResult.value.data.data
+    } else {
+      ElMessage.warning('个人进度扣分加载失败，请刷新重试')
     }
   } catch (err) {
     if (requestId !== scoreRequestId) return
@@ -553,7 +655,8 @@ const startEdit = (row) => {
     quality_event_score: row.quality_event_score,
     carrier_inspection_score: row.carrier_inspection_score
   })
-  // 开启该行的编辑模式
+  // 正式统计不含待确认分；编辑时加载原始附加分，避免用0覆盖。
+  if (row._draft_extra) Object.assign(row, row._draft_extra)
   row.isEditing = true
 }
 
@@ -601,7 +704,27 @@ const saveRow = async (row) => {
   }
 }
 
+function selectReminderMonth(month) {
+  if (typeof month !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return false
+  activeTab.value = 'all'
+  queryMode.value = 'month'
+  setSelectedDate(Number(month.slice(0, 4)), Number(month.slice(5)))
+  return true
+}
+function showScoreMonth(event) {
+  if (selectReminderMonth(event.detail)) fetchPublicScoreBoard()
+}
+watch(() => [route.query.tab, route.query.month], () => {
+  if (route.query.tab === 'all' && selectReminderMonth(route.query.month)) fetchPublicScoreBoard()
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('monthly-score-confirmed', fetchPublicScoreBoard)
+  window.removeEventListener('show-score-month', showScoreMonth)
+})
 onMounted(() => {
+  window.addEventListener('monthly-score-confirmed', fetchPublicScoreBoard)
+  window.addEventListener('show-score-month', showScoreMonth)
+  if (route.query.tab === 'all') selectReminderMonth(route.query.month)
   fetchPublicScoreBoard()
 })
 </script>

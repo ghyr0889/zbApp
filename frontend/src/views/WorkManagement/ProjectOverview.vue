@@ -1,40 +1,41 @@
 <template>
   <div class="project-overview">
     <el-card class="box-card" shadow="never">
-      <template #header>
+      <template v-if="readOnlyView" #header>
         <div class="card-header">
           <div class="header-actions">
-            <el-input
-              v-model="searchKeyword"
-              placeholder="可按照项目名称、编号以及机型主管进行搜索..."
-              clearable
-              class="search-input"
-            >
-              <template #prefix>
-                <i class="el-icon-search"></i>
-              </template>
-            </el-input>
-            <!-- 只保留新增项目在顶部，新增工作包移至每一行内 -->
-            <el-button v-if="activeTab === 'all' && canAddProject" type="success" plain @click="handleAddProject">
-              <i class="el-icon-folder-add"></i> 新增项目
-            </el-button>
-            <el-button type="primary" plain size="default" @click="refreshAll">
-              <i class="el-icon-refresh"></i> 刷新
-            </el-button>
+            <template v-if="readOnlyView">
+              <el-button circle title="返回人员名单" aria-label="返回人员名单" @click="backToEmployees">
+                <el-icon><ArrowLeft /></el-icon>
+              </el-button>
+              <strong>{{ viewedName || props.viewUserId }} 的工作（只读）</strong>
+            </template>
           </div>
         </div>
       </template>
 
       <el-tabs v-model="activeTab">
-        <el-tab-pane label="我的工作" name="mine">
+        <el-tab-pane v-if="isLeader && !readOnlyView" label="员工工作内容" name="employees">
+          <Assignments v-if="activeTab === 'employees'" />
+        </el-tab-pane>
+        <el-tab-pane v-if="!isLeader || readOnlyView" :label="readOnlyView ? '人员工作详情' : '我的工作'" name="mine">
+          <div style="display: flex; align-items: center; gap: 24px; margin-bottom: 12px; flex-wrap: wrap;">
+            <el-checkbox v-model="showCompleted">显示已完成工作项</el-checkbox>
+            <el-checkbox v-model="showRelated">显示关联工作项（只读）</el-checkbox>
+            <el-button type="primary" plain size="default" style="margin-left: auto;" @click="refreshAll">
+              <i class="el-icon-refresh"></i> 刷新
+            </el-button>
+          </div>
           <!-- 外层主表格，展示工作包 -->
           <el-table
             v-if="activeTab === 'mine'"
             :data="myWorkPackages"
+            :expand-row-keys="expandedMyPackageIds"
+            @expand-change="(_, rows) => { expandedMyPackageIds = rows.map(row => row.id) }"
             border
             style="width: 100%"
-            height="calc(100vh - 280px)"
-            empty-text="您暂未负责任何工作包"
+            height="calc(100vh - 298px)"
+            empty-text="当前筛选条件下暂无工作包"
             row-key="id"
             :row-class-name="tableRowClassName"
             :header-cell-style="{background: '#ffffff', color: '#64748b', fontWeight: '600'}"
@@ -43,42 +44,58 @@
             <el-table-column type="expand">
               <template #default="{ row: pkg }">
                 <div class="nested-table-container">
-                  <WorkItemTable_improved :workPackageId="pkg.id" :refresh-key="refreshKey" @changed="refreshAll" />
+                  <WorkItemTable_improved :workPackageId="pkg.id" :only-mine="true" :read-only="readOnlyView" :view-user-id="props.viewUserId" :show-completed="showCompleted" :show-related="showRelated" :refresh-key="refreshKey" @changed="refreshAll" />
                 </div>
               </template>
             </el-table-column>            
             <el-table-column prop="id" label="工作包编号" min-width="120" align="center">
               <template #default="{ row: pkg }">
-                <span>{{ pkg.code }}</span>
+                <el-input v-if="pkg.isPackageEditing" v-model="pkg.code" maxlength="50" size="small" /><span v-else>{{ pkg.code }}</span>
               </template>
             </el-table-column>
             <el-table-column prop="category_name" label="工作包类别" min-width="120" align="center">
               <template #default="{ row: pkg }">
-                <span v-if="pkg.category_name" size="small" type="info">{{ pkg.category_name }}</span>
+                <el-select v-if="pkg.isPackageEditing" v-model="pkg.category_name" size="small"><el-option v-for="cat in packageCategories" :key="cat" :label="cat" :value="cat" /></el-select>
+                <span v-else-if="pkg.category_name" size="small" type="info">{{ pkg.category_name }}</span>
                 <span v-else class="tip-text">-</span>
               </template>
             </el-table-column>
             <el-table-column prop="objective" label="目标" min-width="120" align="center">
               <template #default="{ row: pkg }">
-                <span v-if="pkg.objective">{{ pkg.objective }}</span>
+                <el-input v-if="pkg.isPackageEditing" v-model="pkg.objective" type="textarea" autosize />
+                <span v-else-if="pkg.objective">{{ pkg.objective }}</span>
                 <span v-else class="tip-text">-</span>
               </template>
             </el-table-column>
             <el-table-column prop="name" label="名称" min-width="150" align="center">
               <template #default="{ row: pkg }">
-                <span v-if="pkg.name">{{ pkg.name }}</span>
+                <el-input v-if="pkg.isPackageEditing" v-model="pkg.name" type="textarea" autosize />
+                <span v-else-if="pkg.name">{{ pkg.name }}</span>
                 <span v-else class="tip-text">-</span>
               </template>
             </el-table-column>
-            <el-table-column prop="project_code" label="所属项目编号" min-width="110" show-overflow-tooltip />
-            <el-table-column prop="package_owner_name" label="工作包负责人" min-width="110" align="center"/>
-              
+            <el-table-column prop="project_code" label="所属项目编号" min-width="110" />
             <el-table-column prop="package_tech_owner_name" label="工作包技术负责人" min-width="130" align="center" >
               <template #default="{ row: pkg }">
-                <span>{{ pkg.package_tech_owner_name || '-' }}</span>
+                <el-select v-if="pkg.isPackageEditing" v-model="pkg.package_tech_owner_id" filterable clearable size="small"><el-option v-for="u in packageUsers" :key="u.id" :label="`${u.username}（${u.id}）`" :value="u.id" /></el-select>
+                <span v-else>{{ pkg.package_tech_owner_name || '-' }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="工作包进度" min-width="130" align="center" fixed="right">
+
+            <el-table-column prop="package_owner_name" label="工作包负责人" min-width="150" align="center">
+              <template #default="{ row: pkg }">
+                <el-select v-if="pkg.isPackageEditing" v-model="pkg.package_owner_id" filterable clearable size="small"><el-option v-for="u in packageUsers" :key="u.id" :label="`${u.username}（${u.id}）`" :value="u.id" /></el-select>
+                <span v-else>{{ pkg.package_owner_name || '-' }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="decomposition_status" label="分解状态" width="110" align="center">
+              <template #default="{ row }">
+                <el-tag :type="row.is_decomposed ? 'success' : 'info'" effect="light">
+                  {{ row.decomposition_status }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column :label="readOnlyView ? '该人员负责的工作项进度' : '我负责的工作项进度'" min-width="130" align="center" fixed="right">
               <template #default="{ row }">
                 <div class="progress-wrapper">
                   <span class="progress-text">{{ row.package_progress || 0 }}%</span>
@@ -104,14 +121,19 @@
               </template>
             </el-table-column>
 
-            <el-table-column label="操作" min-width="150" align="center" fixed="right">
+            <el-table-column v-if="!readOnlyView" label="操作" min-width="220" align="center" fixed="right">
               <template #default="{ row: pkg }">
+                <el-button v-if="!pkg.isPackageEditing && (isAdmin || isDepartment) && !pkg.closed_status && !pkg.project_closed" type="primary" link size="small" @click="startPackageEdit(pkg)">申请修改</el-button>
+                <template v-if="pkg.isPackageEditing">
+                  <el-button type="primary" link :loading="packageSaving" @click="confirmPackageEdit(pkg)">确认修改</el-button>
+                  <el-button link :disabled="packageSaving" @click="cancelPackageEdit(pkg)">取消</el-button>
+                </template>
                 <!-- 转办：按生效状态（已自动完成/手动完成均不可转办） -->
-                <el-button v-if="isPkgOwner(pkg) && !pkg.complete_status && !pkg.closed_status && !pkg.project_closed" 
+                <el-button v-if="!pkg.isPackageEditing && isPkgOwner(pkg) && !pkg.complete_status && !pkg.closed_status && !pkg.project_closed" 
                 type="warning" link size="small" @click="handleTransferWorkPackage(pkg)">转办
                 </el-button>
                 <!-- 完成/取消完成：按手动原始状态 -->
-                <el-button v-if="canConfirmPkg(pkg) && !pkg.closed_status && !pkg.project_closed" type="success" link size="small" :loading="confirming" @click="confirmPkg(pkg)">
+                <el-button v-if="!pkg.isPackageEditing && canConfirmPkg(pkg) && !pkg.closed_status && !pkg.project_closed" type="success" link size="small" :loading="confirming" @click="confirmPkg(pkg)">
                   {{ pkg.manual_complete_status ? '取消完成' : '完成' }}
                 </el-button>
               </template>
@@ -130,7 +152,23 @@
         </el-tab-pane>
 
       
-        <el-tab-pane label="所有项目" name="all">
+        <el-tab-pane v-if="!readOnlyView" label="所有项目" name="all">
+          <div class="toolbar">
+            <el-input
+              v-model="searchKeyword"
+              placeholder="可按照项目名称、编号以及机型主管进行搜索..."
+              clearable
+              class="toolbar-search"
+              @keyup.enter="fetchProjects(1)"
+              @clear="fetchProjects(1)"
+            />
+            <el-button type="primary" style="margin-left: auto;" @click="fetchProjects(1)">查询</el-button>
+            <el-button @click="refreshAll">刷新</el-button>
+            <!-- 只保留新增项目在顶部，新增工作包移至每一行内 -->
+            <el-button v-if="canAddProject" type="success" plain @click="handleAddProject">
+              <i class="el-icon-folder-add"></i> 新增项目
+            </el-button>
+          </div>
           <!-- 外层主表格：显示项目信息 -->
           <el-table
             v-if="activeTab === 'all'"
@@ -139,7 +177,7 @@
             border
             style="width: 100%"
             v-loading="loadingAllWorkPackages"
-            height="calc(100vh - 310px)"
+            height="calc(100vh - 328px)"
             empty-text="暂无项目数据"
             row-key="project_id"
             :row-class-name="tableRowClassName"
@@ -161,14 +199,14 @@
 
             <el-table-column prop="project_code" label="项目编号" min-width="100">
               <template #default="{ row }">
-                <el-input v-if="row.isEdit" v-model="row.project_code" size="small" placeholder="请输入项目编号" />
+                <el-input v-if="row.isEdit" v-model="row.project_code" size="small" maxlength="50" show-word-limit placeholder="项目编号（最多50字）" />
                 <span v-else>{{ row.project_code }}</span>
               </template>
             </el-table-column>
 
             <el-table-column prop="project_name" label="项目名称" min-width="140">
               <template #default="{ row }">
-                <el-input v-if="row.isEdit" v-model="row.project_name" size="small" placeholder="请输入项目名称" />
+                <el-input v-if="row.isEdit" v-model="row.project_name" size="small" maxlength="100" show-word-limit placeholder="项目名称（最多100字）" />
                 <span v-else>{{ row.project_name }}</span>
               </template>
             </el-table-column>
@@ -262,7 +300,11 @@
                     <el-button type="info" link size="small" @click="cancelProjectEdit(row, $index)">取消</el-button>
                   </template>
                   <template v-else>
-                    <el-button type="primary" link size="small" :disabled="row.closed_status" @click="row.isEdit = true">编辑</el-button>
+                    <el-button
+                      type="primary" link size="small"
+                      :disabled="row.closed_status || row.complete_status"
+                      :title="row.closed_status ? '已关闭的项目不可编辑' : (row.complete_status ? '已完成的项目不可编辑' : '编辑')"
+                      @click="row.isEdit = true">编辑</el-button>
                   </template>
                    <el-dropdown trigger="click" :disabled="!hasMoreOptions(row)" @command="(command) => handleMoreCommand(command, row)">
                     <el-button type="info" link size="small">更多
@@ -291,9 +333,9 @@
                           <span class="danger-menu-item">确认关闭</span>
                         </el-dropdown-item>
 
-                        <!-- 取消关闭：仅已关闭且管理员 -->
+                        <!-- 项目取消关闭：科室、管理员、领导均可操作 -->
                         <el-dropdown-item
-                          v-if="row.closed_status && isAdmin" command="cancelClosed" > 取消关闭
+                          v-if="row.closed_status && canReopenProject" command="cancelClosed" > 取消关闭
                         </el-dropdown-item>
 
                       </el-dropdown-menu>
@@ -342,32 +384,61 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
+  createWorkPackageApi,
+  getWorkCategoriesApi,
   createProjectApi,
   deleteProjectApi,
   getAllProjectsApi,
   getAllUsersApi,
   getPagedProjectsApi,
   getMyWorkPackagesPagedApi,
+  getAssignedPackagesApi,
   initiateTransferApi,
   confirmCompletionApi,
   confirmClosedApi
 } from '../../api'
 import { useUserStore } from '../../stores/user'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
+import Assignments from './Assignments.vue'
 import { confirmClose, confirmCancelClose } from '../../components/confirm'
 import WorkItemTable_improved from '../../components/WorkItemTable_improved.vue'
-import { ArrowDown, Loading, CircleCheck, CircleClose, Lock } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowDown, Loading, CircleCheck, CircleClose, Lock } from '@element-plus/icons-vue'
 
+const props = defineProps({ viewUserId: { type: String, default: "" } })
+const readOnlyView = computed(() => !!props.viewUserId)
+const viewedName = ref("")
 const userStore = useUserStore()
 const router = useRouter()
+const route = useRoute()
 const isAdmin = computed(() => userStore.isAdmin)
 const isLeader = computed(() => userStore.isLEADER)
 const isDepartment = computed(() => userStore.isDEPARTMENT)
 const currentUserId = computed(() => String(userStore.userInfo?.id || ''))
-const activeTab = ref('mine')   // 默认显示“所有项目”
+const initialTab = () => {
+  if (readOnlyView.value) return 'mine'
+  if (isLeader.value && route.query.tab === 'employees') return 'employees'
+  if (route.query.tab === 'all' || isLeader.value) return 'all'
+  return 'mine'
+}
+const activeTab = ref(initialTab())
+// 将标签页写入地址，刷新或从人员详情返回时恢复正确的标签页。
+watch(() => route.query.tab, () => { activeTab.value = initialTab() })
+watch(activeTab, tab => {
+  if (!readOnlyView.value && route.query.tab !== tab) {
+    router.replace({ path: '/project-overview', query: { ...route.query, tab } })
+  }
+})
+
+const backToEmployees = () => {
+  router.push({ path: '/project-overview', query: { tab: 'employees' } })
+}
+
+const handleEscape = e => {
+  if (e.key === 'Escape' && readOnlyView.value) backToEmployees()
+}
 
 const tableRowClassName = ({ row }) => {
   if (row.closed_status) return 'closed-row'      // 返回深灰类名
@@ -385,6 +456,53 @@ const canManageProject = (projectRow) => {
 }
 
 
+const packageCategories = ref([])
+const packageUsers = ref([])
+const packageSaving = ref(false)
+const packageValues = pkg => ({
+  work_package_code: (pkg.code || '').trim(), name: (pkg.name || '').trim(),
+  category_name: pkg.category_name, objective: (pkg.objective || '').trim(),
+  tech_owner_id: pkg.package_tech_owner_id || null, owner_id: pkg.package_owner_id || null
+})
+async function startPackageEdit(pkg) {
+  if (readOnlyView.value || !(isAdmin.value || isDepartment.value)) return
+  try {
+    const [cats, users] = await Promise.all([getWorkCategoriesApi(), getAllUsersApi()])
+    packageCategories.value = cats.data.data || []
+    packageUsers.value = users.data.data || []
+    pkg._packageOriginal = JSON.parse(JSON.stringify({ ...pkg, _packageOriginal: null }))
+    pkg.isPackageEditing = true
+  } catch (error) { ElMessage.error('工作类型或负责人加载失败，请重试') }
+}
+function cancelPackageEdit(pkg) {
+  if (pkg._packageOriginal) Object.assign(pkg, pkg._packageOriginal)
+  delete pkg._packageOriginal
+  pkg.isPackageEditing = false
+}
+async function confirmPackageEdit(pkg) {
+  if (packageSaving.value) return
+  const data = packageValues(pkg)
+  if (!data.work_package_code) return ElMessage.warning('请填写工作包编号')
+  if (!data.category_name) return ElMessage.warning('请选择工作类型')
+  if (JSON.stringify(data) === JSON.stringify(packageValues(pkg._packageOriginal))) return ElMessage.warning('请先修改工作包内容')
+  packageSaving.value = true
+  try {
+    const { value } = await ElMessageBox.prompt('请说明本次修改的内容和原因，提交后由领导审核', '填写修改说明', {
+      draggable: true,
+      inputType: 'textarea', confirmButtonText: '提交修改申请', cancelButtonText: '取消',
+      inputValidator: value => !!value?.trim() && value.trim().length <= 2000 || '请填写修改说明，且不能超过2000字'
+    })
+    const res = await createWorkPackageApi({ ...data, id: pkg.id, project_id: pkg.project_id, reason: value.trim() })
+    if (res.data?.code !== 200) throw new Error(res.data?.message || '提交失败')
+    cancelPackageEdit(pkg)
+    ElMessage.success('修改申请已提交，等待领导审核')
+    refreshAll()
+    userStore.refreshPendingCount()
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') ElMessage.error(error.response?.data?.detail || error.message || '提交失败')
+  } finally { packageSaving.value = false }
+}
+
 const tableData = ref([]) // 控制行内编辑的可变表格数据源
 const loadingAllWorkPackages = ref(false)
 const refreshKey = ref(0) // 传给工作项表格：点「刷新」时强制拉取最新数据
@@ -401,6 +519,18 @@ const pagedPageSize = ref(20)
 // —— 我的工作：服务端分页状态 ——
 const myWorkPackages = ref([])
 const myTotal = ref(0)
+const showCompleted = ref(false)
+const showRelated = ref(false)
+const expandedMyPackageIds = ref([])
+watch(() => props.viewUserId, () => {
+  expandedMyPackageIds.value = []
+  viewedName.value = ''
+  myWorkPackages.value = []
+  activeTab.value = initialTab()
+  fetchMyWorkPackages(1)
+  if (!readOnlyView.value) fetchProjects(1)
+})
+watch([showCompleted, showRelated], () => fetchMyWorkPackages(1))
 const myPage = ref(1)
 const myPageSize = ref(20)
 
@@ -472,16 +602,22 @@ const fetchProjects = async (page = 1) => {
 
 
 // —— 我的工作：服务端分页 ——
+let myWorkRequestId = 0
 const fetchMyWorkPackages = async (page = 1) => {
+  if (isLeader.value && !readOnlyView.value) return
+  const requestId = ++myWorkRequestId
   myPage.value = page
   try {
-    const res = await getMyWorkPackagesPagedApi(currentUserId.value, { page, page_size: myPageSize.value })
+    const res = await (readOnlyView.value ? getAssignedPackagesApi : getMyWorkPackagesPagedApi)(props.viewUserId || currentUserId.value, { page, page_size: myPageSize.value, show_completed: showCompleted.value, show_related: showRelated.value })
+    if (requestId !== myWorkRequestId) return
     if (res.data?.code === 200) {
       const data = res.data.data || {}
+      viewedName.value = data.username || ""
       myTotal.value = data.total || 0
       myWorkPackages.value = data.items || []
     }
   } catch (err) {
+    if (requestId !== myWorkRequestId) return
     console.error('获取我的工作失败:', err)
     ElMessage.error(err.response?.data?.detail || '获取我的工作失败')
   }
@@ -511,7 +647,7 @@ watch(searchKeyword, () => {
 // 顶部刷新：同时刷新所有项目与我的工作
 const refreshAll = () => {
   refreshKey.value++ // 通知已展开的工作项表格强制拉取最新数据
-  fetchProjects(pagedPage.value)
+  if (!readOnlyView.value) fetchProjects(pagedPage.value)
   fetchMyWorkPackages(myPage.value)
 }
 
@@ -552,7 +688,7 @@ const getStatusConfig = (row) => {
 // 是否存在可用的“更多”操作：控制更多按钮禁用，避免点开空菜单
 const hasMoreOptions = (row) => {
   if (!row || row.isEdit) return false
-  if (row.closed_status) return !!isAdmin.value // 已关闭：仅管理员可“取消关闭”
+  if (row.closed_status) return canReopenProject.value
   return true                                  // 未关闭：删除/完成/关闭等均可能
 }
 
@@ -562,7 +698,7 @@ const handleMoreCommand = async (command, row) => {
     case 'delete':
       try {
         await ElMessageBox.confirm(
-          '确定删除该工作项？',
+          '确定删除该项目？',
           '删除确认',
           {
             confirmButtonText: '确定删除',
@@ -638,6 +774,7 @@ const handleCancelClosedConfirm = (row) => {
 
 // —— 确认/取消关闭（工作包/项目，只有领导/管理员，后端会校验）——
 const canClosed = computed(() => isAdmin.value || isLeader.value)
+const canReopenProject = computed(() => isDepartment.value || isAdmin.value || isLeader.value)
 const confirmClosed = async (row) => {
   confirming.value = true
   try {
@@ -706,9 +843,16 @@ const handleAddProject = () => {
 }
 
 const handleSaveProject = async (row) => {
+  // 已完成/已关闭的项目不允许再修改
+  if (!row.isNew && (row.closed_status || row.complete_status)) {
+    row.isEdit = false
+    return ElMessage.warning(row.closed_status ? '已关闭的项目不可编辑' : '已完成的项目不可编辑')
+  }
   if (!row.project_name || !row.project_name.trim()) {
     return ElMessage.warning('请输入项目名称')
   }
+  if (Array.from(row.project_name.trim()).length > 100) return ElMessage.warning('项目名称不能超过100字，请缩短后保存')
+  if (Array.from(row.project_code || '').length > 50) return ElMessage.warning('项目编号不能超过50字，请缩短后保存')
   saving.value = true
   try {
     const res = await createProjectApi({
@@ -728,7 +872,14 @@ const handleSaveProject = async (row) => {
       await fetchAdminOptions()
     }
   } catch (err) {
-    ElMessage.error(err.response?.data?.detail || '项目保存失败')
+    if (err.response?.status === 403) {
+      // 后端判定已完成/已关闭，退出编辑并刷新最新状态
+      row.isEdit = false
+      await fetchProjects(pagedPage.value)
+    }
+    const detail = err.response?.data?.detail
+    const labels = { name: '项目名称', code: '项目编号' }
+    ElMessage.error(Array.isArray(detail) ? detail.map(item => item.type === 'string_too_long' ? `${labels[item.loc?.at(-1)] || '输入内容'}不能超过${item.ctx?.max_length}字` : '请检查项目填写内容').join('；') : (detail || '项目保存失败'))
   } finally {
     saving.value = false
   }
@@ -783,9 +934,14 @@ const confirmTransfer = async () => { //确认发起函数
 }
 
 onMounted(async () => {
-  await fetchProjects(1)
+  window.addEventListener('keydown', handleEscape)
+  if (!readOnlyView.value) await fetchProjects(1)
   await fetchMyWorkPackages(1)
-  await fetchAdminOptions()
+  if (!readOnlyView.value) await fetchAdminOptions()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleEscape)
 })
 
 </script>
@@ -831,8 +987,21 @@ onMounted(async () => {
   gap: 16px; /* 两个输入框之间的间距 */
 }
 
-.search-input {
-  width: 240px;
+.toolbar {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.toolbar-search {
+  flex: 0 0 280px;
+  width: 280px;
+}
+
+.toolbar .el-button {
+  flex: 0 0 auto;
 }
 
 .pagination-bar {

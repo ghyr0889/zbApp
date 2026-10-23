@@ -73,7 +73,7 @@ export const deleteWorkItemApi = (workItemId) => api.delete(`/work-logs/work-ite
 // 确认/取消完成（负责人手动标记）
 export const confirmCompletionApi = (data) => api.put('/work-logs/confirm-completion', data)
 
-// 工作项完成审核（进度满 / 手动提交 → 技术负责人审核）
+// 工作项完成审核（用户手动提交 → 技术负责人审核）
 export const createCompleteRequestApi = (data) => api.post('/complete_review/complete-requests', data)
 export const getCompleteRequestsApi = (userId) =>
   api.get('/complete_review/complete-requests', { params: { user_id: userId } })
@@ -92,17 +92,12 @@ export const getMyWorkPackagesPagedApi = (userId, params) =>
   api.get(`/work-logs/my-work-packages/${userId}`, { params })
 // 保存工作项本月分值（直接生效，不经过审核）
 export const saveMonthScoreApi = (workItemId, data) => api.put(`/score-board/work-items/${workItemId}/month-score`, data)
-//工作完成情况汇总
-export const getCompletedSituationApi = (params) => api.get('/score-board/completed-situation', { params })
 // 工作包拆分申请（员工申请拆解工作包 → 领导审核）
 export const createSplitRequestApi = (data) => api.post('/review/split-requests', data)
 export const getSplitRequestsApi = (userId) => api.get(`/review/split-requests?user_id=${userId}`)
 export const reviewSplitRequestApi = (requestId, data) => api.post(`/review/split-requests/${requestId}/review`, data)
 export const editSplitRequestApi = (requestId, body) => api.put(`/review/split-requests/${requestId}`, body)
 export const removeSplitItemApi = (requestId, body) => api.post(`/review/split-requests/${requestId}/remove-item`, body)
-
-export const saveQualityScoreApi = (workItemId, data) =>
-  api.put(`/score-board/work-items/${workItemId}/quality_score`, data)
 
 export const updateMonthlyExtraScoreApi = (data) => api.put('/score-board/monthly-extra-scores', data)
 
@@ -134,6 +129,15 @@ export const withdrawAnnouncementApi = announcementId => api.post(`/announcement
 
 export default api
 
+export const getMyProgressDeductionsApi = () => api.get('/score-board/my-progress-deductions')
+export const getMyPeriodProgressDeductionsApi = (period, year, month, quarter) => {
+  const params = { period, year, month, quarter }
+  Object.keys(params).forEach(key => {
+    if (params[key] === '' || params[key] === null || params[key] === undefined) delete params[key]
+  })
+  return api.get('/score-board/my-period-progress-deductions', { params })
+}
+
 // 工时操作不传用户 ID 或浏览器时间，身份和计时均由后端确定。
 export const startWorkTimeApi = data => api.post('/work-time/start', data)
 export const finishWorkTimeApi = (id, version) => api.post(`/work-time/${id}/finish`, { version })
@@ -160,3 +164,15 @@ export const getDashboardOverviewApi = params => api.get('/dashboard/overview', 
 // 工作包变更申请：领导可查看全部申请，其他人员仅查看自己的申请。
 export const getWorkPackageChangesApi = () => api.get('/work-package-changes')
 export const reviewWorkPackageChangeApi = (id, data) => api.post(`/work-package-changes/${id}/review`, data)
+
+export const getAssignmentsApi = params => api.get("/work-logs/assignments", { params })
+export const getAssignedPackagesApi = (id, params) => api.get(`/work-logs/assignments/${encodeURIComponent(id)}/packages`, { params })
+
+export const getMyScoreConfirmationsApi = () => api.get('/score-confirmations/mine')
+export const confirmMyScoreApi = (id, fingerprint) => api.post(`/score-confirmations/${id}/confirm`, { fingerprint })
+
+export const saveScoreSelfEvaluationApi = (id, content) => api.put(`/score-confirmations/${id}/self-evaluation`, { content })
+
+export const getHistoricalScoreDraftsApi = () => api.get('/score-confirmations/history/drafts')
+export const saveHistoricalScoreDraftApi = data => api.put('/score-confirmations/history/drafts', data)
+export const publishHistoricalScoreDraftApi = (id, fingerprint) => api.post(`/score-confirmations/history/drafts/${id}/publish`, { fingerprint })

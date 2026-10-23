@@ -92,18 +92,6 @@
           </template>
         </el-table-column>
         
-        <el-table-column label="责任人" width="100">
-          <template #default="{ row: pkg }">
-            <el-select v-if="pkg.isEdit" v-model="pkg.owner_id" clearable filterable placeholder="选择责任人" size="small" style="width: 100%">
-              <el-option v-for="u in userOptions" :key="u.id" :label="`${u.username}（${u.id}）`" :value="u.id" />
-            </el-select>
-            <span v-else-if="pkg.package_owner_name || pkg.package_owner_id" class="employee-text">
-              {{ pkg.package_owner_name }}
-            </span>
-            <span v-else class="tip-text">暂未指定</span>
-          </template>
-        </el-table-column>
-
         <el-table-column label="技术负责人" width="100">
           <template #default="{ row: pkg }">
             <el-select v-if="pkg.isEdit" v-model="pkg.tech_owner_id" clearable filterable placeholder="选择技术负责人" size="small" style="width: 100%">
@@ -116,6 +104,26 @@
           </template>
         </el-table-column>
 
+        <el-table-column label="责任人" width="100">
+          <template #default="{ row: pkg }">
+            <el-select v-if="pkg.isEdit" v-model="pkg.owner_id" clearable filterable placeholder="选择责任人" size="small" style="width: 100%">
+              <el-option v-for="u in userOptions" :key="u.id" :label="`${u.username}（${u.id}）`" :value="u.id" />
+            </el-select>
+            <span v-else-if="pkg.package_owner_name || pkg.package_owner_id" class="employee-text">
+              {{ pkg.package_owner_name }}
+            </span>
+            <span v-else class="tip-text">暂未指定</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="decomposition_status" label="分解状态" width="110" align="center">
+          <template #default="{ row }">
+            <span v-if="row.isNew">—</span>
+            <el-tag v-else :type="row.is_decomposed ? 'success' : 'info'" effect="light">
+              {{ row.decomposition_status }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="进度" width="150" align="center">
           <template #default="{ row }">
           <div class="progress-wrapper">
@@ -145,11 +153,11 @@
         <el-table-column v-if="canManage" label="操作" min-width="140" align="center" fixed="right">
           <template #default="{ row: pkg, $index }">
             <template v-if="pkg.isEdit">
-              <el-button type="success" link size="small" :loading="saving" @click="handleSaveWorkPackage(pkg)">提交申请</el-button>
-              <el-button type="info" link size="small" @click="cancelWpEdit(pkg, $index)">取消</el-button>
+              <el-button type="success" link size="small" :loading="saving" @click="handleSaveWorkPackage(pkg)">{{ pkg.isNew ? '提交申请' : '确认修改' }}</el-button>
+              <el-button type="info" link size="small" :disabled="saving" @click="cancelWpEdit(pkg, $index)">取消</el-button>
             </template>
             <template v-else>
-              <el-button v-if="canRequestPackageChange && !pkg.closed_status && !projectInfo?.closed_status" type="primary" link size="small" @click="pkg.isEdit = true">申请修改</el-button>
+              <el-button v-if="canRequestPackageChange && !pkg.closed_status && !projectInfo?.closed_status" type="primary" link size="small" @click="startPackageEdit(pkg)">申请修改</el-button>
             </template>
             <el-dropdown trigger="click" @command="(command) => handleMoreCommand(command, pkg)">
               <el-button type="info" link size="small">更多
@@ -298,10 +306,10 @@ const handleMoreCommand = async (command, row) => {
     case 'delete':
       try {
         await ElMessageBox.confirm(
-          '确定删除该工作项？',
-          '删除确认',
+          '确定申请删除该工作包？提交原因后，由领导审核通过才会删除。',
+          '工作包删除申请',
           {
-            confirmButtonText: '确定删除',
+            confirmButtonText: '继续填写原因',
             cancelButtonText: '取消',
             type: 'warning'
           }
@@ -438,6 +446,7 @@ const fetchWorkPackages = async (p = 1) => {
 // 三类申请统一收集原因；取消弹窗不会提交，纯空白不允许通过。
 const askPackageReason = (title, message = '请填写本次工作包变更的申请原因') =>
   ElMessageBox.prompt(message, title, {
+    draggable: true,
     inputType: 'textarea',
     inputPlaceholder: '请输入原因（最多2000字）',
     confirmButtonText: '提交申请',
@@ -486,6 +495,10 @@ const handleAddWorkPackage = () => {
   })
 }
 
+const startPackageEdit = (pkg) => {
+  pkg._original = JSON.parse(JSON.stringify({ ...pkg, _original: null }))
+  pkg.isEdit = true
+}
 const handleSaveWorkPackage = async (pkg) => {
   if (saving.value) return
   if (!(pkg.code || '').trim()) {
@@ -494,7 +507,7 @@ const handleSaveWorkPackage = async (pkg) => {
   }
   saving.value = true
   try {
-    const { value } = await askPackageReason(pkg.isNew ? '申请新增工作包' : '申请修改工作包')
+    const { value } = await askPackageReason(pkg.isNew ? '申请新增工作包' : '填写修改说明', pkg.isNew ? '请填写新增原因' : '请说明本次修改的内容和原因，提交后由领导审核')
     const res = await createWorkPackageApi({
       reason: value.trim(),
       id: pkg.id,

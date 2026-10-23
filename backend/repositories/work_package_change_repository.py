@@ -1,5 +1,6 @@
 """工作包变更的数据访问；事务由服务层统一提交。"""
 import models
+from sqlalchemy import case
 
 # 查找工作包
 def package(db, package_id):
@@ -19,4 +20,11 @@ def requests(db, user):
     query = db.query(models.WorkPackageChangeRequest)
     if user.role.upper() != "LEADER":
         query = query.filter_by(applicant_id=user.id)
-    return query.order_by(models.WorkPackageChangeRequest.id.desc()).all()
+    return query.order_by(
+        case(
+            (models.WorkPackageChangeRequest.status == "PENDING", 0),
+            else_=1,
+        ),
+        models.WorkPackageChangeRequest.created_at.desc(),
+        models.WorkPackageChangeRequest.id.desc(),
+    ).all()

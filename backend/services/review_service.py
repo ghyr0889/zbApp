@@ -25,6 +25,19 @@ def _pending_status_for(role: str) -> str:
         raise HTTPException(status_code=403, detail=f"未知角色，无法统计待办: {role}")
     return status
 
+ITEM_COMPARE_FIELDS = ('name', 'standard', 'difficulty', 'importance', 'innovation',
+                       'tech_owner_id', 'owner_id', 'deadline', 'score', 'notes')
+
+
+def _item_snapshot(item):
+    if item is None:
+        return None
+    values = {key: getattr(item, key) for key in ITEM_COMPARE_FIELDS}
+    if values['deadline'] is not None:
+        values['deadline'] = str(values['deadline'])[:10]
+    return values
+
+
 # 工作包拆分申请
 def _split_request_view(req):
     """把拆分申请展开为前端需要的结构。"""
@@ -34,6 +47,19 @@ def _split_request_view(req):
         items = json.loads(req.split_items or "[]")
     except Exception:
         items = []
+    current_items = {item.id: item for item in work_package.work_items} if work_package else {}
+    for entry in items:
+        if not entry.get('work_item_id'):
+            continue
+        before = entry.get('_before')
+        if before is not None:
+            entry['before_source'] = '提交申请时的原值'
+        elif req.status in ('PENDING', 'SUBMITTED'):
+            before = _item_snapshot(current_items.get(entry['work_item_id']))
+            entry['before_source'] = '历史申请未保存快照，修改前显示当前正式数据'
+        else:
+            entry['before_source'] = '历史申请未保存修改前数据，无法还原'
+        entry['before_data'] = before
     return {
         "id": req.id,
         "work_package_id": req.work_package_id,
@@ -59,7 +85,7 @@ def _split_request_view(req):
     }
 
 
-def _split_items_payload(items):
+def _raw_split_items_payload(items):
     """把工作项变更列表序列化为 JSON 字符串（带 work_item_id 表示编辑）。"""
     return json.dumps([
         {
@@ -78,6 +104,25 @@ def _split_items_payload(items):
         }
         for it in items
     ], ensure_ascii=False)
+
+def _split_items_payload(items, db, previous=None, package_id=None):
+    """只信任服务端原值；复用原快照，避免修改申请时覆盖对照依据。"""
+    payload = json.loads(_raw_split_items_payload(items))
+    old = {entry.get('work_item_id'): entry for entry in (previous or []) if entry.get('work_item_id')}
+    for entry in payload:
+        item_id = entry.get('work_item_id')
+        if not item_id:
+            continue
+        prior = old.get(item_id, {})
+        if prior.get('_before') is not None:
+            entry['_before'] = prior['_before']
+        else:
+            item = repo.get_item(db, item_id)
+            if item is None or item.work_package_id != package_id:
+                raise HTTPException(400, '工作项不存在或不属于当前工作包')
+            entry['_before'] = _item_snapshot(item)
+    return json.dumps(payload, ensure_ascii=False)
+
 
 # 除 name 外，还要必填的字段
 REQUIRED_ITEM_FIELDS = ["difficulty", "importance", "innovation", "deadline", "tech_owner_id"]
@@ -150,7 +195,7 @@ def create_split_request(req: SplitRequestCreate, db: Session = None):
         work_package_id=req.work_package_id,
         applicant_id=req.applicant_id,
         reason=reason,
-        split_items=_split_items_payload(req.split_items),
+        split_items=_split_items_payload(req.split_items, db, package_id=req.work_package_id),
         status="PENDING"
     )
     repo.add(db, new_req)
@@ -350,7 +395,7 @@ def edit_split_request(request_id: int, body: SplitRequestEdit, db:Session = Non
         raise HTTPException(status_code=400, detail="已通过的申请不能再修改")
 
     # ---- 判定通过后才写库 ----
-    req.split_items = _split_items_payload(body.split_items)
+    req.split_items = _split_items_payload(body.split_items, db, old_items, req.work_package_id)
     req.reason = reason
     req.status = new_status
     if reset_review:

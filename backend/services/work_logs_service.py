@@ -45,6 +45,8 @@ def _public_package_view(pkg, db):
     pkg_tech_owner = pkg.tech_owner
     pkg_tech_owner_id = pkg.tech_owner_id or ""
     pkg_tech_owner_name = pkg_tech_owner.username if pkg_tech_owner else ""
+    # 以整个工作包下的正式工作项为准，待审批申请不计入分解状态。
+    is_decomposed = bool(pkg.work_items)
 
     return {
         "id": pkg.id,
@@ -63,6 +65,8 @@ def _public_package_view(pkg, db):
         "package_tech_owner_name": pkg_tech_owner_name,
         "level": project.level if project else "",
         "name": pkg.name or "-",
+        "is_decomposed": is_decomposed,
+        "decomposition_status": "已分解" if is_decomposed else "未分解",
         # 生效完成状态（由调用方追加）：手动确认 或 其下全部工作项已完成
         "manual_complete_status": bool(pkg.complete_status),
         "closed_status": bool(pkg.isclosed),
@@ -181,27 +185,29 @@ def get_paged_project_work_packages(project_id: int,
     }}
 
 
+# ---------------------------------------------------------------- 我的工作分页（大数据量项目总览）
 def get_my_work_packages_paged(user_id: str,
                               page: int = 1,
                               page_size: int = 20,
-                              db: Session = None):
-    """我的工作：当前用户负责的工作包（分页 + 进度统计）。"""
+                              db: Session = None, show_completed: bool = True, show_related: bool = False):
+    """我的工作：本人负责的工作包或本人工作项所属工作包（分页 + 进度统计）。"""
     page = max(int(page or 1), 1)
     page_size = min(max(int(page_size or 20), 1), 100)
 
-    # 我负责的工作包 + 我负责的工作项所属的工作包（转办接收后能看到自己的工作项）
-    total, pkgs = repo.list_my_packages_page(db, user_id, page, page_size)
+    # 工作包可因本人负责而显示；工作项数量与进度仍只统计本人负责的工作项。
+    total, pkgs = repo.list_my_packages_page(db, user_id, page, page_size, show_completed=show_completed, show_related=show_related)
 
     items = []
     for pkg in pkgs:
         view = _public_package_view(pkg, db)
+        owned_items = [it for it in (pkg.work_items or []) if str(it.owner_id) == str(user_id)]
         done = sum(
             sum((ms.score or 0.0) for ms in (it.monthly_scores or []))
-            for it in (pkg.work_items or [])
+            for it in owned_items
         )
-        full = sum(it.score or 0.0 for it in (pkg.work_items or []))
+        full = sum(it.score or 0.0 for it in owned_items)
         view["package_progress"] = calc_progress(done, full)
-        view["work_item_count"] = len(list(pkg.work_items or []))
+        view["work_item_count"] = len(owned_items)
         view["complete_status"] = package_effective_complete(pkg)
         items.append(view)
     return {"code": 200, "data": {
@@ -252,14 +258,14 @@ def _work_item_view(item, pending_review_id=None):
 
 
 
-def get_work_items(work_package_id: str, month: str = None, db: Session = None):
+def get_work_items(work_package_id: str, month: str = None, db: Session = None, owner_id: str = None, show_completed: bool = True, show_related: bool = False):
     """查询某个工作包下的全部工作项（含指定月份的分值，默认当月，供工作项页面使用）。"""
     pkg = repo.get_package(db, work_package_id)
     if not pkg:
         raise HTTPException(status_code=404, detail="工作包不存在")
 
     # 预加载月度分值与负责人：_work_item_view 的进度/提交条件需要
-    items = repo.list_package_items(db, work_package_id)
+    items = repo.list_package_items(db, work_package_id, owner_id=owner_id, show_completed=show_completed, show_related=show_related)
     project = pkg.project
     owner_job_grade = pkg.owner.job_grade if pkg.owner else ""
 
@@ -285,7 +291,8 @@ def get_work_items(work_package_id: str, month: str = None, db: Session = None):
         for item in work_items:
             total_score = item.score or 0.0
             completed_score = acc_sum.get(item.id, 0.0)
-            remaining_scores[item.id] = total_score - completed_score
+            # 浮点数直接相减会产生 1.3000000000000003 这类尾差，按分值精度收敛后再返回
+            remaining_scores[item.id] = round(total_score - completed_score, 3)
 
     # 待技术负责人审核的完成申请：work_item_id -> 申请 id
     pending_reviews = {}
@@ -293,7 +300,7 @@ def get_work_items(work_package_id: str, month: str = None, db: Session = None):
         for r in repo.list_pending_completion_reviews(db, item_ids):
             pending_reviews[r.work_item_id] = r.id
 
-    # 工作包级扣分汇总：超期完成的工作项每个扣 1 分
+    # 汇总当前查询范围内工作项的进度扣分，个人视图仅包括本人负责项。
     deducted = sum(compute_deducted(it) for it in items)
 
     return {
@@ -319,6 +326,7 @@ def get_work_items(work_package_id: str, month: str = None, db: Session = None):
             "work_items": [
                 {
                     **_work_item_view(it, pending_reviews.get(it.id)),
+                    "is_related": owner_id is not None and str(it.owner_id) != str(owner_id),
                     "month_score": month_scores.get(it.id, 0.0),
                     "quality_score": monthly_quality_score(db, it.id, cur_month),
                     "calc_score": calc_scores.get(it.id) if calc_scores.get(it.id) is not None else compute_calc_score(month_scores.get(it.id, 0.0), it, db, owner_job_grade, monthly_quality_score(db, it.id, cur_month)),
@@ -409,8 +417,10 @@ def confirm_completion(data: ConfirmCompletionIn, db: Session = None):
     if not target:
         raise HTTPException(status_code=404, detail="目标不存在")
 
-    # 权限：负责人本人 / 领导 / 管理员
-    if role not in ("LEADER", "ADMIN") and str(owner_id or "") != str(operator.id):
+    # 科室可取消项目完成；确认完成及其他目标仍沿用原权限。
+    can_cancel_project = (data.target_type == "project" and not data.confirmed
+                          and role in ("DEPARTMENT", "LEADER", "ADMIN"))
+    if not can_cancel_project and role not in ("LEADER", "ADMIN") and str(owner_id or "") != str(operator.id):
         raise HTTPException(status_code=403, detail="只有负责人、领导和管理员可以确认完成")
 
     # 关闭后不能再确认/取消完成（自身或其父级任一关闭都锁定）
@@ -426,13 +436,20 @@ def confirm_completion(data: ConfirmCompletionIn, db: Session = None):
     # ---------- 工作项：走“提交完成申请 → 技术负责人审核”流程 ----------
     if data.target_type == "work_item":
         if confirmed:
+            if str(target.owner_id or "") != str(operator.id):
+                raise HTTPException(status_code=403, detail="请由工作项责任人填写说明并提交完成审核")
+            reason = data.reason.strip()
+            if not reason:
+                raise HTTPException(status_code=400, detail="请对照工作项目标填写完成说明")
+            if target.complete_status:
+                raise HTTPException(status_code=400, detail="该工作项已完成，无需重复提交")
             # 幂等：已有待审核申请则复用，不重复建单
             existing = repo.get_pending_completion_review(db, target.id)
             if not existing:
                 repo.add(db, models.WorkItemCompletionReview(
                     work_item_id=target.id,
                     applicant_id=operator.id,
-                    reason="负责人手动确认完成",
+                    reason=reason,
                     status="PENDING",
                 ))
             db.commit()
@@ -506,13 +523,14 @@ def confirm_closed(data: ConfirmClosed, db: Session = None):
     if not target:
         raise HTTPException(status_code=404, detail="目标不存在")
 
-    # 权限：只有领导和管理员可以确认关闭
-    if role not in ("LEADER", "ADMIN"):
-        raise HTTPException(status_code=403, detail="只有领导或管理员可以确认关闭")
-
     confirmed = bool(data.confirmed)
-
-    if not confirmed and role != "ADMIN":
+    if confirmed:
+        if role not in ("LEADER", "ADMIN"):
+            raise HTTPException(status_code=403, detail="只有领导或管理员可以确认关闭")
+    elif data.target_type == "project":
+        if role not in ("DEPARTMENT", "LEADER", "ADMIN"):
+            raise HTTPException(status_code=403, detail="只有科室、领导或管理员可以取消项目关闭")
+    elif role != "ADMIN":
         raise HTTPException(status_code=403, detail="只有管理员可以取消关闭")
 
     target.isclosed = confirmed

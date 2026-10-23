@@ -1,17 +1,18 @@
-﻿<template>
+<template>
   <div id="app">
+    <ScoreConfirmation v-if="userInfo && $route.path !== '/login'" />
+    <a class="skip-link" href="#main-content">跳过导航，进入内容</a>
     <!-- 右侧：永远常显的个人信息与下拉退出 -->
-    <div class="right-profile" v-if="$route.path !== '/login' && userInfo">
+    <header class="right-profile" v-if="$route.path !== '/login' && userInfo">
       <!-- 公共顶部导航：所有模块共用入口与登录身份。 -->
       <router-link class="portal-brand" to="/home">综保工作管理系统</router-link>
       <nav class="portal-nav" aria-label="系统导航">
-        <router-link to="/home" :class="{ active: isPortal && $route.path !== '/applications' }">主页面</router-link>
-        <router-link to="/applications" :class="{ active: !isPortal || $route.path === '/applications' }">应用中心</router-link>
+        <router-link to="/home" :class="{ active: isPortal }">主页面</router-link>
       </nav>
       <el-dropdown @command="handleUserCommand" trigger="click">
         
         <!-- 常显触发区：直接展示头像、姓名、工号、角色 -->
-        <div class="user-info-trigger">
+        <button type="button" class="user-info-trigger" aria-label="打开账户菜单">
           <el-avatar size="small" class="user-avatar">
             {{ userInfo.username ? userInfo.username.charAt(0) : 'U' }}
           </el-avatar>
@@ -22,7 +23,7 @@
           <el-tag size="small" :type="roleTagType" effect="light" class="role-tag">
             {{ roleDisplayName }}
           </el-tag>
-        </div>
+        </button>
         
         <!-- 只有点击后才出现的下拉菜单 -->
         <template #dropdown>
@@ -41,10 +42,10 @@
           </el-dropdown-menu>
         </template>
       </el-dropdown>
-    </div>
+    </header>
 
     <div :class="[$route.path === '/login' ? 'login-body' : 'main-body', { 'portal-body': isPortal }]">
-      <div class="page-container">
+      <div id="main-content" class="page-container" tabindex="-1">
         <WorkTimeStatus v-if="userStore.isLoggedIn && $route.path !== '/login'" />
         <router-view />
       </div>
@@ -53,6 +54,7 @@
 </template>
 
 <script setup>
+import ScoreConfirmation from './components/ScoreConfirmation.vue'
 // 公共布局保留原有待办提醒和全局工时同步。
 import { ElMessage, ElNotification } from 'element-plus'
 import { computed, ref, watch, onBeforeUnmount } from 'vue'

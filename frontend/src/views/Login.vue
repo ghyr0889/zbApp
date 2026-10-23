@@ -1,4 +1,4 @@
-﻿<!-- xiangmu/frontend/src/views/Login.vue -->
+<!-- xiangmu/frontend/src/views/Login.vue -->
 <template>
   <div class="login-container">
     <el-card class="login-card" shadow="always">
@@ -16,7 +16,7 @@
       <el-form :model="form" @keyup.enter="handleLogin" style="margin-top: 15px;">
         <el-form-item prop="user_id" required>
           <el-input
-            v-model="form.user_id"
+            v-model="form.user_id" autocomplete="username" aria-label="工号"
             placeholder="请输入您的工号 ID"
             clearable
           />
@@ -24,7 +24,7 @@
 
         <el-form-item prop="password" required>
           <el-input
-            v-model="form.password"
+            v-model="form.password" autocomplete="current-password" aria-label="密码"
             type="password"
             placeholder="请输入密码"
             show-password

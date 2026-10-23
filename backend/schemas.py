@@ -21,6 +21,7 @@ class ConfirmCompletionIn(BaseModel):
     target_id: int = Field(..., description="目标 ID（工作包为字符串，其余为数字字符串）")
     user_id: str = Field(..., description="操作人 ID")
     confirmed: bool = Field(True, description="True=确认完成，False=取消完成")
+    reason: str = Field("", max_length=2000, description="工作项责任人对照目标填写的完成说明")
 
 
 class ConfirmClosed(BaseModel):
@@ -47,8 +48,8 @@ class UserUpdate(BaseModel):
 
 class ProjectCreate(BaseModel):
     id: Optional[int] = None
-    name: str = Field(..., description="项目名称")
-    code: str = Field(..., description="项目编号")
+    name: str = Field(..., min_length=1, max_length=100, description="项目名称，最多100字")
+    code: str = Field(..., max_length=50, description="项目编号，最多50字")
     owner_id: Optional[str] = Field(None, description="项目负责人 ID")
     tech_owner_id: Optional[str] = Field(None, description="机型主管/责任人 ID")
     category: Optional[str] = Field(None, description="项目类别")
@@ -183,6 +184,7 @@ class ScoreRuleUpdate(BaseModel):
 class CompleteRequestReview(BaseModel):
     """审核完成申请。"""
     reviewer_id: str = Field(..., description="审核人 ID")
+    quality_percent: Optional[float] = Field(None, ge=0, allow_inf_nan=False, description="通过审批必填质量百分比，100表示100%，允许超过100")
     action: str = "APPROVE"  #  # APPROVE=同意 / REJECT=驳回
     comment: str = Field("", description="审核意见 / 驳回原因（驳回必填）")
 
@@ -190,7 +192,7 @@ class CompleteRequestCreate(BaseModel):
     """提交完成申请。"""
     applicant_id: str = Field(..., description="申请人 ID")
     item_id: int = Field(..., description="申请的工作项 ID")
-    reason: str = Field(..., description="原因")
+    reason: str = Field(..., min_length=1, max_length=2000, description="对照工作项目标说明完成情况")
 
 class AnnouncementCreate(BaseModel):
     """ 创建公告 """

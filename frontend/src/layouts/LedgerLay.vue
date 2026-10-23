@@ -3,6 +3,7 @@
   <div class="module-layout">
   <aside class="module-sidebar">
     <div class="brand-logo">台账系统</div>
+    <p class="sidebar-group-label">工作空间</p>
     <!-- 台账菜单单独维护，后续业务页面在这里增加入口。 -->
     <el-menu class="left-menu" router :default-active="$route.path" active-text-color="#409eff">
       <el-menu-item index="/ledger/overview">
@@ -10,6 +11,7 @@
         <span>台账首页</span>
       </el-menu-item>
     </el-menu>
+    <p class="sidebar-group-label">应用导航</p>
     <el-menu class="left-menu bottom-menu" router>
       <el-menu-item index="/applications">返回应用中心</el-menu-item>
     </el-menu>

@@ -17,7 +17,7 @@ import ProjectDetail from '../views/WorkManagement/ProjectDetail.vue'
 const routes = [
   { path: '/', redirect: '/home' },
   { path: '/home', name: 'Home', component: () => import('../views/Home.vue'), meta: { layout: 'portal' } },
-  { path: '/applications', name: 'Applications', component: () => import('../views/Applications.vue'), meta: { layout: 'portal' } },
+  { path: '/applications', name: 'Applications', redirect: { path: '/home', hash: '#application-center' } },
   { path: '/login', name: 'Login', component: Login },
   { path: '/personal-info', name: 'PersonalInfo', component: PersonalInfo, meta: { layout: 'portal' } },
   { path: '/announcements', name: 'Announcements', component: () => import('../views/WorkManagement/Announcement.vue'), meta: { layout: 'portal' } },
@@ -28,6 +28,8 @@ const routes = [
     meta: { module: 'work' },
     children: [
     { path: '/work-time', name: 'WorkTime', component: () => import('../views/WorkManagement/WorkTime.vue') },
+    { path: '/assignments', redirect: { path: '/project-overview', query: { tab: 'employees' } }, meta: { requiresLeader: true } },
+    { path: '/assignments/:userId', component: ProjectOverview, props: route => ({ viewUserId: route.params.userId }), meta: { requiresLeader: true } },
     { path: '/project-overview', name: 'ProjectOverview', component: ProjectOverview },
     { path: '/review', name: 'ReviewLogs', component: Review },
     { path: '/complete-review', redirect: '/review' },
@@ -51,7 +53,18 @@ const routes = [
 
 const router = createRouter({
   history: createWebHistory(), 
-  routes
+  routes,
+  scrollBehavior(to) {
+    if (to.hash === '#application-center') {
+      return new Promise(resolve => {
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          document.getElementById('application-center')?.scrollIntoView({ block: 'start' })
+          resolve(false)
+        }))
+      })
+    }
+    return { top: 0 }
+  }
 })
 
 //  全局路由前置守卫：进行权限校验
@@ -78,6 +91,11 @@ router.beforeEach(async (to, from, next) => {
   if (to.path !== '/login' && !userStore.isLoggedIn) {
     ElMessage.warning('请先登录！')
     return next(to.path === '/login' ? undefined : '/login')
+  }
+
+  if (to.meta.requiresLeader && !userStore.isLEADER) {
+    ElMessage.error("仅部门领导可以查看员工工作内容")
+    return next("/home")
   }
 
   //  如果访问的是需要管理员权限的页面

@@ -123,54 +123,13 @@ def package_effective_complete(pkg):
     return all(is_completed(it) for it in items)
 
 def project_effective_complete(project):
-    """项目有效完成 = 手动确认完成 或 其下所有工作包都有效完成。
-    空项目不自动完成；空工作包不阻塞项目（自身不自动完成，但不影响父级）。
-    要求调用前已预加载 project.work_packages -> work_items -> monthly_scores。
+    """A project is complete only when manually confirmed or every package is complete.
+    An empty project or an unfinished empty package does not complete automatically.
+    Package relationships must be loaded by the caller.
     """
     if bool(project.complete_status):
         return True
     wps = list(project.work_packages or [])
     if not wps:
         return False
-    return all(
-        package_effective_complete(wp) or not list(wp.work_items or [])
-        for wp in wps
-    )
-
-def auto_create_complete_request(db, item, applicant_id=None, reason=None):
-    """进度已满时自动提交完成申请。
-    条件 ：
-    - 工作项尚未完成（complete_status 为假）
-    - 进度已满（累计月度分值 >= 工作项分值；满分 0 视为已满）
-    - 不存在待审核（PENDING）的完成申请
-    - 能确定一个**真实存在**的申请人（优先传入值，其次工作项负责人）
-    返回：新建的申请对象 / 已存在的待审申请 / None（未触发）。
-    """
-    import models
-
-    if bool(item.complete_status):
-        return None                      # 已完成，无需再提交
-    if not has_full_progress(item):
-        return None                      # 进度未满
-
-    existing = db.query(models.WorkItemCompletionReview).filter(
-        models.WorkItemCompletionReview.work_item_id == item.id,
-        models.WorkItemCompletionReview.status == "PENDING",
-    ).first()
-    if existing:
-        return existing                  # 已有待审申请，不重复建单
-
-    # 申请人必须存在（外键约束），否则放弃自动提交，交由人工提交
-    applicant = applicant_id or item.owner_id
-    if not applicant or not db.query(models.User).filter(models.User.id == applicant).first():
-        return None
-
-    review = models.WorkItemCompletionReview(
-        work_item_id=item.id,
-        applicant_id=applicant,
-        reason=reason or "进度已满，系统自动提交完成申请",
-        status="PENDING",
-    )
-    db.add(review)
-    return review
-
+    return all(package_effective_complete(wp) for wp in wps)

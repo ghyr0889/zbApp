@@ -1,7 +1,7 @@
 ﻿# xiangmu/backend/main.py
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -9,9 +9,9 @@ from exceptions import BusinessError, PermissionDenied, NotFound
 import sys
 import logging, os
 
-from database import engine, Base, SessionLocal
+from database import engine, Base, SessionLocal, get_db
 from routers import auth, work_logs, review, admin, tasks, score_board, complete_review, pending, announcement, information
-from routers import work_time, dashboard, work_package_changes
+from routers import work_time, dashboard, work_package_changes, score_confirmations
 
 log_file = os.path.join(os.path.dirname(sys.executable), 'calculate_score.log')
 logging.basicConfig(level=logging.DEBUG,
@@ -25,7 +25,15 @@ Base.metadata.create_all(bind=engine)
 with SessionLocal() as db:
     information.seed_departments(db)
 
+def score_settlement_guard(request: Request, db=Depends(get_db)):
+    # All API writes acquire the same settlement lock before modifying source data.
+    # This ensures overdue scores are frozen before a late edit can affect them.
+    if request.method not in ("GET", "HEAD", "OPTIONS"):
+        from services.score_confirmation_service import synchronize
+        synchronize(db)
+
 app = FastAPI(
+    dependencies=[Depends(score_settlement_guard)],
     title="工作内容统计系统 API",
     description="支持项目→工作包→工作项三级结构、日志提交、Owner 审核与自动积分结算",
     version="1.0.0"
@@ -54,6 +62,46 @@ app.include_router(information.router)
 app.include_router(work_time.router)
 app.include_router(dashboard.router)
 app.include_router(work_package_changes.router)
+app.include_router(score_confirmations.router)
+
+import threading
+_settlement_stop = threading.Event()
+_settlement_thread = None
+
+def _settle_scores():
+    from services.score_confirmation_service import synchronize
+    with SessionLocal() as db:
+        try:
+            synchronize(db)
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+
+def _settlement_loop():
+    while not _settlement_stop.wait(60):
+        try:
+            _settle_scores()
+        except Exception:
+            logging.exception("Monthly score settlement failed; retrying in 60 seconds")
+
+@app.on_event("startup")
+def start_score_settlement():
+    from services.score_confirmation_service import initialize
+    global _settlement_thread
+    with SessionLocal() as db:
+        initialize(db)
+    _settle_scores()  # Finish overdue settlement before serving requests.
+    _settlement_stop.clear()
+    _settlement_thread = threading.Thread(target=_settlement_loop, daemon=True)
+    _settlement_thread.start()
+
+@app.on_event("shutdown")
+def stop_score_settlement():
+    _settlement_stop.set()
+    if _settlement_thread:
+        _settlement_thread.join(timeout=2)
+
 
 @app.exception_handler(BusinessError)
 async def handle_business_error(request, exc):

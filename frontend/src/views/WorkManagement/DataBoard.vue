@@ -60,6 +60,51 @@
       <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
       <p class="calculation-note">按工作项截止日期归入周期，按当前负责人／科室／所属项目统计；完成情况为当前状态。分值为工作项配置分值，不是月度已填分。</p>
       <div v-loading="loading" class="board-content">
+        <!-- 工作量统计模块 -->
+        <div class="chart-grid">
+          <section class="board-card">
+            <div class="card-heading">
+              <h2>工作量统计</h2>
+              <div class="chart-tools">
+                <el-button text :aria-pressed="showWorkloadDetails" @click="showWorkloadDetails = !showWorkloadDetails">{{ showWorkloadDetails ? '关闭详细数据' : '显示详细数据' }}</el-button>
+                <el-button text :icon="Download" :disabled="loading || !!error || !rows.length" @click="exportChart('workload')">导出图片</el-button>
+                <el-button 
+                  text 
+                  :icon="chartType === 'bar' ? TrendCharts : Histogram" 
+                  :aria-label="chartType === 'bar' ? '切换折线图' : '切换柱状图'" 
+                  @click="chartType = chartType === 'bar' ? 'line' : 'bar'">
+                  {{ chartType === 'bar' ? '折线' : '柱状' }}
+                </el-button>
+                <el-button text :icon="FullScreen" aria-label="放大查看工作量图表" @click="expanded = true" />
+              </div>
+            </div>
+
+            <DashboardChart ref="workloadChartRef" :style="{ height: workloadChartHeight + 'px' }" 
+              v-if="rows.length && !error" 
+              :option="barOption" 
+              :label="`${dimensionLabel}工作量${chartType === 'bar' ? '柱状' : '折线'}图`" 
+            />
+            <el-empty v-else :description="error ? '数据加载失败，请重试' : '所选周期暂无工作项'" :image-size="100" />
+          </section>
+
+          <section class="board-card report-card">
+            <div class="card-heading">
+              <h2>{{ dimensionLabel }}报表</h2>
+              <el-button text :icon="Download" :disabled="loading || !!error || reportTotal <= 0" @click="exportChart('report')">导出图片</el-button>
+            </div>
+            <DashboardChart ref="reportChartRef" v-if="reportTotal > 0 && !error" :option="pieOption" :label="`${dimensionLabel}${reportLabel}占比`" />
+            <el-empty v-else :description="error ? '数据加载失败' : '暂无可展示的占比数据'" :image-size="100" />
+            <div class="segments report-switch">
+              <button 
+                v-for="r in reportModes" 
+                :key="r.value" 
+                :class="{ selected: reportMode === r.value }" 
+                @click="reportMode = r.value">{{ r.label }}
+              </button>
+            </div>
+          </section>
+        </div>
+
         <!-- 工作总览模块 -->
         <section class="board-card overview-report">
           <div class="card-heading">
@@ -68,8 +113,8 @@
             </h2>
             <el-input v-model="search" clearable :placeholder="`搜索${dimensionLabel}`" :prefix-icon="Search" style="width: 220px" />
           </div>
-          <el-table :data="pagedRows" :empty-text="error ? '数据加载失败' : '暂无匹配数据'" style="width:100%">
-            <el-table-column prop="name" :label="dimensionLabel" min-width="200" show-overflow-tooltip />
+          <el-table :data="pagedRows" show-summary :summary-method="overviewSummary" :empty-text="error ? '数据加载失败' : '暂无匹配数据'" style="width:100%">
+            <el-table-column prop="name" :label="dimensionLabel" min-width="200" />
             <el-table-column label="总计" min-width="110" align="right">
               <template #default="{ row }">{{ format(row.total) }}</template>
             </el-table-column>
@@ -98,54 +143,11 @@
             class="report-pagination" />
         </section>
 
-        <!-- 工作量统计模块 -->
-        <div class="chart-grid">
-          <section class="board-card">
-            <div class="card-heading">
-              <h2>工作量统计</h2>
-              <div class="chart-tools">
-                <el-button text :icon="Download" :disabled="loading || !!error || !rows.length" @click="exportChart('workload')">导出图片</el-button>
-                <el-button 
-                  text 
-                  :icon="chartType === 'bar' ? TrendCharts : Histogram" 
-                  :aria-label="chartType === 'bar' ? '切换折线图' : '切换柱状图'" 
-                  @click="chartType = chartType === 'bar' ? 'line' : 'bar'">
-                  {{ chartType === 'bar' ? '折线' : '柱状' }}
-                </el-button>
-                <el-button text :icon="FullScreen" aria-label="放大查看工作量图表" @click="expanded = true" />
-              </div>
-            </div>
-
-            <DashboardChart ref="workloadChartRef" 
-              v-if="rows.length && !error" 
-              :option="barOption" 
-              :label="`${dimensionLabel}工作量${chartType === 'bar' ? '柱状' : '折线'}图`" 
-            />
-            <el-empty v-else :description="error ? '数据加载失败，请重试' : '所选周期暂无工作项'" :image-size="100" />
-          </section>
-
-          <section class="board-card report-card">
-            <div class="card-heading">
-              <h2>{{ dimensionLabel }}报表</h2>
-              <el-button text :icon="Download" :disabled="loading || !!error || reportTotal <= 0" @click="exportChart('report')">导出图片</el-button>
-            </div>
-            <DashboardChart ref="reportChartRef" v-if="reportTotal > 0 && !error" :option="pieOption" :label="`${dimensionLabel}${reportLabel}占比`" />
-            <el-empty v-else :description="error ? '数据加载失败' : '暂无可展示的占比数据'" :image-size="100" />
-            <div class="segments report-switch">
-              <button 
-                v-for="r in reportModes" 
-                :key="r.value" 
-                :class="{ selected: reportMode === r.value }" 
-                @click="reportMode = r.value">{{ r.label }}
-              </button>
-            </div>
-          </section>
-        </div>
-
       </div>
       <el-dialog v-model="expanded" title="工作量统计" fullscreen destroy-on-close>
         <p>{{ periodLabel }} · 按{{ dimensionLabel }} · 单位：{{ unit }}</p>
-        <DashboardChart v-if="expanded" :option="barOption" label="工作量统计放大图" style="height:calc(100vh - 150px)" />
+        <el-button :aria-pressed="showWorkloadDetails" @click="showWorkloadDetails = !showWorkloadDetails">{{ showWorkloadDetails ? '关闭详细数据' : '显示详细数据' }}</el-button>
+        <DashboardChart v-if="expanded" :option="barOption" label="工作量统计放大图" :style="{ height: `max(calc(100vh - 150px), ${workloadChartHeight}px)` }" />
       </el-dialog>
     </template>
   </div>
@@ -286,7 +288,8 @@ const rows = computed(() => raw.value.map(
   //两种数据（分值/数量）统一格式
   r => (
     { id: r.id,
-      name: r.name, 
+      name: r.name,
+      project_code: r.project_code, 
       total: r[metric.value], 
       completed: r[`completed_${metric.value}`], 
       pending: r[`pending_${metric.value}`] 
@@ -311,6 +314,7 @@ const totals = computed(
 )
 
 const format = value => Number(value).toLocaleString('zh-CN', { maximumFractionDigits: metric.value === 'score' ? 2 : 0 }) //格式化函数
+const showWorkloadDetails = ref(false)
 const chartType = ref('bar'), expanded = ref(false), reportMode = ref('total') //图标类型
 const reportLabel = computed(() => reportModes.find(r => r.value === reportMode.value).label)
 const reportTotal = computed(() => totals.value[reportMode.value])
@@ -318,17 +322,45 @@ const ranking = computed(() => [...rows.value].sort((a,b) => b[reportMode.value]
 const colors = ['#ffad3b', '#ff7046', '#26bf8c', '#8ed163', '#4389f9', '#16b4d9', '#9377dc']
 const colorOf = id => colors[raw.value.findIndex(r => r.id === id) % colors.length]
 // 图例、总览和明细共用 rows，数量／分值切换不重复请求且口径保持一致。
+const workloadNames = computed(() => rows.value.map(row => {
+  const name = String(row.name || '')
+  if (dimension.value === 'project') return row.project_code || name.match(/（([^（）]*)）$/)?.[1] || name
+  const suffix = `（${row.id}）`
+  return dimension.value === 'person' && name.endsWith(suffix) ? name.slice(0, -suffix.length) : name
+}))
+// 按字符估算85px标签宽度，最多两行，保留完整值供悬浮查看。
+function shortAxisLabel(name) {
+  const chars = Array.from(String(name))
+  const lines = ['']
+  let width = 0
+  for (const char of chars) {
+    const size = /[^\x00-\xff]/.test(char) ? 12 : 7
+    if (width + size > 85 || char === '\n') {
+      if (lines.length === 2) {
+        lines[1] = Array.from(lines[1]).slice(0, -1).join('') + '…'
+        return lines.join('\n')
+      }
+      lines.push(''); width = 0
+    }
+    if (char !== '\n') { lines[lines.length - 1] += char; width += size }
+  }
+  return lines.join('\n')
+}
+const workloadAxisNames = computed(() => workloadNames.value.map(shortAxisLabel))
+const workloadChartHeight = computed(() => 376)
 const barOption = computed(() => ({
   //描述图标内容和样式
   color: ['#4389f9', '#26bf8c', '#f16d73'], 
-  tooltip: { trigger: 'axis', renderMode: 'richText' }, //鼠标悬停时的提示
+  animation: false, // 切换后立即完成绘制，导出与当前标注状态一致
+  tooltip: { show: false, triggerOn: 'none' }, // 使用按钮统一控制数据标注
   legend: { top: 6, icon: 'circle' }, //总计、已完成、未完成图例
-  grid: { left: 55, right: 24, top: 65, bottom: rows.value.length > 8 ? 85 : 60 }, //坐标绘图区的边距
+  grid: { left: 55, right: 24, top: 65, bottom: rows.value.length > 8 ? 45 : 20, containLabel: true }, //坐标绘图区的边距
   xAxis: { 
-    type: 'category', 
-    data: rows.value.map(r => r.name), 
+    type: 'category',
+    triggerEvent: true,
+    data: workloadNames.value, 
     axisTick: { show: false }, 
-    axisLabel: { width: 85, overflow: 'truncate' }, 
+    axisLabel: { interval: 0, lineHeight: 16, formatter: (name, index) => workloadAxisNames.value[index] ?? name }, 
     axisLine: { lineStyle: { color: '#b7bdc5' } } 
   }, //横轴名称
   yAxis: { 
@@ -343,7 +375,16 @@ const barOption = computed(() => ({
       { name: r.label, 
         type: chartType.value, 
         data: rows.value.map(row => row[r.value]), 
-        barMaxWidth: 24, 
+        barMaxWidth: 24,
+        label: {
+          show: showWorkloadDetails.value,
+          position: 'top',
+          distance: 6,
+          color: '#334155',
+          fontSize: 11,
+          formatter: params => format(params.value)
+        },
+        emphasis: { label: { show: showWorkloadDetails.value } }, 
         itemStyle: { borderRadius: chartType.value === 'bar' ? [4,4,0,0] : 0 }, 
         smooth: false }
       )
@@ -362,6 +403,15 @@ const filteredRows = computed(
   //搜索结果
   () => rows.value.filter(r => r.name.toLowerCase().includes(search.value.trim().toLowerCase()))
 )
+// 汇总全部搜索结果，不只汇总当前分页；占比按总量计算。
+function overviewSummary() {
+  const sums = filteredRows.value.reduce((result, row) => {
+    for (const key of ['total', 'completed', 'pending']) result[key] += Number(row[key]) || 0
+    return result
+  }, { total: 0, completed: 0, pending: 0 })
+  return ['总计', format(sums.total), format(sums.completed), format(sums.pending),
+    sums.total > 0 ? (sums.completed / sums.total * 100).toFixed(1) + '%' : '—']
+}
 const pagedRows = computed(() => filteredRows.value.slice((page.value - 1) * 20, page.value * 20)) //分页
 watch(search, () => { page.value = 1 })
 

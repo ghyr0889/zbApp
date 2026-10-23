@@ -1,4 +1,4 @@
-<!--- 工作包增删改查组件 -->>
+<!-- 工作包变更申请 -->
 <template>
   <div>
     <div class="change-toolbar">
@@ -6,10 +6,9 @@
       <el-select v-model="status" clearable placeholder="全部状态" style="width: 140px">
         <el-option v-for="(label, value) in statuses" :key="value" :label="label" :value="value" />
       </el-select>
-      <el-button :loading="loading" @click="fetchRows">刷新</el-button>
+      <el-button class="refresh-button" type="primary" plain size="default" :loading="loading" @click="fetchRows">刷新</el-button>
     </div>
     <el-table :data="filtered" v-loading="loading" border max-height="600">
-      <el-table-column prop="id" label="申请编号" width="90" />
       <el-table-column label="类型" width="80">
         <template #default="{ row }">{{ actions[row.action] }}</template>
       </el-table-column>
@@ -19,10 +18,14 @@
         </template>
       </el-table-column>
       <el-table-column prop="project_name" label="项目" min-width="140" />
-      <el-table-column prop="reason" label="申请原因" min-width="180" show-overflow-tooltip />
+      <el-table-column prop="reason" label="申请原因" min-width="180" />
       <el-table-column prop="applicant_name" label="申请人" width="100" />
-      <el-table-column label="状态" width="110">
-        <template #default="{ row }">{{ statuses[row.status] }}</template>
+      <el-table-column label="状态" width="110" fixed="left">
+        <template #default="{ row }">
+          <span :class="['change-status', `change-status--${row.status.toLowerCase()}`]">
+            {{ statuses[row.status] }}
+          </span>
+        </template>
       </el-table-column>
       <el-table-column prop="created_at" label="提交时间" min-width="180" />
       <el-table-column label="操作" width="100">
@@ -31,19 +34,21 @@
         </template>
       </el-table-column>
     </el-table>
-    <el-dialog v-model="visible" title="工作包变更申请" width="min(850px, 94vw)" draggable append-to-body>
+    <el-dialog v-model="visible" title="工作包变更申请" width="min(1500px, 94vw)" draggable append-to-body>
       <template v-if="selected">
         <p>
           {{ actions[selected.action] }}申请 · {{ statuses[selected.status] }} · 申请人：{{ selected.applicant_name }}
         </p>
-        <p class="application-reason">申请原因：{{ selected.reason || '历史申请未填写' }}</p>
-        <el-table :data="comparison" border max-height="420">
-          <el-table-column prop="label" label="字段" width="130" />
-          <!-- 新增申请没有原工作包，不显示修改前内容。 -->
-          <el-table-column v-if="selected.action !== 'create'" prop="before" label="修改前" min-width="200" />
-          <el-table-column label="申请内容" min-width="200">
+        <p class="application-reason">申请原因：<span class="applicant-reason-text">{{ selected.reason || '历史申请未填写' }}</span></p>
+        <el-table :data="comparison" border class="package-comparison-table">
+          <el-table-column prop="label" label="内容" width="110" fixed="left" />
+          <el-table-column v-for="(label, key) in fields" :key="key" :label="label" :min-width="key === 'objective' ? 230 : ['tech_owner_id', 'owner_id'].includes(key) ? 190 : 160">
             <template #default="{ row }">
-              <span :class="{ changed: row.before !== row.after }">{{ row.after }}</span>
+              <div class="detail-field-value" :class="{ 'is-changed': row.kind === 'after' && isChanged(key), 'is-deleted': row.kind === 'delete' }">
+                <span v-if="row.kind === 'after' && isChanged(key)" class="detail-change-label">已修改</span>
+                <span v-if="row.kind === 'delete'" class="detail-change-label">拟删除</span>
+                <span>{{ displayValue(row.data, key) }}</span>
+              </div>
             </template>
           </el-table-column>
         </el-table>
@@ -59,11 +64,13 @@
           class="review-comment" />
       </template>
       <template #footer>
+        <div class="detail-footer">
         <el-button :disabled="saving" @click="visible = false">关闭</el-button>
         <template v-if="isLeader && selected?.status === 'PENDING'">
           <el-button type="danger" :disabled="saving" @click="decide('REJECT')">驳回</el-button>
           <el-button type="primary" :loading="saving" @click="decide('APPROVE')">通过</el-button>
         </template>
+        </div>
       </template>
     </el-dialog>
   </div>
@@ -90,9 +97,26 @@ const fields = {
   objective: '工作目标' }
 const filtered = computed(() => rows.value.filter(row => !status.value || row.status === status.value))
 // 对比内容只读，领导不能在审核时改写申请方案。
-const comparison = computed(() => Object.entries(fields).map(([key, label]) => ({
-  label, before: selected.value?.before_data?.[key] ?? '—', after: selected.value?.after_data?.[key] ?? '—',
-})))
+const comparison = computed(() => {
+  const entry = selected.value
+  if (!entry) return []
+  if (entry.action === 'create') return [{ kind: 'after', label: '申请内容', data: entry.after_data }]
+  if (entry.action === 'delete') return [{ kind: 'delete', label: '删除内容', data: entry.before_data }]
+  return [
+    { kind: 'before', label: '修改前', data: entry.before_data },
+    { kind: 'after', label: '申请内容', data: entry.after_data }
+  ]
+})
+const displayValue = (data, key) => {
+  const value = data?.[key]
+  return value === null || value === undefined || value === '' ? '—' : value
+}
+const isChanged = (key) => {
+  const entry = selected.value
+  if (entry?.action !== 'update' || !entry.before_data || !entry.after_data) return false
+  if (!Object.hasOwn(entry.before_data, key)) return false
+  return String(entry.before_data[key] ?? '') !== String(entry.after_data[key] ?? '')
+}
 async function fetchRows() {
   loading.value = true
   try { rows.value = (await getWorkPackageChangesApi()).data.data || [] }
@@ -121,7 +145,19 @@ defineExpose({ refresh: fetchRows })
 <style scoped>
 .change-toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
 .change-toolbar > span { margin-right: auto; color: #64748b; }
-.changed { color: #409eff; font-weight: 600; white-space: pre-wrap; }
+.refresh-button { margin-left: auto; flex-shrink: 0; }
+.detail-field-value { padding: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.detail-field-value.is-changed { background: #fff4df; color: #875000; border-left: 3px solid #b86b00; border-radius: 4px; }
+.detail-field-value.is-deleted { background: #fff0f0; color: #a13232; border-left: 3px solid #c45656; border-radius: 4px; }
+.detail-change-label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+.package-comparison-table { margin-bottom: 16px; }
+.detail-footer { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; border-top: 1px solid #e4e7ed; padding-top: 16px; }
+.detail-footer .el-button + .el-button { margin-left: 0; }
+.applicant-reason-text { color: #1d5c91; font-weight: 600; background: #eef6ff; border-radius: 4px; padding: 2px 6px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
 .application-reason { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
 .review-comment { margin-top: 16px; }
+.change-status { font-weight: 600; }
+.change-status--pending { color: #b45309; }   /* 待审核：琥珀色 */
+.change-status--approved { color: #16794b; }  /* 已通过：绿色 */
+.change-status--rejected { color: #c24141; }  /* 已驳回：红色 */
 </style>

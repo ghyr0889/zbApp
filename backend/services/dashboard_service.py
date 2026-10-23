@@ -101,7 +101,8 @@ def summarize(items, dimension):
             name = f"{project.name or project.code}（{project.code}）" if project else "未分配项目"
         row = groups.setdefault(key, 
                                 {"id": key, 
-                                 "name": name, 
+                                 "name": name,
+                                 "project_code": project.code if dimension == "project" and project else None, 
                                  "count": 0, 
                                  "completed_count": 0,
                                   "score": 0.0, 

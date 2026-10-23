@@ -1,6 +1,5 @@
 <template>
   <div class="work-time-page">
-    <h2>工时记录</h2>
     <el-tabs v-model="tab">
       <el-tab-pane label="工作项计时" name="timer">
         <WorkTimeTracker :items="options" :loading="optionsLoading" :error="optionsError" @refresh="loadOptions" />

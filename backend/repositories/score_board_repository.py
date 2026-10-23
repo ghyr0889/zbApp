@@ -1,6 +1,23 @@
 """数据访问层：封装查询和持久化操作，不决定业务权限，不提交事务。"""
 from sqlalchemy import func
+from sqlalchemy.orm import selectinload
 import models
+
+
+def list_owned_items(db, user_id):
+    """扣分展示不能依赖填分记录：尚未填分的工作项也可能超期。"""
+    return (db.query(models.WorkItem)
+            .options(selectinload(models.WorkItem.work_package).selectinload(models.WorkPackage.project))
+            .filter(models.WorkItem.owner_id == user_id)
+            .order_by(models.WorkItem.id).all())
+
+
+def list_all_owned_items(db):
+    """积分统计中的进度扣分按工作项负责人查询，不依赖月度填分记录。"""
+    return (db.query(models.WorkItem)
+            .options(selectinload(models.WorkItem.work_package).selectinload(models.WorkPackage.project))
+            .filter(models.WorkItem.owner_id.isnot(None))
+            .all())
 
 
 def list_period_extra_scores(db, months):
@@ -118,7 +135,7 @@ def get_user(db, entry_id):
 
 def get_item(db, entry_id):
     """按主键查询，找不到返回 None，业务层决定如何报错。"""
-    return db.query(models.WorkItem).filter(models.WorkItem.id == entry_id).first()
+    return db.query(models.WorkItem).filter(models.WorkItem.id == entry_id).with_for_update().first()
 
 
 def get_month_score(db, work_item_id, month):

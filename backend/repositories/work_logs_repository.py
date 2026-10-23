@@ -1,6 +1,6 @@
 """数据访问层：封装查询和持久化操作，不决定业务权限，不提交事务。"""
 from sqlalchemy import or_, exists
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, aliased
 import models
 
 
@@ -53,14 +53,25 @@ def list_project_packages_page(db, project_id, page, page_size, keyword):
     return total, pkgs
 
 
-def list_my_packages_page(db, user_id, page, page_size):
-    """查询本人负责或含本人工作项的工作包分页。"""
+def personal_item_condition(user_id, show_completed=True, show_related=False):
+    """关联范围为当前仍含本人负责工作项的工作包，不依赖转办记录。"""
+    condition = models.WorkItem.owner_id == user_id
+    if show_related:
+        own_item = aliased(models.WorkItem)
+        from sqlalchemy import select
+        owned_packages = select(own_item.work_package_id).where(own_item.owner_id == user_id)
+        condition = models.WorkItem.work_package_id.in_(owned_packages)
+    if not show_completed:
+        condition = condition & models.WorkItem.complete_status.isnot(True)
+    return condition
+
+
+def list_my_packages_page(db, user_id, page, page_size, show_completed=True, show_related=False):
+    """本人负责的工作包和本人工作项所属工作包都参与分页，包括未分解工作包。"""
     q = db.query(models.WorkPackage).filter(or_(
         models.WorkPackage.owner_id == user_id,
-        exists().where(
-            models.WorkItem.work_package_id == models.WorkPackage.id,
-            models.WorkItem.owner_id == user_id,
-        )
+        models.WorkPackage.work_items.any(
+            personal_item_condition(user_id, show_completed, show_related)),
     ))
     total = q.count()
     pkgs = q.options(
@@ -101,11 +112,15 @@ def get_package(db, entry_id):
     return db.query(models.WorkPackage).filter(models.WorkPackage.id == entry_id).first()
 
 
-def list_package_items(db, work_package_id):
-    """读取工作包下工作项及负责人、月度分值。"""
+def list_package_items(db, work_package_id, owner_id=None, show_completed=True, show_related=False):
+    """读取工作项；提供 owner_id 时只查询该负责人。"""
+    query = db.query(models.WorkItem).filter(models.WorkItem.work_package_id == work_package_id)
+    if owner_id is not None:
+        query = query.filter(personal_item_condition(owner_id, show_completed, show_related))
+    if not show_completed:
+        query = query.filter(models.WorkItem.complete_status.isnot(True))
     return (
-        db.query(models.WorkItem)
-        .options(
+        query.options(
             selectinload(models.WorkItem.owner),
             selectinload(models.WorkItem.tech_owner),
             selectinload(models.WorkItem.monthly_scores),

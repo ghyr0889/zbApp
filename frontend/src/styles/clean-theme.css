@@ -1,0 +1,575 @@
+/* 公共表现层：不持有业务状态，不改变查询、权限或审批流程。 */
+:root {
+  --clean-canvas: #f4f7fe;
+  --clean-paper: #fff;
+  --clean-ink: #1f2937;
+  --clean-muted: #6b7a90;
+  --clean-line: #e7ecf4;
+  --clean-accent: #1762f6;
+  --clean-selected: #eaf5ff;
+  --clean-space: 24px;
+  --clean-motion: 220ms;
+  --el-color-primary: #1762f6;
+  --el-color-primary-light-3: #5c8ff8;
+  --el-color-primary-light-5: #8fb2fa;
+  --el-color-primary-light-7: #bfd0fc;
+  --el-color-primary-light-8: #d6e0fd;
+  --el-color-primary-light-9: #eef4ff;
+  --el-color-primary-dark-2: #124ed0;
+  --el-color-success: #2f9e6f;
+  --el-color-warning: #c08a24;
+  --el-color-danger: #d9534f;
+  --el-text-color-primary: #1f2937;
+  --el-text-color-regular: #3f4c60;
+  --el-text-color-secondary: #6b7a90;
+  --el-border-color: #d9e2ee;
+  --el-border-color-light: #e7ecf4;
+  --el-border-color-lighter: #eff3f8;
+  --el-fill-color-light: #f3f7fd;
+  --el-border-radius-base: 8px;
+  --el-font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'DengXian', Arial, sans-serif;
+}
+html body { color: var(--clean-ink); background: var(--clean-canvas); font-family: var(--el-font-family); }
+button, input, select, textarea { font-family: inherit; }
+:focus-visible { outline: 2px solid var(--clean-accent); outline-offset: 3px; }
+::selection { background: #d6eaff; color: #303d50; }
+.skip-link { position: fixed; top: 8px; left: 12px; z-index: 5000; padding: 12px 18px; background: white; color: var(--clean-accent); transform: translateY(-160%); }
+.skip-link:focus { transform: none; }
+#main-content:focus { outline: none; }
+
+/* 保持熟悉的顶栏结构；浅色导航与业务内容共同组成安静的工作空间。 */
+#app .right-profile { padding: 0 24px; box-shadow: none; border-bottom: 1px solid var(--clean-line); gap: 32px; }
+#app .portal-brand { color: var(--clean-ink); font-size: 18px; letter-spacing: -.02em; }
+#app .portal-nav a { color: var(--clean-muted); font-size: 14px; min-height: 44px; transition: color var(--clean-motion), background var(--clean-motion); }
+#app .portal-nav a.active, #app .portal-nav a:hover { color: var(--clean-accent); background: #f1f7fe; }
+#app .portal-nav a.active { border-bottom-color: var(--clean-accent); }
+#app .user-info-trigger { min-height: 44px; min-width: 44px; background: transparent; border-radius: 6px; font: inherit; }
+#app .user-avatar { background: #e5f1ff; color: var(--clean-accent); }
+#app .right-profile .user-id { color: var(--clean-muted); }
+#app .role-tag { border-radius: 4px; }
+#app .module-sidebar { flex-basis: 192px; width: 192px; background: white; border-right: 1px solid var(--clean-line); }
+#app .brand-logo { background: white; justify-content: flex-start; padding-left: 24px; height: 68px; font-size: 15px; color: var(--clean-ink); border-bottom: 1px solid var(--clean-line); }
+#app .left-menu { background: white; }
+#app .left-menu .el-menu-item { height: 44px; min-height: 44px; border-radius: 6px; color: var(--clean-muted); font-size: 14px; margin: 4px 12px; }
+#app .left-menu .el-menu-item:hover { background: #f2f7fc !important; }
+#app .left-menu .el-menu-item.is-active { color: var(--clean-accent); background: var(--clean-selected) !important; font-weight: 600; }
+#app .left-menu .el-menu-item.is-active::before { background: var(--clean-accent); }
+#app .left-menu .el-menu-item > .el-icon { width: 20px; margin-right: 10px; font-size: 18px; }
+#app .module-content, #app .portal-body, #app .review-page, #app .project-overview,
+#app .dashboard-page, #app .complete-review-page { background: var(--clean-canvas); }
+#app .main-body { background: var(--clean-canvas); }
+#app .review-page { animation: none; }
+
+/* 白色内容面＋细线替代重阴影；不移动业务工具栏。 */
+#app .box-card, #app .home-card, #app .application-card, #app .board-card {
+  border: 1px solid var(--clean-line); border-radius: 8px; background: white; box-shadow: none;
+}
+#app .box-card > .el-card__body { padding: var(--clean-space); }
+#app .complete-review-embed .box-card { border: 0; }
+#app .complete-review-embed .box-card > .el-card__body { padding: 0; }
+#app .el-card__header { border-bottom-color: var(--clean-line); }
+#app .el-tabs__item { height: 48px; font-size: 14px; color: var(--clean-muted); }
+#app .el-tabs__item.is-active { color: var(--clean-accent); font-weight: 600; }
+#app .el-tabs__active-bar { background: var(--clean-accent); height: 2px; }
+#app .el-tabs__nav-wrap::after { height: 1px; background: var(--clean-line); }
+#app .el-button, body .el-dialog .el-button { min-width: 44px; min-height: 44px; border-radius: 6px; transition: background-color var(--clean-motion), border-color var(--clean-motion); }
+#app .el-input__wrapper, #app .el-select__wrapper { min-height: 46px; box-sizing: border-box; border-radius: 6px; }
+#app .el-checkbox, #app .el-radio { min-height: 44px; height: auto; }
+#app .el-checkbox__label, #app .el-radio__label { line-height: 1.5; }
+#app .el-table { --el-table-border-color: #e2ecf5; --el-table-header-bg-color: #f2f7fc; --el-table-row-hover-bg-color: #f0f7ff; color: var(--clean-ink); font-variant-numeric: tabular-nums; }
+#app .el-table th.el-table__cell { background: #f2f7fc !important; color: #40566d !important; font-weight: 600; padding: 12px 0 !important; }
+#app .el-table td.el-table__cell { padding: 8px 0 !important; }
+#app .el-table .cell { line-height: 1.65; }
+#app .el-table__expand-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  width: 44px;
+  height: 44px;
+  margin: auto;
+  color: #245d8c;
+}
+#app .el-table__expand-icon > .el-icon {
+  position: static;
+  margin: 0;
+  font-size: 18px;
+}
+#app .el-table__expand-icon:not(.is-disabled):hover {
+  color: #174d7b;
+  background: #e1effc;
+}
+#app .el-table__expand-icon.is-disabled {
+  color: var(--el-disabled-text-color);
+}
+#app .expand-wrapper, #app .inner-table-container, #app .nested-table-container { background: #f7faff; border-color: var(--clean-line); box-shadow: none; border-radius: 6px; }
+#app .el-pagination { flex-wrap: wrap; font-variant-numeric: tabular-nums; }
+#app .el-pagination button, #app .el-pager li { min-height: 44px; min-width: 44px; }
+#app .el-tag { border-radius: 4px; }
+#app .hint, #app .page-desc, #app .calculation-note, #app .muted-text, #app .overview-unit { color: var(--clean-muted); }
+#app .pending-alert { border: 1px solid #f1e7d0; background: #fcf8ef; border-radius: 6px; }
+
+/* 周期选择与看板共享强调色，图表分类色保留用于区分数据。 */
+#app .board-toolbar { border: 1px solid var(--clean-line); border-radius: 8px; padding: 20px; }
+#app .board-card { padding: 24px; }
+#app .board-card h2 { color: var(--clean-ink); font-size: 18px; }
+#app .segments, #app .period-segments { background: #eaf2fa; border-radius: 6px; }
+#app .segments button, #app .period-segments button, #app .period-label,
+body .scroll-period-picker button { min-width: 44px; min-height: 44px; }
+#app .segments button, #app .period-segments button { color: var(--clean-muted); }
+#app .segments button.selected, #app .period-segments button.selected { color: var(--clean-accent); background: white; box-shadow: 0 1px 3px #303d500d; }
+body .scroll-period-picker .year-list button.selected { background: var(--clean-accent); color: white; }
+body .scroll-period-picker .period-grid button.selected { color: var(--clean-accent); }
+body .scroll-period-picker button:focus-visible { outline-color: var(--clean-accent); }
+#app .dashboard-card { background: #f0f7ff; border: 1px solid var(--clean-line); border-radius: 6px; box-shadow: none; }
+#app .stat-value { color: var(--clean-ink); font-variant-numeric: tabular-nums; }
+#app .chart-tools .el-button { color: var(--clean-muted); }
+#app .work-time-status { background: #eaf5ff; border-color: #d0e4f7; color: #2169c2; }
+body .el-dialog { border-radius: 8px; padding: 24px; max-width: calc(100vw - 24px); max-height: 90dvh; overflow-y: auto; }
+body .el-dialog__headerbtn { min-height: 44px; min-width: 44px; }
+body .el-dialog__title { font-size: 18px; font-weight: 600; }
+body .el-dialog__footer { border-top: 1px solid var(--clean-line); padding-top: 16px; margin-top: 16px; }
+
+/* 门户仅保留必要标题与真实内容，不增加宣传区。 */
+.page-intro { margin-bottom: 24px; animation: intro-in 220ms ease-out; }
+.page-intro h1 { margin: 0; color: var(--clean-ink); font-size: 28px; font-weight: 600; letter-spacing: -.03em; }
+.page-intro p { color: var(--clean-muted); font-size: 14px; margin: 8px 0 0; line-height: 1.7; }
+#app .home-page { max-width: 1440px; padding: 28px 32px; }
+#app .home-grid { grid-template-columns: minmax(400px, 1.1fr) minmax(0, 1.4fr); gap: 24px; }
+#app .home-card h2 { font-size: 17px; margin: 0; color: var(--clean-ink); }
+#app .home-card .el-card__header { padding: 20px 0; }
+#app .home-card .profile-actions .el-button { color: var(--clean-accent); border-color: #bdd2ed; background: var(--clean-selected); }
+#app .announcement-title { min-height: 44px; color: var(--clean-ink); }
+#app .announcement-heading a, #app .application-link { display: inline-flex; align-items: center; min-height: 44px; color: var(--clean-accent); }
+#app .applications-page { background: transparent; box-shadow: none; padding: 12px 8px; }
+#app .application-icon { background: #eaf5ff; border-radius: 8px; }
+#app .application-icon .el-icon { color: var(--clean-accent); }
+#app .ledger-icon { background: #edf5ff; }
+#app .ledger-icon .el-icon { color: #3975ac; }
+#app .application-card p { color: var(--clean-muted); }
+#app .application-card:hover { border-color: #9cc3e5; }
+#app .login-container { background: var(--clean-canvas); }
+#app .login-card { background: white; border: 1px solid var(--clean-line); border-radius: 12px; box-shadow: 0 12px 40px #303d5008; }
+#app .login-header h2 { color: var(--clean-ink); font-size: 24px; }
+#app .login-footer { color: var(--clean-muted); }
+@keyframes intro-in { from { opacity: .5; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+@media (min-width: 768px) and (max-width: 1199px) {
+  :root { --clean-space: 20px; }
+  #app .module-sidebar { flex-basis: 160px; width: 160px; }
+  #app .left-menu .el-menu-item { margin-left: 8px; margin-right: 8px; }
+  #app .right-profile { gap: 16px; padding: 0 16px; }
+}
+@media (max-width: 767px) {
+  :root { --clean-space: 16px; }
+  #app .module-layout { flex-direction: column; }
+  #app .module-sidebar { flex: 0 0 auto; width: 100%; flex-direction: row; overflow-x: auto; border-bottom: 1px solid var(--clean-line); }
+  #app .module-sidebar .brand-logo { display: none; }
+  #app .module-sidebar > .left-menu { display: flex; flex: 0 0 auto; width: auto; overflow: visible; padding: 4px; border: 0; }
+  #app .left-menu .el-menu-item { margin: 2px; padding: 0 12px !important; }
+  #app .left-menu .el-menu-item > .el-icon { display: none; }
+  #app .action-bar, #app .toolbar, #app .header-actions, #app .board-toolbar,
+  #app .card-heading, #app .period-navigation { flex-wrap: wrap; gap: 12px; }
+  #app .chart-grid, #app .home-grid { grid-template-columns: minmax(0, 1fr); }
+  #app .home-page { padding: 20px 16px; }
+  #app .review-page, #app .project-overview, #app .dashboard-page { padding: 12px; }
+  #app .el-table { max-width: 100%; }
+  #app .board-card { min-width: 0; padding: 16px; }
+  #app .portal-brand { font-size: 15px; }
+  #app .right-profile { padding: 0 12px; gap: 10px; }
+  #app .page-intro h1 { font-size: 24px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition-duration: 0s !important; scroll-behavior: auto !important; }
+}
+
+/* 通栏工作区：去掉页面外侧空隙，保留与工时记录相同的内容安全边距。
+   只处理页面的第一层容器，展开表格、图表卡片和弹窗仍保留内部层次。 */
+#app .module-content,
+#app .portal-body,
+#app .portal-body > .page-container {
+  background: #fff;
+}
+
+#app .module-content > :is(.project-overview, .review-page, .score-board-page,
+  .admin-panel-page, .project-detail-page, .ledger-overview),
+#app .portal-body .page-container > :is(.personal-info-page, .announcements-page) {
+  padding: 0;
+  margin: 0;
+  width: 100%;
+  max-width: none;
+  min-height: 0;
+  box-sizing: border-box;
+  background: #fff;
+  animation: none;
+}
+
+#app :is(.project-overview, .review-page, .score-board-page, .admin-panel-page,
+  .project-detail-page, .personal-info-page, .announcements-page, .ledger-overview) > .el-card {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  min-height: 0;
+}
+
+#app :is(.project-overview, .review-page, .score-board-page, .admin-panel-page,
+  .project-detail-page, .personal-info-page, .announcements-page, .ledger-overview) > .el-card > .el-card__body {
+  padding: 16px 20px;
+}
+
+#app :is(.project-overview, .review-page, .admin-panel-page, .project-detail-page,
+  .personal-info-page, .announcements-page, .ledger-overview) > .el-card > .el-card__header {
+  padding: 16px 20px;
+}
+
+#app .module-content > :is(.dashboard-page, .personnel-management-container),
+#app .portal-body .page-container > :is(.home-page, .applications-page) {
+  padding: 16px 20px;
+  margin: 0;
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+  background: #fff;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* 积分周期栏不再叠加额外顶部留白。 */
+#app .score-board-page > .box-card > .el-card__body > .global-filter {
+  padding-top: 0;
+}
+
+/* 参考图的轻盈蓝白导航：柔和渐变、圆角容器、细线选中标记。 */
+#app .right-profile {
+  top: 4px;
+  left: 4px;
+  right: 4px;
+  height: 56px;
+  border: 1px solid #ffffff;
+  border-radius: 16px;
+  background: linear-gradient(110deg, #edf5ff 0%, #f8fbff 65%, #f2f5ff 100%);
+  box-shadow: 0 3px 10px #30476b0a;
+}
+#app .portal-nav a.active,
+#app .portal-nav a:hover { background: #eaf5ff; color: var(--clean-accent); }
+#app .module-sidebar {
+  margin: 8px 0 8px 6px;
+  background: linear-gradient(155deg, #eaf3ff 0%, #f5f9ff 45%, #f0f4fc 100%);
+  border: 1px solid #e0e9f5;
+  border-radius: 16px;
+  box-shadow: 0 3px 12px #30476b08;
+}
+#app .module-sidebar .brand-logo {
+  height: 54px;
+  padding-left: 20px;
+  background: transparent;
+  color: #394b63;
+  border: 0;
+  font-size: 15px;
+  letter-spacing: 0;
+}
+.sidebar-group-label {
+  flex-shrink: 0;
+  margin: 8px 20px 4px;
+  color: #5e6e85;
+  font-size: 12px;
+  line-height: 20px;
+}
+#app .module-sidebar .left-menu {
+  background: transparent;
+  padding-top: 0;
+  --el-menu-bg-color: transparent;
+  --el-menu-text-color: #4b5c73;
+}
+#app .module-sidebar .left-menu .el-menu-item {
+  margin: 3px 8px;
+  padding-left: 12px !important;
+  color: #4b5c73;
+  border-radius: 10px;
+  font-weight: 400;
+}
+#app .module-sidebar .left-menu .el-menu-item > .el-icon {
+  color: #65758e;
+  font-size: 19px;
+  margin-right: 10px;
+}
+#app .module-sidebar .left-menu .el-menu-item:hover {
+  background: #e4f0ff !important;
+  color: #2169c2;
+}
+#app .module-sidebar .left-menu .el-menu-item.is-active {
+  color: #2169c2;
+  background: #e2f1ff !important;
+  font-weight: 600;
+}
+#app .module-sidebar .left-menu .el-menu-item.is-active > .el-icon {
+  color: #2169c2;
+}
+#app .module-sidebar .left-menu .el-menu-item.is-active::before {
+  background: #438df0;
+  left: 0;
+  width: 2px;
+  top: 13px;
+  bottom: 13px;
+  border-radius: 2px;
+}
+#app .module-sidebar > .bottom-menu {
+  border: 0;
+  padding-bottom: 12px;
+}
+/* 业务内容维持通栏，只柔化已有的内层卡片。 */
+#app .board-card, #app .home-card, #app .application-card {
+  border-color: #e3e8f0;
+  border-radius: 14px;
+  box-shadow: 0 3px 10px #30476b08;
+}
+#app .user-avatar { background: #def0ff; color: #2169c2; }
+#app .user-info-trigger:hover { background: #eaf2ff; border-color: #dce7f5; }
+#app .ledger-icon { background: #eaf5ff; }
+#app .ledger-icon .el-icon { color: #2169c2; }
+@media (max-width: 767px) {
+  #app .module-sidebar { margin: 4px 6px; width: calc(100% - 12px); border-radius: 12px; }
+  #app .module-sidebar .sidebar-group-label { display: none; }
+  #app .module-sidebar > .bottom-menu { padding: 4px; }
+}
+@media (max-width: 480px) {
+  #app .right-profile { height: 104px; }
+  #app .main-body { padding-top: 104px; }
+}
+
+/* ================= 视觉升级：浅蓝画布 + 白色圆角内容面 =================
+   参考图的轻盈蓝白风格：
+   · 页面底色使用极浅的蓝灰，内容以白色圆角面板承载
+   · 左侧菜单与右侧页面之间保留间距（module-layout 的 gap）
+   · 主色统一为 #1762f6                                                  */
+
+/* 工作区：左侧菜单与右侧页面之间留出间距 */
+#app .module-layout {
+  gap: 12px;
+  padding: 10px 14px 12px 10px;
+  background: var(--clean-canvas);
+  box-sizing: border-box;
+}
+
+#app .module-content { background: transparent; }
+#app .portal-body, #app .portal-body > .page-container { background: var(--clean-canvas); }
+#app .portal-body > .page-container { padding: 12px 16px 16px; box-sizing: border-box; }
+
+/* 页面外层容器透明，让内部白色卡片浮在画布上 */
+#app .module-content > :is(.project-overview, .review-page, .score-board-page,
+  .admin-panel-page, .project-detail-page, .ledger-overview),
+#app .portal-body .page-container > :is(.personal-info-page, .announcements-page) {
+  padding: 0;
+  margin: 0;
+  width: 100%;
+  max-width: none;
+  min-height: 0;
+  box-sizing: border-box;
+  background: transparent;
+  animation: none;
+}
+
+/* 白色圆角内容面 */
+#app :is(.project-overview, .review-page, .score-board-page, .admin-panel-page,
+  .project-detail-page, .personal-info-page, .announcements-page, .ledger-overview) > .el-card {
+  margin: 0;
+  border: 1px solid var(--clean-line);
+  border-radius: 14px;
+  box-shadow: 0 2px 12px rgba(23, 98, 246, .05);
+  background: #fff;
+  min-height: 0;
+}
+
+#app :is(.project-overview, .review-page, .score-board-page, .admin-panel-page,
+  .project-detail-page, .personal-info-page, .announcements-page, .ledger-overview) > .el-card > .el-card__body {
+  padding: 16px 20px;
+}
+
+#app :is(.project-overview, .review-page, .admin-panel-page, .project-detail-page,
+  .personal-info-page, .announcements-page, .ledger-overview) > .el-card > .el-card__header {
+  padding: 16px 22px;
+  border-bottom: 1px solid var(--clean-line);
+}
+
+#app .module-content > :is(.dashboard-page, .personnel-management-container),
+#app .portal-body .page-container > :is(.home-page, .applications-page),
+#app .module-content > .work-time-page {
+  padding: 18px 22px;
+  margin: 0;
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+  background: #fff;
+  border: 1px solid var(--clean-line);
+  border-radius: 14px;
+  box-shadow: 0 2px 12px rgba(23, 98, 246, .05);
+}
+
+/* 顶栏：浅蓝渐变 + 细分割线 */
+#app .right-profile {
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 64px;
+  border: 0;
+  border-bottom: 1px solid #e3e9f3;
+  border-radius: 0;
+  background: linear-gradient(90deg, #eaf2fd 0%, #f2f6fe 55%, #eef0fd 100%);
+  box-shadow: 0 1px 0 rgba(23, 98, 246, .03);
+}
+#app .portal-brand { color: var(--clean-ink); }
+#app .portal-nav a.active, #app .portal-nav a:hover { background: #eaf5ff; color: var(--clean-accent); }
+#app .portal-nav a.active { border-bottom-color: var(--clean-accent); }
+#app .right-profile .user-name { color: var(--clean-ink); }
+#app .user-avatar { background: #e3efff; color: var(--clean-accent); }
+#app .user-info-trigger:hover { background: #eaf3ff; border-color: #dbe7f8; }
+
+/* 左侧菜单：浅蓝渐变圆角面板 */
+#app .module-sidebar {
+  margin: 0;
+  background: linear-gradient(180deg, #f6f9ff 0%, #eef2fd 100%);
+  border: 1px solid #e4eaf4;
+  border-radius: 14px;
+  box-shadow: 0 2px 12px rgba(23, 98, 246, .05);
+}
+#app .module-sidebar .brand-logo {
+  height: 60px;
+  padding-left: 20px;
+  background: transparent;
+  color: var(--clean-ink);
+  border: 0;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: .5px;
+}
+.sidebar-group-label { margin: 12px 20px 4px; color: #8a97ad; }
+#app .module-sidebar .left-menu {
+  background: transparent;
+  --el-menu-bg-color: transparent;
+  --el-menu-text-color: #4a5a72;
+}
+#app .module-sidebar .left-menu .el-menu-item {
+  margin: 3px 10px;
+  padding-left: 14px !important;
+  color: #4a5a72;
+  border-radius: 10px;
+}
+#app .module-sidebar .left-menu .el-menu-item > .el-icon { color: #7c8aa0; }
+#app .module-sidebar .left-menu .el-menu-item:hover {
+  background: #edf4ff !important;
+  color: var(--clean-accent);
+}
+#app .module-sidebar .left-menu .el-menu-item.is-active {
+  background: #eaf5ff !important;
+  color: var(--clean-accent);
+  font-weight: 600;
+}
+#app .module-sidebar .left-menu .el-menu-item.is-active > .el-icon { color: var(--clean-accent); }
+#app .module-sidebar .left-menu .el-menu-item.is-active::before {
+  left: 0;
+  top: 12px;
+  bottom: 12px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--clean-accent);
+}
+#app .module-sidebar > .bottom-menu { border: 0; }
+
+/* 控件与表格：更柔和的圆角与浅色描边 */
+#app .el-button { border-radius: 8px; }
+#app .el-input__wrapper, #app .el-select__wrapper { border-radius: 8px; }
+#app .el-tag { border-radius: 6px; }
+#app .el-table {
+  --el-table-border-color: #eef2f7;
+  --el-table-header-bg-color: #f7f9fd;
+  --el-table-row-hover-bg-color: #f4f8ff;
+}
+#app .el-table th.el-table__cell { background: #f7f9fd !important; color: #4a5a72 !important; }
+#app .el-tabs__active-bar { background: var(--clean-accent); }
+#app .el-tabs__item.is-active { color: var(--clean-accent); }
+#app .work-time-status { background: #eaf5ff; border-color: #d5e6fb; color: var(--clean-accent); }
+#app .ledger-icon { background: #eaf5ff; }
+#app .ledger-icon .el-icon { color: var(--clean-accent); }
+#app .board-card, #app .home-card, #app .application-card {
+  border-color: #e8edf5;
+  border-radius: 14px;
+  box-shadow: 0 2px 12px rgba(23, 98, 246, .05);
+}
+
+@media (min-width: 768px) and (max-width: 1199px) {
+  #app .module-layout { gap: 10px; padding: 10px 12px 12px 10px; }
+  #app .module-sidebar { flex-basis: 172px; width: 172px; }
+}
+@media (max-width: 767px) {
+  #app .module-layout { gap: 10px; padding: 8px; }
+  #app .module-sidebar { width: 100%; border-radius: 12px; }
+  #app .module-sidebar .brand-logo { display: none; }
+}
+@media (max-width: 480px) {
+  #app .right-profile { height: 104px; }
+  #app .main-body { padding-top: 104px; }
+}
+
+/* 首页各模块独立成卡片，模块间露出浅蓝底色。 */
+#app .portal-body .page-container > .home-page {
+  background: #f2f7fd;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+#app .home-page > .application-center {
+  margin-top: 32px;
+  background: #fff;
+  border: 1px solid var(--clean-line);
+  border-radius: 14px;
+  box-shadow: 0 2px 12px rgba(23, 98, 246, .05);
+}
+@media (max-width: 767px) {
+  #app .home-page > .application-center { margin-top: 24px; }
+}
+
+/* 全局紧凑数字输入框：同时覆盖页面与挂载到 body 的弹窗。 */
+body .el-input-number {
+  --el-input-height: 32px;
+  --el-component-size: 32px;
+  --el-component-size-small: 32px;
+  --el-component-size-large: 32px;
+  width: 100px !important;
+  max-width: 100%;
+  height: 32px;
+  line-height: 30px;
+}
+body .el-input-number .el-input {
+  --el-input-height: 32px;
+  height: 32px;
+}
+body .el-input-number .el-input__wrapper,
+#app .el-input-number .el-input__wrapper {
+  min-height: 32px;
+  height: 32px;
+  border-radius: 6px;
+}
+body .el-input-number .el-input__inner {
+  height: 30px;
+  line-height: 30px;
+  font-size: 13px;
+}
+body .el-input-number .el-input-number__increase,
+body .el-input-number .el-input-number__decrease {
+  width: 22px;
+  font-size: 12px;
+}
+body .el-input-number:not(.is-without-controls) .el-input__wrapper {
+  padding-left: 25px;
+  padding-right: 25px;
+}
+body .el-input-number.is-controls-right .el-input__wrapper {
+  padding-left: 8px;
+  padding-right: 26px;
+}
+body .el-input-number.is-controls-right .el-input-number__increase,
+body .el-input-number.is-controls-right .el-input-number__decrease {
+  height: 15px;
+  line-height: 15px;
+}

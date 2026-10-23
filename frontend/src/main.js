@@ -3,6 +3,9 @@ import App from './App.vue'
 import router from './router'
 import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
+import './styles/clean-theme.css'
+import './styles/table-content.css'
+import { installTableContentPreview } from './utils/tableContent'
 import { createPinia } from 'pinia'
 import zhCn from 'element-plus/dist/locale/zh-cn.mjs'
 import { startAutoUpdate } from './autoUpdate'
@@ -20,6 +23,8 @@ setUnauthorizedHandler(() => {
 app.use(router)
 app.use(ElementPlus, { locale: zhCn })
 app.mount('#app')
+const disposeTableContentPreview = installTableContentPreview()
+if (import.meta.hot) import.meta.hot.dispose(disposeTableContentPreview)
 
 // 生产环境：轮询 /version.json，发现新版本自动刷新（开发环境无需）
 if (import.meta.env.PROD) {

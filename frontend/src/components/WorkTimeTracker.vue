@@ -11,7 +11,7 @@
           <div class="nested-table">
             <el-table :data="pkg.items" border size="small" highlight-current-row :current-row-key="selectedId" row-key="id" @row-click="select" empty-text="暂无符合条件的工作项">
               <el-table-column type="index" label="序号" width="60" align="center" />
-              <el-table-column prop="name" label="工作项名称" min-width="220" show-overflow-tooltip />
+              <el-table-column prop="name" label="工作项名称" min-width="220" />
               <el-table-column label="状态" width="150"><template #default="{ row }"><el-tag :type="isCurrent(row) ? 'success' : row.can_start ? 'info' : 'warning'">{{ isCurrent(row) ? '本次计时未结束' : row.can_start ? '可计时' : '已完成 / 关闭' }}</el-tag></template></el-table-column>
               <el-table-column label="计时操作" width="150" fixed="right"><template #default="{ row }">
                 <WorkTimeActions v-if="isCurrent(row)" />
@@ -22,9 +22,9 @@
         </template>
       </el-table-column>
       <el-table-column type="index" label="序号" width="60" align="center" />
-      <el-table-column label="工作包编号" min-width="150" show-overflow-tooltip><template #default="{ row }">{{ row.work_package_code || '—' }}</template></el-table-column>
-      <el-table-column prop="work_package_name" label="工作包名称" min-width="200" show-overflow-tooltip />
-      <el-table-column prop="project_name" label="所属项目" min-width="180" show-overflow-tooltip />
+      <el-table-column label="工作包编号" min-width="150"><template #default="{ row }">{{ row.work_package_code || '—' }}</template></el-table-column>
+      <el-table-column prop="work_package_name" label="工作包名称" min-width="200" />
+      <el-table-column prop="project_name" label="所属项目" min-width="180" />
       <el-table-column label="工作项数" width="110" align="center"><template #default="{ row }">{{ row.items.length }}</template></el-table-column>
     </el-table>
     <p v-if="timer.current" class="list-note">每次只能计时一个工作项，请先结束当前计时再切换。关闭页面不会停止计时。</p>

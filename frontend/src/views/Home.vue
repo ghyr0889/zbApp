@@ -1,9 +1,10 @@
 <!-- 主页面 -->
 <template>
   <main class="home-page">
+    <PageIntro title="我的工作台" description="查看个人信息与公告，选择应用开始工作。" />
     <div class="home-grid">
       <el-card shadow="never" class="home-card">
-        <template #header><h1>个人信息</h1></template>
+        <template #header><h2>个人信息</h2></template>
         <div class="profile-summary">
           <el-avatar :size="80" class="user-avatar">{{ user.username?.charAt(0) || 'U' }}</el-avatar>
           <dl>
@@ -21,7 +22,7 @@
       <el-card shadow="never" class="home-card">
         <template #header>
           <div class="announcement-heading">
-            <h1>公告板</h1>
+            <h2>公告板</h2>
             <router-link to="/announcements">更多 ›</router-link>
           </div>
         </template>
@@ -44,6 +45,8 @@
       </el-card>
     </div>
 
+    <ApplicationCenter />
+
     <el-dialog v-model="detailVisible" title="公告详情" width="min(900px, 94vw)" top="6vh" @closed="clearDetail">
       <div v-loading="detailLoading" class="announcement-detail">
         <template v-if="detail">
@@ -59,6 +62,8 @@
 </template>
 
 <script setup>
+import PageIntro from '../components/PageIntro.vue'
+import ApplicationCenter from '../components/ApplicationCenter.vue'
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '../stores/user'
@@ -139,10 +144,10 @@ h1 { margin: 0; font-size: 18px; font-weight: 600; color: #409eff; }
 .announcement-heading a:hover { color: #409eff; }
 .profile-summary { display: flex; align-items: center; gap: 22px; padding: 16px 0; }
 .profile-summary .el-avatar { flex-shrink: 0; font-size: 28px; }
-dl { margin: 0; min-width: 0; font-size: 14px; }
-dl > div { display: flex; margin: 14px 0; line-height: 1.6; }
-dt { color: #909399; flex: 0 0 42px; }
-dd { margin: 0; color: #303133; overflow-wrap: anywhere; }
+dl { margin: 0; min-width: 0; flex: 1; font-size: 14px; overflow-x: auto; }
+dl > div { display: grid; grid-template-columns: 4em max-content; column-gap: 12px; margin: 14px 0; line-height: 1.6; }
+dt { color: #737f90; white-space: nowrap; }
+dd { margin: 0; color: #303133; white-space: nowrap; }
 .profile-actions { padding: 20px 0 10px; text-align: center; }
 .announcement-list { min-height: 280px; }
 ul { margin: 0; padding: 0; list-style: none; }
@@ -157,4 +162,5 @@ time { color: #777; font-size: 13px; white-space: nowrap; }
 .detail-meta { color: #909399; font-size: 13px; line-height: 1.8; }
 .detail-content { white-space: pre-wrap; line-height: 2; color: #303133; }
 @media (max-width: 900px) { .home-grid { grid-template-columns: 1fr; } .home-page { padding: 20px 12px; } }
+@media (max-width: 480px) { .profile-summary { flex-direction: column; align-items: stretch; gap: 12px; } .profile-summary .el-avatar { align-self: flex-start; } }
 </style>

@@ -12,6 +12,12 @@ let chart, observer
 onMounted(() => {
   chart = echarts.init(host.value)
   chart.setOption(props.option, true)
+  // 仅横坐标标签显示全文，数值仍由看板的“显示详细数据”按钮控制。
+  chart.on('mouseover', params => {
+    if (host.value) host.value.title = params.componentType === 'xAxis' ? String(params.value ?? '') : ''
+  })
+  chart.on('mouseout', () => { if (host.value) host.value.removeAttribute('title') })
+  chart.getZr().on('globalout', () => { if (host.value) host.value.removeAttribute('title') })
   observer = new ResizeObserver(() => chart?.resize())
   observer.observe(host.value)
 })

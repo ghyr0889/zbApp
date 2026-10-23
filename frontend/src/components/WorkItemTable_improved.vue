@@ -1,6 +1,6 @@
 <template>
   <div class="work-item-table">
-    <div class="table-actions">
+    <div v-if="!readOnly" class="table-actions">
       <el-tag v-if="pkgLocked" type="danger" effect="dark" size="small" class="closed-notice">
         工作包或所属项目已关闭，禁止新增/编辑/填分
       </el-tag>
@@ -11,7 +11,7 @@
     </div>
 
     <!-- 填写/查看月份：每月前2天可切换到上月补填 -->
-    <div v-if="hasManage && monthOptions.length > 1" class="month-switch">
+    <div v-if="(readOnly || hasManage) && monthOptions.length > 1" class="month-switch">
       <span class="month-label">填写/查看月份：</span>
       <el-select v-model="fillMonth" size="small" style="width: 150px">
         <el-option v-for="m in monthOptions" :key="m.value" :label="m.label" :value="m.value" />
@@ -25,19 +25,20 @@
       border
       size="small"
       max-height="calc(100vh - 400px)"
-      empty-text="该工作包下暂无工作项，点击「新增工作项」可添加"
+      :empty-text="readOnly || onlyMine ? '当前筛选条件下暂无工作项' : '该工作包下暂无工作项，点击「新增工作项」可添加'"
       :row-class-name="rowClassName"
     >
       <el-table-column type="index" label="序号" width="52" align="center" fixed="left" />
       <el-table-column label="累计工时" min-width="120">
         <template #default="{ row }">
-          <WorkItemTimer :item="row" :locked="pkgLocked" />
+          <span v-if="row.is_related">—</span>
+          <WorkItemTimer v-else :item="row" :locked="pkgLocked" />
         </template>
       </el-table-column>
       <el-table-column prop="name" label="名称" min-width="150">
         <template #default="{ row }">
           <el-input v-if="row.isEdit" v-model="row.name" size="small" placeholder="请输入名称" />
-          <span v-else>{{ row.name }}</span>
+          <span v-else>{{ row.name }} <el-tag v-if="row.is_related" size="small" type="info">关联 · 只读</el-tag></span>
         </template>
       </el-table-column>
 
@@ -75,7 +76,7 @@
         </template>
       </el-table-column>
 
-      <el-table-column prop="deadline" label="截止时间" width="130" align="center">
+      <el-table-column prop="deadline" label="截止时间" width="155" align="center" class-name="deadline-column">
         <template #default="{ row }">
           <el-date-picker
             v-if="row.isEdit"
@@ -83,6 +84,7 @@
             type="date"
             value-format="YYYY-MM-DD"
             size="small"
+            class="deadline-date-picker"
             style="width: 100%"
             placeholder="选择日期"
           />
@@ -100,26 +102,26 @@
 
       <el-table-column label="剩余分值" width="90" align="center">
         <template #default="{ row }">
-          <span class="score-text">{{ row.remaining_score }}</span>
-        </template>
-      </el-table-column>
-
-      <el-table-column label="负责人" width="120" align="center" fixed="right">
-        <template #default="{ row }">
-          <el-select v-if="row.isEdit" v-model="row.owner_id" filterable placeholder="选择负责人" size="small" style="width: 100%">
-            <el-option v-for="u in userOptions" :key="u.id" :label="`${u.username}（${u.id}）`" :value="u.id" />
-          </el-select>
-          <span v-else class="employee-text">{{ row.owner_name || '-' }}</span>
+          <span class="score-text">{{ formatScore(row.remaining_score) }}</span>
         </template>
       </el-table-column>
 
       <!-- 技术负责人：工作项完成后由 TA 审核 -->
       <el-table-column label="技术负责人" width="130" align="center">
         <template #default="{ row }">
-          <el-select v-if="row.isEdit" v-model="row.tech_owner_id" filterable clearable placeholder="选择技术负责人" size="small" style="width: 100%">
+          <el-select v-if="row.isEdit" v-model="row.tech_owner_id" filterable clearable placeholder="选择技术负责人" size="small" style="width: 100%" @change="syncAssigneeName(row, 'tech_owner')">
             <el-option v-for="u in userOptions" :key="u.id" :label="`${u.username}（${u.id}）`" :value="u.id" />
           </el-select>
-          <span v-else class="employee-text">{{ row.tech_owner_name || '-' }}</span>
+          <span v-else class="employee-text">{{ assigneeName(row, 'tech_owner') }}</span>
+        </template>
+      </el-table-column>
+
+      <el-table-column label="负责人" width="120" align="center">
+        <template #default="{ row }">
+          <el-select v-if="row.isEdit" v-model="row.owner_id" filterable placeholder="选择负责人" size="small" style="width: 100%" @change="syncAssigneeName(row, 'owner')">
+            <el-option v-for="u in userOptions" :key="u.id" :label="`${u.username}（${u.id}）`" :value="u.id" />
+          </el-select>
+          <span v-else class="employee-text">{{ assigneeName(row, 'owner') }}</span>
         </template>
       </el-table-column>
 
@@ -139,17 +141,7 @@
 
       <el-table-column prop="quality_score" label="质量分" width="90" align="center" >
         <template #default="{ row }">
-          <template v-if="row.isEditQuality">
-            <el-input-number v-model="row.quality_score" :min="-1000" :step="0.5" size="small" style="width: 100%" controls-position="right" />
-            <div class="score-actions">
-              <el-button type="success" link size="small" :loading="savingQuality" @click="saveQualityScore(row)">保存</el-button>
-              <el-button type="info" link size="small" @click="row.isEditQuality = false">取消</el-button>
-            </div>
-          </template>
-          <template v-else>
-            <span class="score-text">{{ row.quality_score ?? 0 }}</span>
-            <el-button v-if="canManageQuality && !isLocked(row) && !row.isPending" type="primary" link size="small" @click="row.isEditQuality = true">填写</el-button>
-          </template>
+          <span class="score-text">{{ row.quality_score ?? 0 }}</span>
         </template>
       </el-table-column>
 
@@ -190,7 +182,8 @@
 
       <el-table-column v-if="hasManage" label="操作" min-width="140" align="center" fixed="right">
         <template #default="{ row, $index }">
-          <template v-if="row.isPending">
+          <template v-if="row.is_related"><el-tag size="small" type="info">只读</el-tag></template>
+          <template v-else-if="row.isPending">
             <el-tag size="small" type="warning" effect="plain">待审核</el-tag>
           </template>
           <template v-else-if="row.isEdit">
@@ -221,7 +214,7 @@
 
                   <!-- 提交完成审核：未完成且无待审申请时可用（后端校验进度满或已手动确认） -->
                   <el-dropdown-item
-                    v-if="canManageRow(row) && !isLocked(row) && row.id && !row.complete_status && !row.pending_complete_review"
+                    v-if="canSubmitCompletion(row) && !isLocked(row) && row.id && !row.complete_status && !row.pending_complete_review"
                     command="confirmComplete" divided> 提交完成审核
                   </el-dropdown-item>
 
@@ -289,7 +282,7 @@
       <el-form label-width="90px">
         <el-form-item label="工作项">
           <el-tag>{{ transferRow?.name }}</el-tag>
-          <span style="margin-left: 8px; color: #909399;">剩余 {{ transferRow?.remaining_score }} 分</span>
+          <span style="margin-left: 8px; color: #909399;">剩余 {{ formatScore(transferRow?.remaining_score) }} 分</span>
         </el-form-item>
         <el-form-item label="接收人" required>
           <el-select v-model="transferTargetId" filterable placeholder="选择接收人" style="width: 100%">
@@ -300,7 +293,7 @@
           <el-input-number
             v-model="transferScore"
             :min="0.01"
-            :max="transferRow?.remaining_score || 0"
+            :max="formatScore(transferRow?.remaining_score) || 0"
             :step="0.5"
             :precision="2"
             style="width: 100%"
@@ -311,6 +304,28 @@
       <template #footer>
         <el-button @click="transferDialogVisible = false">取消</el-button>
         <el-button type="warning" :loading="transferring" @click="confirmTransfer">发送转办</el-button>
+      </template>
+    </el-dialog>
+    <el-dialog v-model="completionDialogVisible" title="提交完成审核"
+      width="min(620px, 94vw)" draggable append-to-body
+      :close-on-click-modal="false" :close-on-press-escape="!confirming" :show-close="!confirming">
+      <div class="completion-context">
+        <p><strong>工作项：</strong>{{ completionRow?.name }}</p>
+        <p><strong>工作项目标／完成标准：</strong></p>
+        <p class="completion-standard">{{ completionRow?.standard || '未填写完成标准，请按实际工作要求说明完成情况。' }}</p>
+      </div>
+      <el-form label-position="top" @submit.prevent="submitCompletion">
+        <el-form-item label="提交说明（由责任人填写）" required :error="completionError">
+          <el-input v-model="completionReason" type="textarea" :rows="6"
+            maxlength="2000" show-word-limit :disabled="confirming"
+            aria-label="对照工作项目标填写完成说明"
+            placeholder="请逐项对照工作目标／完成标准，说明已完成的内容、完成结果，以及成果或验证依据。"
+            @input="completionError = ''" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button :disabled="confirming" @click="completionDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="confirming" @click="submitCompletion">提交审核</el-button>
       </template>
     </el-dialog>
   </div>
@@ -327,7 +342,6 @@ import {
   getAllUsersApi,
   initiateTransferApi,
   saveMonthScoreApi,
-  saveQualityScoreApi,
   confirmCompletionApi,
   confirmClosedApi,
   getSplitRequestsApi
@@ -341,7 +355,12 @@ import { ArrowDown, Loading, CircleCheck, CircleClose, Lock } from '@element-plu
 const workItemCache = new Map()
 
 const props = defineProps({
-  workPackageId: { type: String, required: true },
+  workPackageId: { type: [String, Number], required: true },
+  onlyMine: { type: Boolean, default: false },
+  readOnly: { type: Boolean, default: false },
+  viewUserId: { type: String, default: "" },
+  showCompleted: { type: Boolean, default: false },
+  showRelated: { type: Boolean, default: false },
   // 父级「刷新」时递增该值，强制工作项表格拉取最新数据
   refreshKey: { type: Number, default: 0 }
 })
@@ -355,8 +374,11 @@ const workItems = ref([])
 const loading = ref(false)
 const saving = ref(false)
 const savingMonth = ref(false)
-const savingQuality = ref(false)
 const confirming = ref(false)
+const completionDialogVisible = ref(false)
+const completionRow = ref(null)
+const completionReason = ref('')
+const completionError = ref('')
 const levelDefs = useLevelDefs()
 
 const currentMonth = computed(() => {
@@ -393,6 +415,7 @@ const stagedCount = computed(() => workItems.value.filter(w => w.isStaged).lengt
 
 // 管理权限：管理员 / 领导 / 该工作包负责人 可以新增、编辑、删除工作项
 const canManage = computed(() => {
+  if (props.readOnly) return false
   if (!userStore.isLoggedIn) return false
   if (userStore.isAdmin || userStore.isLEADER || userStore.isDEPARTMENT) return true
   return workPackage.value && String(workPackage.value.owner_id) === String(userStore.userInfo?.id)
@@ -412,14 +435,35 @@ const loadUsers = async () => {
   }
 }
 
-// 只有领导可以编辑质量分
-const canManageQuality = computed(() => userStore.isLEADER)
+const userNamesById = computed(() => new Map(
+  userOptions.value.map(user => [String(user.id), user.username])
+))
+
+const assigneeName = (row, field) => {
+  const id = String(row[`${field}_id`] || '')
+  if (!id) return '-'
+  const currentName = userNamesById.value.get(id)
+  if (currentName) return currentName
+  // 本地暂存和待审核行的旧姓名可能属于更换前的人，找不到用户时显示工号。
+  if (row.isNew || row.isStaged || row.isPending) return id
+  return row[`${field}_name`] || id
+}
+
+const syncAssigneeName = (row, field) => {
+  const id = String(row[`${field}_id`] || '')
+  row[`${field}_name`] = id ? (userNamesById.value.get(id) || '') : ''
+}
+
+// 质量分只在完成审批中填写
 
 const isAdmin = computed(() => userStore.isAdmin)
 
 // 当前用户是否是某个工作项的负责人（转办拆分后各自负责人不同）
 const currentUserId = computed(() => String(userStore.userInfo?.id || ''))
+const canSubmitCompletion = row => !props.readOnly && !row.is_related &&
+  !!currentUserId.value && String(row.owner_id || '') === currentUserId.value
 const isItemOwner = (row) => {
+  if (props.readOnly || row.is_related) return false
   if (String(row.owner_id || '') === currentUserId.value ) return true
   if (userStore.isAdmin || userStore.isLEADER || userStore.isDEPARTMENT) return true
 }
@@ -427,14 +471,16 @@ const isItemOwner = (row) => {
 const canManageRow = (row) => canManage.value || isItemOwner(row)
 // 填写分值权限：领导/管理员/工作项负责人本人
 const canEditScore = (row) => {
+  if (props.readOnly || row.is_related) return false
   if (!userStore.isLoggedIn) return false
   if (userStore.isAdmin || userStore.isLEADER) return true
   if (String(row.owner_id || '') === currentUserId.value ) return true
 }
 // 是否展示「操作」列：包级可管理，或存在本人负责的工作项
-const hasManage = computed(() => canManage.value || workItems.value.some(isItemOwner))
+const hasManage = computed(() => !props.readOnly && (canManage.value || workItems.value.some(isItemOwner)))
 // 关闭权限：只有领导/管理员可以确认/取消关闭
 const canManageClosed = () => {
+  if (props.readOnly) return false
   if (!userStore.isLoggedIn) return false
   return !!(userStore.isAdmin || userStore.isLEADER)
 }
@@ -442,7 +488,7 @@ const canManageClosed = () => {
 // 工作包/所属项目是否已整体关闭（禁止其下所有工作项的编辑/填分）
 const pkgLocked = computed(() => !!workPackage.value && (!!workPackage.value.closed_status || !!workPackage.value.project_closed))
 // 单行是否锁定：包/项目关闭，或该工作项自身已关闭
-const isLocked = (row) => pkgLocked.value || !!row.closed_status
+const isLocked = (row) => props.readOnly || !!row.is_related || pkgLocked.value || !!row.closed_status
 
 // ---- 工作项转办 ----
 const transferDialogVisible = ref(false)
@@ -452,10 +498,16 @@ const transferScore = ref(0)
 const transferTargets = ref([])
 const transferring = ref(false)
 
+// 分值统一最多保留 3 位小数（与后端一致），消除浮点运算产生的 1.3000000000000003 尾差
+const formatScore = (value) => {
+  const num = Number(value)
+  return Number.isFinite(num) ? Number(num.toFixed(3)) : 0
+}
+
 const openTransfer = async (row) => {
   transferRow.value = row
   transferTargetId.value = ''
-  transferScore.value = Number(row.remaining_score || 0)
+  transferScore.value = formatScore(row.remaining_score || 0)
   try {
     const res = await getAllUsersApi()
     transferTargets.value = (res.data?.data || []).filter(u => String(u.id) !== currentUserId.value)
@@ -468,7 +520,7 @@ const openTransfer = async (row) => {
 const confirmTransfer = async () => {
   if (!transferTargetId.value) return ElMessage.warning('请选择接收人')
   if (!transferScore.value || transferScore.value <= 0) return ElMessage.warning('请填写转出分数')
-  if (transferScore.value > (transferRow.value?.remaining_score || 0)) {
+  if (transferScore.value > formatScore(transferRow.value?.remaining_score || 0)) {
     return ElMessage.warning('转出分数不能超过剩余分值')
   }
   transferring.value = true
@@ -537,7 +589,8 @@ const statusConfig = {
 // ============ 获取状态配置 ============
 const getStatusConfig = (row) => {
   if (row.closed_status) return statusConfig['已关闭']
-  if (isLocked(row)) return statusConfig['所属已关闭']
+  // 只读是查看权限，不代表工作项或所属工作包已关闭。
+  if (pkgLocked.value) return statusConfig['所属已关闭']
   // 已完成：只有技术负责人审核通过才算
   if (row.complete_status) return statusConfig['已完成']
   // 已提交完成申请，等待技术负责人审核
@@ -547,8 +600,8 @@ const getStatusConfig = (row) => {
 
 const notifyChanged = () => emit('changed')
 
-// 缓存 key：按登录用户 + 工作包隔离，避免跨用户串数据
-const cacheKey = () => `work_item_cache_${userStore.userInfo?.id || 'anon'}_${props.workPackageId}`
+// 缓存 key：按登录用户、工作包、个人/全部视图隔离
+const cacheKey = () => `work_item_cache_${userStore.userInfo?.id || 'anon'}_${props.workPackageId}_${props.onlyMine ? 'mine' : 'all'}`
 
 // 从 sessionStorage 读取缓存（页面刷新 / Vite 热更新后仍可恢复）
 const loadCacheFromStorage = () => {
@@ -562,12 +615,13 @@ const loadCacheFromStorage = () => {
 
 // 同步当前状态到缓存（本地暂存/新增/待审核行都会保留；模块 Map + sessionStorage 双写）
 const syncCache = () => {
+  if (props.readOnly) return
   const data = {
     month: fillMonth.value,
     workPackage: workPackage.value,
     workItems: workItems.value.map(w => ({ ...w }))
   }
-  workItemCache.set(props.workPackageId, data)
+  workItemCache.set(cacheKey(), data)
   try {
     sessionStorage.setItem(cacheKey(), JSON.stringify(data))
   } catch {
@@ -578,7 +632,14 @@ const syncCache = () => {
 // 强制刷新后，把本地暂存/待审核行合并回服务器列表，避免被覆盖丢失
 const mergeLocalRows = (serverItems) => {
   const cached = loadCacheFromStorage()
-  const local = (cached?.workItems || []).filter(w => w.isStaged || w.isPending || w.isNew)
+  const visibleIds = new Set(serverItems.map(w => String(w.id)))
+  const local = (cached?.workItems || []).filter(w => {
+    if (!(w.isStaged || w.isPending || w.isNew)) return false
+    if (!props.onlyMine) return true
+    if (w.is_related || (!props.showCompleted && w.complete_status)) return false
+    // 已转办的工作项不能从缓存恢复；本人新增草稿仍可保留。
+    return String(w.owner_id || '') === currentUserId.value && (!w.id || visibleIds.has(String(w.id)))
+  })
   if (!local.length) return serverItems
   const serverIds = new Set(serverItems.map(i => String(i.id)))
   const merged = serverItems.map(i => ({ ...i }))
@@ -647,14 +708,16 @@ const reconcilePending = async (items) => {
   return { items: list, removed: list.length !== items.length }
 }
 
+let fetchRequestId = 0
 const fetchData = async (force = false, skipReconcile = false) => {
+  const requestId = ++fetchRequestId
   loading.value = true
   try {
     // 始终向后端拉取该月最新数据（不再整表命中本地缓存快照）：
     // 这样新增/编辑审核通过后，重新展开或点「刷新」即可看到最新结果，
     // 无需关闭网页清缓存。
-    const res = await getWorkItemsApi(props.workPackageId, { month: fillMonth.value })
-    if (res.data?.code !== 200) return
+    const res = await getWorkItemsApi(props.workPackageId, { month: fillMonth.value, only_mine: props.onlyMine, show_completed: props.showCompleted, show_related: props.showRelated, view_user_id: props.viewUserId || undefined })
+    if (requestId !== fetchRequestId || res.data?.code !== 200) return
 
     workPackage.value = res.data.data.work_package
     let items = (res.data.data.work_items || []).map(item => ({
@@ -672,11 +735,12 @@ const fetchData = async (force = false, skipReconcile = false) => {
     // - isStaged：本地保存但未提交 → 保留（服务器上还没有）
     // - isPending：带 id 且服务器已有同 id → 说明已生效/更新，丢弃本地旧行；
     //   服务器没有同 id（新增待审）→ 保留占位，交给下面 reconcile 对账
-    items = mergeLocalRows(items)
+    if (!props.readOnly) items = mergeLocalRows(items)
 
     // 对账：清除“已审批通过”申请对应的 pending 行（含新增落库后留下的幽灵占位）
     if (!skipReconcile) {
       const { items: reconciled, removed } = await reconcilePending(items)
+      if (requestId !== fetchRequestId) return
       if (removed) {
         // 有申请已通过 → 先清掉本地 pending 行并写回缓存，再从后端重拉确认
         workItems.value = reconciled
@@ -689,14 +753,18 @@ const fetchData = async (force = false, skipReconcile = false) => {
     workItems.value = items
     syncCache()
   } catch (err) {
+    if (requestId !== fetchRequestId) return
     ElMessage.error(err.response?.data?.detail || '获取工作项失败')
   } finally {
-    loading.value = false
+    if (requestId === fetchRequestId) loading.value = false
   }
 }
 
 // 工作项 ID 变化（展开不同工作包）时重新加载
-watch(() => props.workPackageId, () => fetchData())
+watch([() => props.workPackageId, () => props.onlyMine, () => props.showCompleted, () => props.showRelated, () => props.viewUserId, currentUserId], () => {
+  workItems.value = []
+  fetchData()
+})
 // 父级「刷新」时强制拉取最新数据
 watch(() => props.refreshKey, () => fetchData(true))
 // 切换填写/查看月份 → 强制从后端拉取该月数据
@@ -719,6 +787,7 @@ const handleAddWorkItem = () => {
     score: 0,
     work_package_id: props.workPackageId,
     owner_id: workPackage.value?.owner_id || '',
+    owner_name: workPackage.value?.owner_name || '',
     // 技术负责人默认继承所属工作包的技术负责人
     tech_owner_id: workPackage.value?.tech_owner_id || '',
     tech_owner_name: workPackage.value?.tech_owner_name || '',
@@ -756,6 +825,8 @@ const validateWorkItemFields = (row) => {
 const handleSaveLocal = (row) => {
   const msg = validateWorkItemFields(row)
   if (msg) return ElMessage.warning(msg)
+  syncAssigneeName(row, 'owner')
+  syncAssigneeName(row, 'tech_owner')
   row.isEdit = false
   row.isStaged = true
   syncCache()
@@ -869,30 +940,6 @@ const saveMonthScore = async (row) => {
 // 每月前2天可填写上月分值，避免重复填写
 // （由上方“填写/查看月份”下拉切换处理，不再单独按钮）
 
-const saveQualityScore = async (row) => {
-  if (!row.id) return ElMessage.warning('该工作项尚未保存，无法填写质量分')
-  savingQuality.value = true
-  try {
-    const res = await saveQualityScoreApi(row.id, {
-      user_id: userStore.userInfo?.id,
-      quality_score: row.quality_score ?? 0,
-      month: fillMonth.value
-    })
-    if (res.data?.code === 200) {
-      ElMessage.success('质量分已保存')
-      row.isEditQuality = false
-      const saved = Number(res.data?.data?.quality_score)
-      row.quality_score = Number.isFinite(saved) ? saved : row.quality_score
-      await fetchData(true)
-      notifyChanged()
-    }
-  } catch (err) {
-    ElMessage.error(err.response?.data?.detail || '保存质量分失败')
-  } finally {
-    savingQuality.value = false
-  }
-}
-
 const cancelEdit = (row, index) => {
   if (row.isNew) {
     workItems.value.splice(index, 1)   // 移除本地行
@@ -972,16 +1019,32 @@ const removeItem = async (row) => {
 
 // 提交完成审核（后端校验：进度已满或已手动确认；通过后需技术负责人审核）
 const confirmComplete = async (row) => {
-  if (!row.id) return
+  if (!row.id || !canSubmitCompletion(row) || confirming.value) return
+  completionRow.value = row
+  completionReason.value = ''
+  completionError.value = ''
+  completionDialogVisible.value = true
+}
+
+const submitCompletion = async () => {
+  if (confirming.value || !completionRow.value) return
+  const reason = completionReason.value.trim()
+  if (!reason) {
+    completionError.value = '请对照工作项目标填写完成说明'
+    return
+  }
+  const row = completionRow.value
   confirming.value = true
   try {
     const res = await confirmCompletionApi({
       target_type: 'work_item',
       target_id: String(row.id),
       user_id: userStore.userInfo?.id,
-      confirmed: true
+      confirmed: true,
+      reason
     })
     if (res.data?.code === 200) {
+      completionDialogVisible.value = false
       ElMessage.success(res.data.message || '已提交，等待技术负责人审核')
       await fetchData(true)
       notifyChanged()
@@ -1056,11 +1119,20 @@ const deadlineTagType = (date) => {
 
 onMounted(() => {
   fetchData()
-  loadUsers()
+  if (!props.readOnly) loadUsers()
 })
 </script>
 
 <style scoped>
+.completion-context {
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  border: 1px solid #dce8f3;
+  border-radius: 6px;
+  background: #f3f8fd;
+}
+.completion-context p { margin: 6px 0; line-height: 1.7; }
+.completion-standard { white-space: pre-wrap; overflow-wrap: anywhere; }
 .work-item-table {
   width: 100%;
 }
@@ -1189,6 +1261,18 @@ onMounted(() => {
 
 .submit-item-name {
   color: #1e293b;
+}
+
+/* 编辑日期时保留完整输入框，不受表格文本截断和通用输入框高度影响。 */
+.work-item-table :deep(.deadline-column .cell) {
+  display: block;
+  overflow: visible;
+  -webkit-line-clamp: unset;
+}
+
+.work-item-table :deep(.deadline-date-picker .el-input__wrapper) {
+  min-height: 32px !important;
+  height: 32px;
 }
 
 /* 修改整个表格背景 */

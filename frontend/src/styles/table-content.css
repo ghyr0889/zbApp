@@ -1,0 +1,36 @@
+/* Text cells use two lines; interactive controls and expanded rows keep their layout. */
+body .el-table .el-table__cell > .cell:not(:has(button, input, textarea, select, [role="button"], .el-table, .el-table__expand-icon, .el-checkbox, .el-radio, .el-select, .el-input, .el-input-number, .el-progress, .el-dropdown, .el-table__column-filter-trigger, .caret-wrapper)) {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.65;
+  /* 由行数截断决定高度，不用固定高度裁切带内边距的详情内容。 */
+}
+.table-full-content {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  box-sizing: border-box;
+  z-index: 10000;
+  width: max-content;
+  max-width: min(560px, calc(100vw - 24px));
+  max-height: min(420px, calc(100vh - 24px));
+  overflow: auto;
+  padding: 12px 16px;
+  border: 1px solid #d5e2ef;
+  border-radius: 8px;
+  background: #fff;
+  color: #263b50;
+  box-shadow: 0 6px 24px #203c5b26;
+  font-size: 14px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}

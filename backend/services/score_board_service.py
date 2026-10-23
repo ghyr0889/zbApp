@@ -2,14 +2,15 @@
 from repositories import score_board_repository as repo
 
 import re
-from datetime import datetime
+from calendar import monthrange
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 import models
 from schemas import MonthScoreIn, MonthlyExtraScoreIn
-from utils import ensure_open, item_filled_score, auto_create_complete_request
+from utils import ensure_open, item_filled_score
 import logging
 
 
@@ -96,13 +97,26 @@ def assert_month_fillable(month):
     return month
 
 
-def compute_deducted(item):
-    """逾期扣分：前30天每满7天扣0.5分，之后每满7天扣1分。"""
-    if not item.completed_at or not item.deadline:
+def compute_deducted(item, today=None):
+    """按当前日期累计扣分：前30天每满7天扣0.5分，超过30天的部分每满7天扣1分。
+
+    today 是可选的日期参数，供边界测试使用；业务调用默认取北京时间当天。
+    按日历日期计算，已完成工作项最多计算到完成日期。
+    """
+    if not item or not item.deadline:
         return 0.0
 
-    # 获取完整的逾期天数；未逾期则不扣分。
-    overdue_days = (item.completed_at - item.deadline).days
+    # 截止日期当天不扣分；只比较日期，忽略截止时间中的时分秒。
+    today = today if today is not None else datetime.now(timezone(timedelta(hours=8))).date()
+    if getattr(item, "complete_status", False):
+        completed_at = getattr(item, "completed_at", None)
+        if completed_at is None:
+            # 不能伪造历史完成日期，也不能继续以今天累计扣分。
+            logging.warning("Completed work item %s has no completion date; live deduction skipped", getattr(item, "id", None))
+            return 0.0
+        completed_date = completed_at.astimezone(timezone(timedelta(hours=8))).date() if completed_at.tzinfo else completed_at.date()
+        today = min(today, completed_date)
+    overdue_days = (today - item.deadline.date()).days
     if overdue_days <= 0:
         return 0.0
 
@@ -117,15 +131,102 @@ def compute_deducted(item):
     return first_deducted + extra_deducted
 
 def monthly_quality_score(db, work_item_id, month):
-    """M月质量分 = 当月显式值 → 之前最近显式值 → 0（不再使用工作项全局默认）"""
-    rows = repo.list_quality_scores_through_month(db, work_item_id, month)
-    if rows:
-        return rows[0].quality_score
-    return 0.0
+    """质量分只读取指定月份，不向后续月份继承。"""
+    rec = repo.get_month_score(db, work_item_id, month)
+    return float(rec.quality_score or 0.0) if rec else 0.0
 
-def monthly_score_detail(rec, db):
-    """把一条月度分值记录展开为积分面板需要的明细结构。"""
-    item = rec.work_item
+def apply_completion_quality(db, item, score, reviewed_at):
+    """由完成审批事务调用：仅审批当月有质量分，不在这里提交事务。"""
+    month = reviewed_at.strftime("%Y-%m")
+    owner_id = item.owner_id or (item.work_package.owner_id if item.work_package else None)
+    if not owner_id:
+        raise HTTPException(400, "工作项未指定责任人，无法归属质量分")
+    records = db.query(models.WorkItemMonthlyScore).filter(
+        models.WorkItemMonthlyScore.work_item_id == item.id).with_for_update().all()
+    target = next((rec for rec in records if rec.month == month), None)
+    if target is None:
+        target = models.WorkItemMonthlyScore(work_item_id=item.id, user_id=owner_id,
+            month=month, score=0.0)
+        db.add(target)
+        records.append(target)
+    grade = item.owner.job_grade if item.owner else ""
+    for rec in records:
+        rec.quality_score = round(float(score), 2) if rec.month == month else 0.0
+        rec.quality_score_updated_at = reviewed_at
+        if rec.month == month:
+            rec.user_id = owner_id
+        rec.calculate_score = compute_calc_score(rec.score or 0.0, item, db, grade, rec.quality_score)
+    return month
+
+
+def get_my_progress_deductions(db, user_id):
+    """当前负责工作项截至今天的累计扣分，只用于个人积分展示。"""
+    today = datetime.now(timezone(timedelta(hours=8))).date() # 获取该时区当前的日期和时间
+    details = []
+    for item in repo.list_owned_items(db, user_id):
+        deducted = compute_deducted(item, today=today)
+        if deducted <= 0:
+            continue
+        wp = item.work_package
+        project = wp.project if wp else None
+        details.append({
+            "work_item_id": item.id,
+            "work_item_name": item.name,
+            "work_item_standard": item.standard,
+            "work_item_deadline": item.deadline.date().isoformat() if item.deadline else None,
+            "work_item_difficulty": item.difficulty,
+            "work_item_importance": item.importance,
+            "work_item_innovation": item.innovation,
+            "work_package_id": wp.id if wp else None,
+            "work_package_code": wp.code if wp else None,
+            "work_package_category": wp.category_name if wp else None,
+            "project_name": project.name if project else None,
+            "project_code": project.code if project else None,
+            "score": 0,
+            "calculate_score": 0,
+            "quality_score": None,
+            "deducted_score": deducted,
+        })
+    return {"code": 200, "data": {"as_of": today.isoformat(), "details": details,
+            "deducted_score": round(sum(row["deducted_score"] for row in details), 2)}}
+
+
+def get_my_period_progress_deductions(db, user_id, period, year, month=None, quarter=None):
+    """个人页按周期显示扣分；已入账取快照，未入账的当前月份取实时预览。"""
+    from services.score_confirmation_service import now_local, official_board
+
+    official = official_board(db, period, year, month, quarter)["data"]
+    person = next((p for p in official["people"] if p["user_id"] == user_id), None)
+    details = [d for d in (person or {}).get("details", []) if (d.get("deducted_score") or 0) > 0]
+    total = float((person or {}).get("deducted_score") or 0)
+
+    if period != "month":
+        now = now_local()
+        current_month = now.strftime("%Y-%m")
+        cfg = db.get(models.ScoreConfirmationConfig, 1)
+        selected_months = months_of_period(period, year, month, quarter)
+        if selected_months is None:
+            selected_months = [current_month]
+        settled = {r.month for r in db.query(models.MonthlyScoreConfirmation).filter(
+            models.MonthlyScoreConfirmation.user_id == user_id,
+            models.MonthlyScoreConfirmation.status != "PENDING",
+        ).all()}
+        for mm in selected_months:
+            if mm > current_month or mm in settled or (cfg and mm < cfg.start_month):
+                continue
+            preview = calculate_public_score_board(
+                "month", int(mm[:4]), int(mm[5:]), db=db, as_of=now.date())["data"]
+            preview_person = next((p for p in preview["people"] if p["user_id"] == user_id), None)
+            if preview_person:
+                details.extend(d for d in preview_person["details"] if (d.get("deducted_score") or 0) > 0)
+                total += float(preview_person.get("deducted_score") or 0)
+
+    return {"code": 200, "data": {"deducted_score": round(total, 2), "details": details}}
+
+
+def _work_item_score_detail(item, month, score=0.0, calculate_score=0.0,
+                            quality_score=0.0, deducted_score=0.0):
+    """有无月度填分记录都使用相同的工作项明细结构。"""
     wp = item.work_package if item else None
     project = wp.project if wp else None
     return {
@@ -135,18 +236,56 @@ def monthly_score_detail(rec, db):
         "work_item_difficulty": item.difficulty if item else "-",
         "work_item_importance": item.importance if item else "-",
         "work_item_innovation": item.innovation if item else "-",
-        "work_package_id": wp.id,
+        "work_item_deadline": item.deadline.date().isoformat() if item and item.deadline else None,
+        "work_package_id": wp.id if wp else None,
         "work_package_code": wp.code if wp else None,
         "work_package_category": wp.category_name if wp else "-",
         "project_id": project.id if project else None,
         "project_name": project.name if project else "-",
         "project_code": project.code if project else "-",
-        "month": rec.month,
-        "score": rec.score,
-        "quality_score": monthly_quality_score(db, rec.work_item_id, rec.month),
-        "calculate_score": rec.calculate_score if rec.calculate_score is not None else 0.0,
-        "deducted_score": compute_deducted(item),
+        "month": month,
+        "score": score,
+        "quality_score": quality_score,
+        "calculate_score": calculate_score,
+        "deducted_score": deducted_score,
     }
+
+
+def monthly_score_detail(rec, db, deducted_score=None):
+    """把一条月度分值记录展开为积分面板需要的明细结构。"""
+    return _work_item_score_detail(
+        rec.work_item, rec.month, rec.score,
+        rec.calculate_score if rec.calculate_score is not None else 0.0,
+        monthly_quality_score(db, rec.work_item_id, rec.month),
+        monthly_progress_deduction(rec.work_item, rec.month)
+        if deducted_score is None else deducted_score,
+    )
+
+
+def _deduction_date(month, as_of=None, include_grace=False):
+    """历史月份取月末，当前月份取今天；结算预览可显式指定核算日。"""
+    year, number = map(int, month.split("-"))
+    today = as_of or datetime.now(timezone(timedelta(hours=8))).date()
+    if isinstance(today, datetime):
+        today = today.date()
+    first_day = date(year, number, 1)
+    if first_day > today:
+        return None
+    if as_of is not None and include_grace:
+        return today
+    return min(today, date(year, number, monthrange(year, number)[1]))
+
+
+def monthly_progress_deduction(item, month, as_of=None, include_grace=False):
+    """本月新增扣分＝本月核算日累计扣分－上月末累计扣分。"""
+    cutoff = _deduction_date(month, as_of, include_grace)
+    if cutoff is None:
+        return 0.0
+    year, number = map(int, month.split("-"))
+    previous_month_end = date(year, number, 1) - timedelta(days=1)
+    return max(0.0, round(
+        compute_deducted(item, today=cutoff)
+        - compute_deducted(item, today=previous_month_end), 2))
 
 def compute_calc_score(month_score, item, db, owner_job_grade, quality_score=None):
     """计算得分 = 本月基础得分 × (难度系数 + 创新度系数 + 重要度系数)＋质量分。
@@ -184,8 +323,12 @@ def get_score_board(user_id: str,
     records = repo.list_user_month_scores(db, user_id)
     filtered = [r for r in records if month_in_selection(r.month, period, y, month, quarter)]
     total_score = sum(r.score or 0.0 for r in filtered)
-    details = [monthly_score_detail(r, db) for r in filtered]
-    deducted = sum(compute_deducted(r.work_item) for r in {r.work_item_id: r for r in filtered}.values())
+    details = [monthly_score_detail(
+        r, db, deducted_score=monthly_progress_deduction(r.work_item, r.month)
+        if r.work_item and r.work_item.owner_id == user_id else 0.0)
+        for r in filtered]
+    deducted = sum(monthly_progress_deduction(r.work_item, r.month) for r in filtered
+                   if r.work_item and r.work_item.owner_id == user_id)
     return {
         "code": 200,
         "data": {
@@ -212,11 +355,11 @@ def grade_of(score):
     return "D"
 
 
-def get_public_score_board(period: str = "all",
+def calculate_public_score_board(period: str = "all",
                            year: int = None,
                            month: int = None,
                            quarter: int = None,
-                           db: Session = None):
+                           db: Session = None, as_of=None):
     """所有人员积分面板：按 月/季/年 计算 技术提升、日常管理、技术成长分、计算总分、折算得分、等级。"""
     period = str(period or "all").lower()
     now = datetime.now()
@@ -227,6 +370,9 @@ def get_public_score_board(period: str = "all",
 
     users = repo.list_score_board_users(db)
     all_records = repo.list_all_month_scores(db)
+    owned_items = {}
+    for item in repo.list_all_owned_items(db):
+        owned_items.setdefault(item.owner_id, []).append(item)
 
     # 周期内的月度附加分（技术提升 / 日常管理）
     extras = repo.list_period_extra_scores(db, months)
@@ -266,18 +412,45 @@ def get_public_score_board(period: str = "all",
         if months is not None:
             months_used = months
         else:
-            months_used = sorted(set(list(month_score_map) + list(extra_map) + [r.month for r in user_records]))
+            months_used = sorted(set(month_score_map) | set(extra_map) |
+                                 {datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m")})
+
+        # 扣分归属当前工作项负责人，与本月是否填分无关。
+        deductions_by_month = {}
+        for mm in months_used:
+            deductions_by_month[mm] = {
+                item.id: (item, deducted)
+                for item in owned_items.get(user.id, [])
+                for deducted in [monthly_progress_deduction(
+                    item, mm, as_of, include_grace=period == "month")]
+                if deducted > 0
+            }
+        deduct_total = round(sum(
+            deducted for penalties in deductions_by_month.values()
+            for _, deducted in penalties.values()
+        ), 2)
+
+        details = []
+        recorded_keys = set()
+        for rec in user_records:
+            deducted = deductions_by_month.get(rec.month, {}).get(rec.work_item_id, (None, 0.0))[1]
+            details.append(monthly_score_detail(rec, db, deducted_score=deducted))
+            recorded_keys.add((rec.month, rec.work_item_id))
+        for mm, penalties in deductions_by_month.items():
+            for item_id, (item, deducted) in penalties.items():
+                if (mm, item_id) not in recorded_keys:
+                    details.append(_work_item_score_detail(item, mm, deducted_score=deducted))
 
         # 各月「计算总分」= 该月计算分 + 该月技术提升合计 + 该月日常管理合计
         period_scores = []
         for mm in months_used:
             calc = calc_map.get(mm, 0.0)
             p, k, t, dd, qe, ci = extra_map.get(mm, (0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
-            period_scores.append(round(calc + p + k + t + dd + qe + ci, 2))
+            month_deducted = sum(value for _, value in deductions_by_month[mm].values())
+            period_scores.append(round(calc + p + k + t + dd + qe + ci - month_deducted, 2))
 
         month_score_total = round(sum(month_score_map.values()), 2)
         calc_total = round(sum(calc_map.values()), 2)
-        deduct_total = round(sum(compute_deducted(r.work_item) for r in {r.work_item_id: r for r in user_records}.values()), 2) #进度扣分
         patent = round(sum(v[0] for v in extra_map.values()), 2)
         knowledge = round(sum(v[1] for v in extra_map.values()), 2)
         train = round(sum(v[2] for v in extra_map.values()), 2)
@@ -317,8 +490,8 @@ def get_public_score_board(period: str = "all",
             "period_2": round(sum(period_scores[3:6]), 2) if period == "year" else (period_scores[1] if len(period_scores) >= 2 else 0),
             "period_3": round(sum(period_scores[6:9]), 2) if period == "year" else (period_scores[2] if len(period_scores) >= 3 else 0),
             "period_4": round(sum(period_scores[9:12]), 2) if period == "year" else 0,
-            "deducted_score": sum(compute_deducted(r.work_item) for r in {r.work_item_id: r for r in user_records}.values()),
-            "details": [monthly_score_detail(r, db) for r in user_records],
+            "deducted_score": deduct_total,
+            "details": details,
         })
 
     # 计算系数 = 计算总分第5名 / 90.01（不足5人取最高分）
@@ -335,54 +508,14 @@ def get_public_score_board(period: str = "all",
     people.sort(key=lambda p: p["total_calculated"], reverse=True)
     return {"code": 200, "data": {"period": period, "people": people, "year": y, "month": month, "quarter": quarter}}
 
+def get_public_score_board(period="all", year=None, month=None, quarter=None, db=None):
+    from services.score_confirmation_service import official_board
+    return official_board(db, period, year, month, quarter)
+
+
 def put_quality_score(work_item_id: int, data: MonthScoreIn, db: Session = None):
-    user = repo.get_user(db, data.user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="用户不存在")
+    raise HTTPException(403, "质量分只能由工作项技术负责人在完成审批通过时填写")
 
-    role = str(user.role).upper()
-
-    if role != "LEADER":
-        raise HTTPException(status_code = 403, detail = "只有领导可以编辑质量分")
-
-    score = round(float(data.quality_score or 0.0), 2)
-    item = repo.get_item(db, work_item_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="工作项不存在")
-    ensure_open(item, item.work_package,
-                item.work_package.project if item.work_package else None)  # 已关闭不能再填质量分
-    month = data.month or datetime.now().strftime("%Y-%m")
-    rec = repo.get_month_score(db, work_item_id, month)
-
-    owner_job_grade = item.owner.job_grade if (item and item.owner) else ""
-
-    if rec:
-        rec.quality_score = score
-        rec.quality_score_updated_at = datetime.now()
-
-        # 本月分值已填过 → 用新质量分重算本月计算分
-        rec.calculate_score = compute_calc_score(rec.score, item, db, owner_job_grade, score)
-    else:
-        rec = models.WorkItemMonthlyScore(
-            work_item_id=work_item_id,
-            user_id=data.user_id,      # 修改为 data.user_id
-            month=month,
-            score=0.0,
-            quality_score=score,
-            quality_score_updated_at=datetime.now() # 修改为 datetime.now()
-        )
-        repo.add(db, rec)
-
-    db.commit()
-
-    return{
-        "code": 200,
-        "message": "质量分已保存",
-        "data":{
-            "work_item_id": work_item_id,
-            "quality_score": data.quality_score
-        }
-    }
 
 def save_month_score(work_item_id: int, body: MonthScoreIn, db: Session = None):
     """保存工作项本月分值：员工直接填写、直接生效，不经过审核。"""
@@ -416,7 +549,8 @@ def save_month_score(work_item_id: int, body: MonthScoreIn, db: Session = None):
     acc_all = item_filled_score(db, work_item_id)
 
     acc_other = acc_all - (old_score or 0.0)
-    remain = (item.score or 0.0) - acc_other
+    # 与工作项列表口径一致：按分值精度收敛，避免浮点尾差影响校验提示
+    remain = round((item.score or 0.0) - acc_other, 3)
 
     score = round(float(body.score or 0.0), 3)
     if score > remain + 1e-6:
@@ -449,20 +583,18 @@ def save_month_score(work_item_id: int, body: MonthScoreIn, db: Session = None):
 
     db.flush()  # 确保上面的 rec 新增/修改已经反映到查询里
 
-    # 进度已满 → 自动提交完成申请（等待工作项技术负责人审核）
-    db.expire(item, ["monthly_scores"])   # 丢弃关系缓存，确保读到刚写入的分值
-    auto_review = auto_create_complete_request(db, item, applicant_id=owner_id)
+    # 保存分值不提交完成申请；完成申请仅由用户主动发起。
 
     db.commit()
     return {
         "code": 200,
-        "message": "本月分值已保存" + ("，进度已满，已自动提交完成申请待技术负责人审核" if auto_review else ""),
+        "message": "本月分值已保存",
         "data": {
             "work_item_id": work_item_id,
             "month": month,
             "score": score,
             "calculate_score": rec.calculate_score,
-            "auto_complete_request_id": auto_review.id if auto_review else None,
+            "auto_complete_request_id": None,  # 保留响应字段兼容旧客户端，不再自动建单
         }
     }
 
@@ -534,94 +666,6 @@ def get_monthly_extra_scores(user_id: str = None, month: str = None, db: Session
         })
     return {"code": 200, "data": data}
 
-# ---------------------------------------------------------------- 工作完成情况
-def get_completed_situation(target_type: str = "project",
-                            currentUserId: str = None,
-                            target_id: int = None,
-                            category_name: str = None,
-                            month: str = None,
-                            db: Session = None):
-    """按 项目 / 工作包类别 查看该对象下每位工作人员的完成情况（分值口径）：
-    total_score    = 其负责工作项的基础总分值之和
-    filled_score   = 这些工作项已填月度分值之和（传 month 只算该月，缺省累计全部月份）
-    unfilled_score = total_score - filled_score（还没填的分）
-    仅领导/管理员可查看。"""
-    user = repo.get_user(db, currentUserId)
-    if not user:
-        raise HTTPException(status_code=404, detail="用户不存在")
-    if str(user.role).upper() not in ["LEADER", "ADMIN"]:
-        raise HTTPException(status_code=403, detail="只有领导和管理员可以查看完成情况")
-
-    target_type = (target_type or "project").lower()
-    if target_type not in ("project", "category"):
-        raise HTTPException(status_code=400, detail="target_type 只能是 project / category")
-
-    # ----  定位目标对象并取其下工作项 ----
-    # 目标存在性和参数校验由业务层完成。
-
-    if target_type == "project":
-        if not target_id:
-            raise HTTPException(status_code=400, detail="target_type=project 时必须传 target_id")
-        project = repo.get_project(db, target_id)
-        if not project:
-            raise HTTPException(status_code=404, detail="项目不存在")
-        rows = repo.list_items_for_project(db, target_id)
-        target_name = project.name
-    else:
-        category_name = (category_name or "").strip()
-        if not category_name:
-            raise HTTPException(status_code=400, detail="target_type=category 时必须传 category_name")
-        rows = repo.list_items_for_category(db, category_name)
-        target_name = category_name
-
-    # ---- 按负责人聚合基础总分，并记录每个工作项所属负责人 ----
-    owner_of = {}          # work_item_id -> owner_id
-    total_by_owner = {}    # owner_id -> sum(item.score)
-    for wi, _wp in rows:
-        if not wi.owner_id:
-            continue
-        owner_of[wi.id] = wi.owner_id
-        total_by_owner[wi.owner_id] = total_by_owner.get(wi.owner_id, 0.0) + (wi.score or 0.0)
-
-    # ---- 已填分：这些工作项上的月度分值（可选月份）合计 → 归到所属负责人 ----
-    filled_by_owner = {}
-    if owner_of:
-        monthly_rows = repo.list_item_month_scores(db, list(owner_of.keys()), month)
-        for m in monthly_rows:
-            owner_id = owner_of.get(m.work_item_id)
-            if owner_id:
-                filled_by_owner[owner_id] = filled_by_owner.get(owner_id, 0.0) + (m.score or 0.0)
-
-    # ----组装人员 ----
-    owner_ids = sorted(total_by_owner.keys())
-    user_map = {}
-    if owner_ids:
-        user_map = {u.id: u for u in repo.list_users_by_ids(db, owner_ids)}
-
-    people = []
-    for owner_id in owner_ids:
-        u = user_map.get(owner_id)
-        total_score = round(total_by_owner.get(owner_id, 0.0), 3)
-        filled_score = round(filled_by_owner.get(owner_id, 0.0), 3)
-        people.append({
-            "user_id": owner_id,
-            "username": u.username if u else owner_id,
-            "role": u.role if u else "",
-            "total_score": total_score,
-            "filled_score": filled_score,
-            "unfilled_score": round(total_score - filled_score, 3),
-        })
-    people.sort(key=lambda p: p["total_score"], reverse=True)
-
-    return {
-        "code": 200,
-        "data": {
-            "target_type": target_type,
-            "target_name": target_name,
-            "month": month or None,
-            "people": people,
-        }
-    }
 
 # ---------------------------------------------------------------- 项目/工作包汇总
 def get_project_summary(currentUserId: str = None,

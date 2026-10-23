@@ -5,9 +5,9 @@ export function createScoreSnapshot(people, mode, period, quarter = 1) {
   if (mode === 'month') {
     columns.push(
       ['month_score', '工作项-基础得分'], ['calculate_score', '工作项-计算得分'],
-      ['deducted_score', '工作项-进度扣分'], ['patent_score', '技术提升-专利'],
+      ['deducted_score', '工作项-进度扣分'], ['tech_improve', '技术提升合计'], ['patent_score', '技术提升-专利'],
       ['knowledge_score', '技术提升-知识库'], ['train_score', '技术提升-培训'],
-      ['deduct_score', '日常管理-扣分'], ['quality_event_score', '日常管理-质量事件'],
+      ['daily_manage', '日常管理合计'], ['deduct_score', '日常管理-扣分'], ['quality_event_score', '日常管理-质量事件'],
       ['carrier_inspection_score', '日常管理-载体检查'], ['tech_growth_score', '技术成长分'],
       ['total_calculated', '计算总分'], ['converted_score', '折算总分'],
     )
@@ -17,10 +17,12 @@ export function createScoreSnapshot(people, mode, period, quarter = 1) {
     }
     columns.push(['total_score', '得分'], ['final_calculated', '计算得分'])
   }
-  columns.push(['grade', '等级', 'text'])
+  columns.push(['grade', '等级', 'text'], ['settlement_label', '入账状态', 'text'])
   // 立即复制单元格值，避免等待加载导出库时切换周期或编辑影响本次文件。
   const rows = people.map(person => columns.map(([key, label, type]) => {
-    const value = person[key]
+    const value = key === 'settlement_label'
+      ? (person.is_provisional ? '实时预览（未入账）' : ({IMPORTED:'历史补录已入账',CONFIRMED:'本人已确认',AUTO:'自动入账',PARTIAL:'部分月份未入账',HISTORY:'历史积分'}[person.confirmation_status] || '统计结果'))
+      : person[key]
     if (value === null || value === undefined || value === '') return null
     if (type === 'text') return String(value) // 工号保留 0004 等前导零，文本不会作为公式执行。
     const number = Number(value)

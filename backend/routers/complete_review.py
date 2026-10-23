@@ -1,5 +1,7 @@
+from decimal import Decimal, ROUND_HALF_UP
+import math
 import json
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -8,7 +10,9 @@ from sqlalchemy.orm import Session, selectinload
 
 import models
 from database import get_db
+from dependencies import get_current_user
 from schemas import CompleteRequestReview, CompleteRequestCreate
+from services.score_board_service import apply_completion_quality
 from utils import ensure_open, effective_complete, item_progress
 
 router = APIRouter(prefix="/api/v1/complete_review", tags=["Complete Review"])
@@ -44,6 +48,11 @@ def _complete_request_view(req):
         "complete_item": {
             "id": item.id,
             "name": item.name,
+            "standard": item.standard,
+            "difficulty": item.difficulty,
+            "importance": item.importance,
+            "innovation": item.innovation,
+            "notes": item.notes,
             "score": item.score or 0.0,
             "deadline": item.deadline.strftime("%Y-%m-%d") if item.deadline else "",
             "owner_id": item.owner_id or "",
@@ -90,20 +99,20 @@ def get_complete_requests(user_id: str = Query(...), db: Session = Depends(get_d
     return {"code": 200, "data": [_complete_request_view(r) for r in requests]}
 
 @router.post("/complete-requests/{request_id}/review")
-def review_complete_request(request_id: int, body: CompleteRequestReview, db: Session = Depends(get_db)):
+def review_complete_request(request_id: int, body: CompleteRequestReview, db: Session = Depends(get_db), user=Depends(get_current_user)):
     """工作项技术负责人审核完成申请：APPROVE → 写完成状态与完成时间 / REJECT → 驳回。"""
     req = db.query(models.WorkItemCompletionReview).options(
         selectinload(models.WorkItemCompletionReview.work_item),
-    ).filter(models.WorkItemCompletionReview.id == request_id).first()
+    ).filter(models.WorkItemCompletionReview.id == request_id).with_for_update().first()
     if not req:
         raise HTTPException(status_code=404, detail="申请不存在")
 
     # 以申请单关联的工作项为准（不信任前端传入的 item_id，避免审错对象）
-    item = req.work_item
+    item = db.query(models.WorkItem).filter(models.WorkItem.id == req.work_item_id).with_for_update().populate_existing().first()
     if not item:
         raise HTTPException(status_code=400, detail="工作项不存在，无法处理")
 
-    reviewer = db.query(models.User).filter(models.User.id == body.reviewer_id).first()
+    reviewer = db.query(models.User).filter(models.User.id == user.id).first()
     if not reviewer:
         raise HTTPException(status_code=404, detail="审核人不存在")
 
@@ -122,7 +131,7 @@ def review_complete_request(request_id: int, body: CompleteRequestReview, db: Se
 
     try:
         req.reviewer_id = reviewer.id
-        req.reviewed_at = datetime.now()
+        req.reviewed_at = datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)
 
         if action == "REJECT":
             comment = (body.comment or "").strip()
@@ -137,8 +146,19 @@ def review_complete_request(request_id: int, body: CompleteRequestReview, db: Se
             work_package = item.work_package
             project = work_package.project if work_package else None
             ensure_open(item, work_package, project)  # 已关闭不能审批生效
+            if body.quality_percent is None:
+                raise HTTPException(400, "通过完成审批时必须填写质量系数（百分比）")
+            if item.complete_status:
+                raise HTTPException(409, "该工作项已完成，不能重复审批打分")
+            base_score = Decimal(str(item.score or 0))
+            percent = Decimal(str(body.quality_percent))
+            calculated = base_score * (percent / Decimal("100") - 1)
+            if not calculated.is_finite() or not math.isfinite(float(calculated)):
+                raise HTTPException(422, "质量系数过大，无法计算")
+            quality_score = float(calculated.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+            month = apply_completion_quality(db, item, quality_score, req.reviewed_at)
             req.status = "APPROVED"
-            req.review_comment = (body.comment or "").strip() or "审核通过"
+            req.review_comment = ((body.comment or "").strip() or "审核通过") + f"；基础总分：{base_score}；质量系数：{body.quality_percent}%；{month}质量分：{quality_score}"
             # 完成时间 = 审核通过时间；扣分以其是否超出 deadline+7 天 判定
             item.complete_status = True
             item.completed_at = req.reviewed_at
@@ -155,7 +175,7 @@ def review_complete_request(request_id: int, body: CompleteRequestReview, db: Se
     return {"code": 200, "message": message, "data": {"id": req.id, "status": req.status}}
 
 @router.post("/complete-requests")
-def create_complete_request(body: CompleteRequestCreate, db: Session = Depends(get_db)):
+def create_complete_request(body: CompleteRequestCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
     """提交工作项完成申请：进度已满或负责人手动确认后可提交，等待技术负责人审核。"""
     item = db.query(models.WorkItem).options(
         selectinload(models.WorkItem.monthly_scores),
@@ -166,14 +186,16 @@ def create_complete_request(body: CompleteRequestCreate, db: Session = Depends(g
     work_package = item.work_package
     ensure_open(item, work_package, work_package.project)
 
-    applicant = db.query(models.User).filter(models.User.id == body.applicant_id).first()
+    applicant = db.query(models.User).filter(models.User.id == user.id).first()
     if not applicant:
         raise HTTPException(status_code=404, detail="申请人不存在")
 
-    # 权限：工作项负责人本人，或领导/管理员代提
-    role = str(applicant.role).upper()
-    if str(applicant.id) != str(item.owner_id or "") and role not in ("LEADER", "ADMIN"):
-        raise HTTPException(status_code=403, detail="只能提交自己负责的工作项")
+    # 完成说明必须由责任人本人提交，不能通过请求体指定其他申请人。
+    if str(applicant.id) != str(item.owner_id or ""):
+        raise HTTPException(status_code=403, detail="请由工作项责任人填写说明并提交完成审核")
+    reason = body.reason.strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="请对照工作项目标填写完成说明")
 
     # 已审核通过的不需要再提交
     if bool(item.complete_status):
@@ -198,7 +220,7 @@ def create_complete_request(body: CompleteRequestCreate, db: Session = Depends(g
     review = models.WorkItemCompletionReview(
         work_item_id=item.id,
         applicant_id=applicant.id,
-        reason=(body.reason or "").strip() or None,
+        reason=reason,
         status="PENDING",
     )
     db.add(review)

@@ -124,6 +124,7 @@ class WorkPackage(Base):
     tech_owner = relationship("User", foreign_keys=[tech_owner_id])#技术负责人
     split_requests = relationship("WorkPackageSplitRequest", back_populates="work_package", cascade="all, delete-orphan")
 
+
 class WorkPackageChangeRequest(Base):
     """工作包变更申请：科室或管理员申请增删改，只有领导可以通过或驳回。"""
     __tablename__ = "work_package_change_requests"
@@ -135,13 +136,13 @@ class WorkPackageChangeRequest(Base):
     applicant_id = Column(String(50), ForeignKey("users.id"), nullable=False)  # 申请人
     reviewer_id = Column(String(50), ForeignKey("users.id"), nullable=True)  # 审核人
     status = Column(String(20), default="PENDING")  # PENDING / APPROVED / REJECTED
-    reason = Column(Text, nullable=True)  # 申请原因；兼容旧记录，新申请由服务层强制填写
     before_data = Column(Text, nullable=True)  # 变更前内容（JSON）
     after_data = Column(Text, nullable=True)  # 变更后内容（JSON）
     base_version = Column(Integer, nullable=False, default=1)  # 保留现有字段；当前使用 before_data 校验字段冲突
     review_comment = Column(Text, nullable=True)  # 审核意见 / 驳回原因
     created_at = Column(DateTime, default=datetime.now) # 提交时间
     reviewed_at = Column(DateTime, nullable=True)  # 审核时间
+    reason = Column(Text, nullable=True)  # 申请原因
 
     work_package = relationship("WorkPackage")
     applicant = relationship("User", foreign_keys=[applicant_id])
@@ -175,7 +176,7 @@ class WorkItem(Base):
 
 
 class WorkItemCompletionReview(Base):
-    """工作项完成确认审核：进度满/手动提交后，由工作项技术负责人审核。"""
+    """工作项完成确认审核：用户手动提交后，由工作项技术负责人审核。"""
     __tablename__ = "work_item_completion_reviews"
     id = Column(Integer, primary_key=True, autoincrement=True)
     work_item_id = Column(Integer, ForeignKey("work_items.id"), nullable=False, index=True)
@@ -329,3 +330,43 @@ class LoginSession(Base):
     # 只保存原始令牌的 SHA-256 哈希，原始令牌仅在登录成功时返回前端。
     token_hash = Column( String(64),unique=True, nullable=False, index=True, )
     expires_at = Column(DateTime, nullable=False)  # UTC 到期时间，与签发和验证逻辑一致。
+
+class ScoreConfirmationConfig(Base):
+    __tablename__ = "score_confirmation_config"
+    id = Column(Integer, primary_key=True)
+    start_month = Column(String(7), nullable=False)
+    closed_through = Column(String(7), nullable=True)
+
+
+class MonthlyScoreConfirmation(Base):
+    __tablename__ = "monthly_score_confirmations"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(50), ForeignKey("users.id"), nullable=False)
+    month = Column(String(7), nullable=False)
+    status = Column(String(20), nullable=False, default="PENDING")
+    snapshot = Column(Text, nullable=False)
+    fingerprint = Column(String(64), nullable=False)
+    confirmed_at = Column(DateTime, nullable=True)
+    __table_args__ = (UniqueConstraint("user_id", "month", name="uq_score_confirmation_user_month"),)
+
+
+class MonthlyScoreSelfEvaluation(Base):
+    __tablename__ = "monthly_score_self_evaluations"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    confirmation_id = Column(Integer, ForeignKey("monthly_score_confirmations.id"), nullable=False, unique=True)
+    content = Column(Text, nullable=False)
+    submitted_at = Column(DateTime, nullable=False)
+
+
+class HistoricalScoreDraft(Base):
+    __tablename__ = "historical_score_drafts"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(50), ForeignKey("users.id"), nullable=False)
+    month = Column(String(7), nullable=False)
+    snapshot = Column(Text, nullable=False)
+    reason = Column(Text, nullable=False)
+    status = Column(String(20), nullable=False, default="DRAFT")
+    updated_by_id = Column(String(50), ForeignKey("users.id"), nullable=False)
+    updated_at = Column(DateTime, nullable=False)
+    published_at = Column(DateTime, nullable=True)
+    __table_args__ = (UniqueConstraint("user_id", "month", name="uq_historical_score_draft"),)

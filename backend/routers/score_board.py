@@ -2,10 +2,24 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from database import get_db
+from dependencies import get_current_user
 from schemas import MonthScoreIn, MonthlyExtraScoreIn
 from services import score_board_service as service
 
 router = APIRouter(prefix='/api/v1/score-board', tags=['Score Board'])
+
+
+@router.get("/my-progress-deductions")
+# 返回当前用户负责工作项的进度扣分
+def get_my_progress_deductions(db: Session = Depends(get_db), user=Depends(get_current_user)):
+    return service.get_my_progress_deductions(db, user.id)
+
+
+@router.get("/my-period-progress-deductions")
+def get_my_period_progress_deductions(period: str = "month", year: int = None,
+                                      month: int = None, quarter: int = None,
+                                      db: Session = Depends(get_db), user=Depends(get_current_user)):
+    return service.get_my_period_progress_deductions(db, user.id, period, year, month, quarter)
 
 
 @router.get("/score-board/{user_id}")
@@ -49,6 +63,8 @@ def save_month_score(work_item_id: int, body: MonthScoreIn, db: Session = Depend
 @router.put("/monthly-extra-scores")
 def put_monthly_extra_scores(data: MonthlyExtraScoreIn, db: Session = Depends(get_db)):
     """领导按月为人员设置 技术提升/日常管理 附加分（存在则更新，否则创建）。"""
+    from services.score_confirmation_service import assert_editable
+    assert_editable(db, data.user_id, data.month)
     return service.put_monthly_extra_scores(data=data, db=db)
 
 
