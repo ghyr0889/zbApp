@@ -1,7 +1,7 @@
 <!-- 数据看板 -->
 <template>
   <div class="dashboard-page">
-    <el-alert v-if="!allowed" title="数据看板仅对领导和管理员开放" type="warning" :closable="false" />
+    <el-alert v-if="!allowed" title="数据看板仅对部门和管理员开放" type="warning" :closable="false" />
     <template v-else>
       <!-- 顶部切换数据源 -->
       <header class="board-toolbar">

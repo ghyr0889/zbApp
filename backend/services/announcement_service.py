@@ -199,3 +199,22 @@ def withdraw_announcement(db, announcement_id, current_user):
     except Exception:
         db.rollback()
         raise
+
+
+def delete_announcement(db, announcement_id, current_user):
+    """Delete an unpublished draft or withdrawn announcement and its audience links."""
+    try:
+        announcement = repo.get_by_id(db, announcement_id)
+        if announcement is None:
+            raise NotFound("公告不存在")
+        _check_edit_permission(announcement, current_user)
+        if announcement.status == "PUBLISHED":
+            raise BusinessError("已发布公告请先撤回，再删除")
+        if announcement.status not in {"DRAFT", "WITHDRAWN"}:
+            raise BusinessError("当前状态的公告不能删除")
+        repo.delete(db, announcement_id)
+        db.commit()
+        return {"code": 200, "message": "公告已删除"}
+    except Exception:
+        db.rollback()
+        raise

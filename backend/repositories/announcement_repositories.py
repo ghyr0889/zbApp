@@ -22,6 +22,16 @@ def get_by_id(db: Session, announcement_id: int):
     )
 
 
+def delete(db: Session, announcement_id: int):
+    """Remove role links before the announcement; the service owns the transaction."""
+    db.query(models.AnnouncementRole).filter(
+        models.AnnouncementRole.announcement_id == announcement_id
+    ).delete(synchronize_session=False)
+    db.query(models.Announcement).filter(
+        models.Announcement.id == announcement_id
+    ).delete(synchronize_session=False)
+
+
 def find_existing_roles(db: Session, roles: list[str]):
     """返回所选角色中，当前未删除用户实际使用的角色。"""
     if not roles:
@@ -173,4 +183,3 @@ def list_mine(
             for item in items
         ],
     }
-    

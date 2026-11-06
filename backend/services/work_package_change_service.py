@@ -1,4 +1,4 @@
-"""科室/管理员提交申请，领导通过或驳回；提交时不改正式工作包。"""
+"""科室/管理员提交申请，部门通过或驳回；提交时不改正式工作包。"""
 import json
 from datetime import datetime
 from fastapi import HTTPException
@@ -8,6 +8,7 @@ from utils import ensure_open, package_effective_complete
 
 # 规定允许申请修改哪些字段
 FIELDS = ('code', 'name', 'project_id', 'category_name', 'owner_id', 'tech_owner_id', 'objective')
+OBJECTIVE_MAX_LENGTH = 100  # 与现有数据库工作目标列的容量保持兼容。
 
 # 生成工作包快照
 def snapshot(pkg):
@@ -23,6 +24,8 @@ def validate(db, data):
     ensure_open(project)
     if not data['code'] or len(data['code']) > 50 or len(data['name']) > 100:
         raise HTTPException(400, '工作包编号不能为空且不能超过50字，名称不能超过100字')
+    if len(data.get('objective') or '') > OBJECTIVE_MAX_LENGTH:
+        raise HTTPException(400, f'工作目标不能超过{OBJECTIVE_MAX_LENGTH}字，请删减后重新提交')
     if not db.query(models.WorkPackageCategory).filter_by(name=data['category_name']).first():
         raise HTTPException(400, '工作包类型不存在')
     for key in ('owner_id', 'tech_owner_id'):
@@ -57,7 +60,7 @@ def submit(db, user, body=None, package_id=None, reason=None):
     if pkg:
         ensure_open(pkg, pkg.project)
         if repo.pending(db, pkg.id):
-            raise HTTPException(409, '该工作包已有待审核申请，请等待领导处理')
+            raise HTTPException(409, '该工作包已有待审核申请，请等待部门处理')
     data = None
     if body is not None:
         project_id = body.project_id
@@ -84,7 +87,7 @@ def submit(db, user, body=None, package_id=None, reason=None):
         after_data=json.dumps(data, ensure_ascii=False) if data else None)
     db.add(req)
     db.commit()
-    return {'code': 200, 'message': '申请已提交，等待领导审核', 'data': {'request_id': req.id}}
+    return {'code': 200, 'message': '申请已提交，等待部门审核', 'data': {'request_id': req.id}}
 
 # 整理申请列表，返回给前端
 def list_requests(db, user):
@@ -94,17 +97,19 @@ def list_requests(db, user):
         after = json.loads(req.after_data) if req.after_data else None
         reviewer = db.get(models.User, req.reviewer_id) if req.reviewer_id else None
         project = db.get(models.Project, req.project_id)
+        # 页面依据申请人 ID 决定是否显示“终止流程”；名称只用于展示，不能作为权限依据。
         result.append(dict(id=req.id, action=req.action, status=req.status,
+            applicant_id=req.applicant_id,
             before_data=before, after_data=after, reason=req.reason, project_name=project.name if project else '-',
             applicant_name=req.applicant.username if req.applicant else req.applicant_id,
             reviewer_name=reviewer.username if reviewer else '-', review_comment=req.review_comment,
             created_at=req.created_at, reviewed_at=req.reviewed_at))
     return {'code': 200, 'data': result}
 
-# 领导审核申请
+# 部门审核申请
 def review(db, user, request_id, decision, comment):
     if user.role.upper() != 'LEADER':
-        raise HTTPException(403, '只有领导可以审核工作包变更')
+        raise HTTPException(403, '只有部门可以审核工作包变更')
     if decision not in ('APPROVE', 'REJECT'):
         raise HTTPException(400, '审核只能选择通过或驳回')
     

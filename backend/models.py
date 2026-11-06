@@ -1,5 +1,5 @@
-﻿# xiangmu/backend/models.py
-from sqlalchemy import Column, String, Float, Text, ForeignKey, DateTime, Integer, UniqueConstraint,Boolean
+# xiangmu/backend/models.py
+from sqlalchemy import Column, String, Float, Text, ForeignKey, Date, DateTime, Integer, UniqueConstraint,Boolean, Index
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from database import Base
@@ -77,6 +77,7 @@ class Project(Base):
     category = Column(String(100), default=False,nullable=True)  # 项目类别
     tech_owner_id = Column(String(50),ForeignKey("users.id"),nullable=True) #机型主管/责任人
     isclosed = Column(Boolean, default=False, nullable=True) # 是否关闭
+    closed_at = Column(DateTime, nullable=True)
 
     owner = relationship("User", foreign_keys=[owner_id])
     tech_owner = relationship("User", foreign_keys=[tech_owner_id])
@@ -100,6 +101,36 @@ class WorkPackageCategory(Base):
     work_packages = relationship("WorkPackage", back_populates="category")
 
 
+class WorkPackageTemplate(Base):
+    """Reusable work-item draft for a work-package category."""
+    __tablename__ = "work_package_templates"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    category_id = Column(Integer, ForeignKey("work_package_categories.id"), nullable=False, index=True)
+    name = Column(String(100), nullable=False)
+    description = Column(Text, nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_by = Column(String(50), ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+    items = relationship("WorkPackageTemplateItem", cascade="all, delete-orphan", order_by="WorkPackageTemplateItem.sort_order")
+    __table_args__ = (UniqueConstraint("category_id", "name", name="uq_work_package_template_category_name"),)
+
+
+class WorkPackageTemplateItem(Base):
+    __tablename__ = "work_package_template_items"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    template_id = Column(Integer, ForeignKey("work_package_templates.id", ondelete="CASCADE"), nullable=False, index=True)
+    sort_order = Column(Integer, nullable=False)
+    name = Column(String(100), nullable=False)
+    standard = Column(Text, nullable=True)
+    deadline = Column(Date, nullable=True)  # 模板可预设截止日期；旧模板保持为空
+    difficulty = Column(String(50), nullable=True)
+    importance = Column(String(50), nullable=True)
+    innovation = Column(String(50), nullable=True)
+    score = Column(Float, nullable=False, default=0)
+    notes = Column(Text, nullable=True)
+
+
 
 class WorkPackage(Base):
     __tablename__ = "work_packages" # 工作包表
@@ -112,6 +143,7 @@ class WorkPackage(Base):
     complete_status = Column(Boolean, default=False, nullable=True) # 完成状态
     tech_owner_id = Column(String(50),ForeignKey("users.id"),nullable=True) #技术负责人
     isclosed = Column(Boolean, default=False, nullable=True) # 是否关闭
+    closed_at = Column(DateTime, nullable=True)
 
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     category_name = Column(String(100), ForeignKey("work_package_categories.name"), nullable=False)
@@ -126,7 +158,7 @@ class WorkPackage(Base):
 
 
 class WorkPackageChangeRequest(Base):
-    """工作包变更申请：科室或管理员申请增删改，只有领导可以通过或驳回。"""
+    """工作包变更申请：科室或管理员申请增删改，只有部门可以通过或驳回。"""
     __tablename__ = "work_package_change_requests"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
@@ -160,12 +192,14 @@ class WorkItem(Base):
     innovation = Column(String(50), nullable=False)  # 工作项创新性
     deadline = Column(DateTime, nullable=False)  # 工作项完成节点要求
     completed_at = Column(DateTime, nullable=True) # 工作完成时间
+    completion_approved_at = Column(DateTime, nullable=True) # 审批通过时间
     score = Column(Float, default=0.00, nullable=False)  # 工作项分值
     complete_status = Column(Boolean, default=False, nullable=True) # 完成状态
     owner_id = Column(String(50), ForeignKey("users.id"), nullable=True) #工作项负责人
     tech_owner_id = Column(String(50),ForeignKey("users.id"),nullable=False) #技术负责人
     notes = Column(Text, nullable=True) # 备注
     isclosed = Column(Boolean, default=False, nullable=True) # 是否关闭
+    closed_at = Column(DateTime, nullable=True)
 
     work_package_id = Column(Integer, ForeignKey("work_packages.id"), nullable=False)
     
@@ -210,7 +244,7 @@ class TaskTransfer(Base):
 
 
 class WorkPackageSplitRequest(Base):
-    """工作包拆分申请：普通员工申请把工作包拆分为多个工作项，由领导/管理员审核。"""
+    """工作包拆分申请：普通员工申请把工作包拆分为多个工作项，由部门/管理员审核。"""
     __tablename__ = "work_package_split_requests"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
@@ -350,6 +384,26 @@ class MonthlyScoreConfirmation(Base):
     __table_args__ = (UniqueConstraint("user_id", "month", name="uq_score_confirmation_user_month"),)
 
 
+class MonthlyScoreSettlement(Base):
+    """月度确认名单与统一折算状态；确认记录集合即该月固定参与名单。"""
+    __tablename__ = "monthly_score_settlements"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    month = Column(String(7), nullable=False, unique=True)
+    status = Column(String(20), nullable=False, default="WAITING") 
+    conversion_factor = Column(Float, nullable=True) # 这个月使用的折算系数
+    settled_at = Column(DateTime, nullable=True) # 完成当月统一折算的时间
+
+
+class MonthlyScoreConversion(Base):
+    """全员确认后产生的正式折算分和等级，不修改个人确认快照。"""
+    __tablename__ = "monthly_score_conversions"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    settlement_id = Column(Integer, ForeignKey("monthly_score_settlements.id"), nullable=False, index=True)
+    confirmation_id = Column(Integer, ForeignKey("monthly_score_confirmations.id"), nullable=False, unique=True)
+    converted_score = Column(Float, nullable=False)
+    grade = Column(String(10), nullable=False)
+
+
 class MonthlyScoreSelfEvaluation(Base):
     __tablename__ = "monthly_score_self_evaluations"
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -370,3 +424,14 @@ class HistoricalScoreDraft(Base):
     updated_at = Column(DateTime, nullable=False)
     published_at = Column(DateTime, nullable=True)
     __table_args__ = (UniqueConstraint("user_id", "month", name="uq_historical_score_draft"),)
+
+
+class CloseRecord(Base):
+    """关闭记录表，记录关闭/开启时间，辅助进度扣分逻辑"""
+    __tablename__ = "close_records"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    target_type = Column(String(20), nullable=False)  # 项目/工作包/工作项
+    target_id = Column(Integer, nullable=False)  # 项目/工作包/工作项ID
+    closed_at = Column(DateTime, nullable=False)  # 本次关闭时间 
+    reopened_at = Column(DateTime, nullable=True)  # 本次重新开启时间,可以为空
+    operator_id = Column(String(50), ForeignKey("users.id"), nullable=False)  # 操作人ID

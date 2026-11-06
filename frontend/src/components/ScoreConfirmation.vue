@@ -1,12 +1,9 @@
 <template>
-  <el-button v-if="pending.length || evaluationsPending.length" class="score-confirmation-entry" type="primary" @click="open">
-    积分待确认（{{ pending.length }}）· 待自评（{{ evaluationsPending.length }}）
-  </el-button>
   <el-dialog class="score-confirmation-dialog" top="4vh" v-model="visible" title="积分与自评待办提醒" width="min(720px, 94vw)" draggable append-to-body
     :close-on-click-modal="false" :close-on-press-escape="!saving" :show-close="!saving">
     <div class="confirmation-toolbar">
       <div class="confirmation-toolbar-row">
-        <el-alert title="每月1—3日确认上月积分。确认后保存当次结果；4日起未确认的自动按系统得分入账并锁定。" type="info" :closable="false" />
+        <el-alert title="请确认上月1日至月底的计算总分；未确认的记录会保留，所有参与人员确认后统一生成折算总分和等级。" type="info" :closable="false" />
         <el-button :loading="loading" :disabled="saving" @click="refresh">刷新</el-button>
       </div>
       <el-alert v-if="error" :title="error" type="error" :closable="false" />
@@ -24,7 +21,7 @@
 </template>
 <script setup>
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
-import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '../stores/user'
 import { getMyScoreConfirmationsApi, confirmMyScoreApi, saveScoreSelfEvaluationApi } from '../api'
@@ -34,15 +31,13 @@ async function goToScore(month) {
     await router.push({ name: 'ScoreBoard', query: { tab: 'all', month } })
     window.dispatchEvent(new CustomEvent('show-score-month', { detail: month }))
     visible.value = false
-    notification?.close()
   } catch { ElMessage.error('跳转失败，请重试') }
 }
 const store = useUserStore()
 const records = ref([]), visible = ref(false), loading = ref(false), saving = ref(false), error = ref('')
 const pending = computed(() => records.value.filter(r => r.status === 'PENDING'))
 const evaluationsPending = computed(() => records.value.filter(r => r.self_evaluation?.status === 'REQUIRED'))
-let timer, notification, generation = 0
-const notified = new Set()
+let generation = 0
 async function refresh() {
   const uid = store.userInfo?.id
   if (!uid || loading.value || saving.value) return
@@ -53,20 +48,6 @@ async function refresh() {
     if (current !== generation || store.userInfo?.id !== uid) return
     records.value = data.data.records || []
     error.value = ''
-    const unseen = pending.value.filter(r => !notified.has(r.id))
-    const unseenEvaluations = evaluationsPending.value.filter(r => !notified.has(`evaluation-${r.id}`))
-    if (!pending.value.length && unseenEvaluations.length) {
-      unseenEvaluations.forEach(r => notified.add(`evaluation-${r.id}`))
-      notification?.close()
-      notification = ElNotification({ title: '月度自评待填写', message: `${unseenEvaluations[0].month}月所有人员积分已入账，请填写本人自评。点击查看。`, type: 'warning', duration: 0, onClick: open })
-    }
-    if (unseen.length) {
-      unseen.forEach(r => notified.add(r.id))
-      notification?.close()
-      notification = ElNotification({ title: '月度积分待确认', message: `请在本月3日结束前确认${unseen[0].month}月积分，逾期自动入账并锁定。点击查看。`,
-        type: 'warning', duration: 0, onClick: open })
-    }
-    if (!pending.value.length && !evaluationsPending.value.length) notification?.close()
   } catch (e) {
     if (current === generation) error.value = e.response?.data?.detail || '积分确认数据加载失败，请刷新重试'
   } finally { if (current === generation) loading.value = false }
@@ -118,7 +99,10 @@ window.addEventListener('score-row-action', handleRowAction)
 async function confirm(record) {
   if (saving.value) return
   try {
-    await ElMessageBox.confirm(`确认${record.month}月计算总分 ${record.score.total_calculated}、折算总分 ${record.score.converted_score}？确认后结果锁定。`, '确认得分', { draggable: true })
+    const message = record.settlement_status === 'LEGACY'
+      ? `${record.month}月已有按旧规则确认的记录，本次按原规则确认并锁定计算总分 ${record.score.total_calculated}、折算总分 ${record.score.converted_score}。`
+      : `确认${record.month}月计算总分 ${record.score.total_calculated}？确认后结果锁定，所有人员确认后统一生成折算总分和等级。`
+    await ElMessageBox.confirm(message, '确认积分', { draggable: true })
   } catch { return }
   saving.value = true
   try {
@@ -129,16 +113,14 @@ async function confirm(record) {
   finally { saving.value = false; await refresh() }
 }
 watch(() => store.userInfo?.id, uid => {
-  clearInterval(timer); notification?.close(); generation++; loading.value = false
-  records.value = []; visible.value = false; notified.clear()
-  if (uid) { refresh(); timer = setInterval(refresh, 60000) }
+  generation++; loading.value = false
+  records.value = []; visible.value = false
 }, { immediate: true })
-onBeforeUnmount(() => { window.removeEventListener('score-row-action', handleRowAction); window.removeEventListener('open-score-confirmations', open); generation++; clearInterval(timer); notification?.close() })
+onBeforeUnmount(() => { window.removeEventListener('score-row-action', handleRowAction); window.removeEventListener('open-score-confirmations', open); generation++ })
 defineExpose({ open })
 </script>
 <style scoped>
 .reminder-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
-.score-confirmation-entry { position: fixed; right: 24px; bottom: 24px; z-index: 2000; box-shadow: 0 4px 16px #2169c230; }
 .confirmation-record { margin: 24px 0; }
 .self-evaluation { padding: 16px; margin-top: 16px; background: #f0f7ff; border: 1px solid #d6e7f7; border-radius: 8px; }
 .evaluation-hint { margin-top: 16px; color: #526780; }

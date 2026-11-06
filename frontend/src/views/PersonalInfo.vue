@@ -122,7 +122,7 @@ const roleDisplayName = computed(() => {
   if (!userInfo.value) return ''
   const role = String(userInfo.value.role).toUpperCase()
   if (role === 'ADMIN') return '管理员'
-  if (role === 'LEADER') return '领导（部门主管、项目负责人）'
+  if (role === 'LEADER') return '部门'
   if (role === 'DEPARTMENT') return '科室主任'
   return '普通员工'
 })

@@ -20,7 +20,8 @@ def list_projects_page(db, page, page_size, keyword, owner_id, level, complete_s
         q = q.filter(models.Project.level == level)
     if complete_status is not None and str(complete_status) != "":
         flag = str(complete_status).lower() in ("1", "true", "yes")
-        q = q.filter(models.Project.complete_status == flag)
+        # 旧数据中的 NULL 与未手动确认一致，筛选未完成时也应包含。
+        q = q.filter(models.Project.complete_status.is_(True) if flag else models.Project.complete_status.isnot(True))
 
     total = q.count()
     projects = q.options(
@@ -53,26 +54,38 @@ def list_project_packages_page(db, project_id, page, page_size, keyword):
     return total, pkgs
 
 
-def personal_item_condition(user_id, show_completed=True, show_related=False):
+def personal_item_condition(user_id, show_completed=True, show_related=False, show_closed=True):
     """关联范围为当前仍含本人负责工作项的工作包，不依赖转办记录。"""
     condition = models.WorkItem.owner_id == user_id
     if show_related:
         own_item = aliased(models.WorkItem)
         from sqlalchemy import select
         owned_packages = select(own_item.work_package_id).where(own_item.owner_id == user_id)
+        if not show_closed:
+            owned_packages = owned_packages.where(own_item.isclosed.isnot(True))
         condition = models.WorkItem.work_package_id.in_(owned_packages)
     if not show_completed:
         condition = condition & models.WorkItem.complete_status.isnot(True)
+    if not show_closed:
+        condition = condition & models.WorkItem.isclosed.isnot(True)
     return condition
 
 
-def list_my_packages_page(db, user_id, page, page_size, show_completed=True, show_related=False):
+def list_my_packages_page(db, user_id, page, page_size, show_completed=True, show_related=False, show_closed=True):
     """本人负责的工作包和本人工作项所属工作包都参与分页，包括未分解工作包。"""
     q = db.query(models.WorkPackage).filter(or_(
         models.WorkPackage.owner_id == user_id,
         models.WorkPackage.work_items.any(
-            personal_item_condition(user_id, show_completed, show_related)),
+            personal_item_condition(user_id, show_completed, show_related, show_closed)),
     ))
+    # 工作包手动确认完成后，与已完成工作项一起由同一个开关控制。
+    if not show_completed:
+        q = q.filter(models.WorkPackage.complete_status.isnot(True))
+    if not show_closed:
+        q = q.join(models.Project).filter(
+            models.WorkPackage.isclosed.isnot(True),
+            models.Project.isclosed.isnot(True),
+        )
     total = q.count()
     pkgs = q.options(
         selectinload(models.WorkPackage.owner),
@@ -112,13 +125,15 @@ def get_package(db, entry_id):
     return db.query(models.WorkPackage).filter(models.WorkPackage.id == entry_id).first()
 
 
-def list_package_items(db, work_package_id, owner_id=None, show_completed=True, show_related=False):
+def list_package_items(db, work_package_id, owner_id=None, show_completed=True, show_related=False, show_closed=True):
     """读取工作项；提供 owner_id 时只查询该负责人。"""
     query = db.query(models.WorkItem).filter(models.WorkItem.work_package_id == work_package_id)
     if owner_id is not None:
-        query = query.filter(personal_item_condition(owner_id, show_completed, show_related))
+        query = query.filter(personal_item_condition(owner_id, show_completed, show_related, show_closed))
     if not show_completed:
         query = query.filter(models.WorkItem.complete_status.isnot(True))
+    if not show_closed:
+        query = query.filter(models.WorkItem.isclosed.isnot(True))
     return (
         query.options(
             selectinload(models.WorkItem.owner),
@@ -126,7 +141,11 @@ def list_package_items(db, work_package_id, owner_id=None, show_completed=True, 
             selectinload(models.WorkItem.monthly_scores),
         )
         .filter(models.WorkItem.work_package_id == work_package_id)
-        .order_by(models.WorkItem.id)
+        .order_by(
+            models.WorkItem.deadline.is_(None),
+            models.WorkItem.deadline.asc(),
+            models.WorkItem.id.asc(),
+            )
         .all()
     )
 

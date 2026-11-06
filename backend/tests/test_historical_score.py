@@ -13,7 +13,7 @@ from routers.score_confirmations import HistoricalScoreBody
 class HistoryTests(unittest.TestCase):
     def setUp(self):
         self.engine=create_engine("sqlite:///:memory:")
-        for model in (models.User,models.ScoreConfirmationConfig,models.MonthlyScoreConfirmation,models.MonthlyScoreSelfEvaluation,models.HistoricalScoreDraft):
+        for model in (models.User,models.ScoreConfirmationConfig,models.MonthlyScoreConfirmation,models.MonthlyScoreSettlement,models.MonthlyScoreConversion,models.MonthlyScoreSelfEvaluation,models.HistoricalScoreDraft):
             model.__table__.create(self.engine)
         self.db=sessionmaker(bind=self.engine)()
         self.db.add(models.User(id="u1",username="One",job_grade="P1",role="EMPLOYEE"))

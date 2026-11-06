@@ -11,7 +11,7 @@ import logging, os
 
 from database import engine, Base, SessionLocal, get_db
 from routers import auth, work_logs, review, admin, tasks, score_board, complete_review, pending, announcement, information
-from routers import work_time, dashboard, work_package_changes, score_confirmations
+from routers import work_time, dashboard, work_package_changes, score_confirmations, work_package_templates
 
 log_file = os.path.join(os.path.dirname(sys.executable), 'calculate_score.log')
 logging.basicConfig(level=logging.DEBUG,
@@ -63,6 +63,7 @@ app.include_router(work_time.router)
 app.include_router(dashboard.router)
 app.include_router(work_package_changes.router)
 app.include_router(score_confirmations.router)
+app.include_router(work_package_templates.router)
 
 import threading
 _settlement_stop = threading.Event()

@@ -1,4 +1,4 @@
-﻿# xiangmu/backend/routers/admin.py
+# xiangmu/backend/routers/admin.py
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, selectinload
 import traceback
@@ -210,7 +210,7 @@ def delete_project(project_id: int, user_id: str, db: Session = Depends(get_db))
     if not user:
         raise HTTPException(status_code=404, detail=f"查不到对应的用户 (接收到的 user_id: {user_id})")
     if user.role not in ["LEADER", "DEPARTMENT", "ADMIN"] and (not project or project.owner_id != user.id):
-        raise HTTPException(status_code=405, detail="只有项目负责人和部门领导、科室主任、管理员可以删除项目")
+        raise HTTPException(status_code=405, detail="只有项目负责人和部门、科室主任、管理员可以删除项目")
     if project_effective_complete(project):
         raise HTTPException(status_code=400, detail="项目已完成，不能删除")
     if project.isclosed:

@@ -3,7 +3,7 @@ from datetime import datetime
 from types import SimpleNamespace as NS
 from unittest.mock import patch
 from fastapi import HTTPException
-import test_score_confirmation as confirmation_tests
+import backend.tests.test_score_confirmation as confirmation_tests
 from services import score_confirmation_service as service
 import models
 
@@ -43,9 +43,8 @@ class SelfEvaluationTests(confirmation_tests.ScoreConfirmationTests):
                 with self.assertRaises(HTTPException):
                     service.save_evaluation(self.db, NS(id="u1"), r["id"], content)
             rec = self.db.get(models.MonthlyScoreConfirmation, r["id"])
-            snapshot = json.loads(rec.snapshot)
-            snapshot["grade"] = "B"
-            rec.snapshot = json.dumps(snapshot)
+            conversion = self.db.query(models.MonthlyScoreConversion).filter_by(confirmation_id=rec.id).one()
+            conversion.grade = "B"
             self.db.commit()
             with self.assertRaises(HTTPException):
                 service.save_evaluation(self.db, NS(id="u1"), r["id"], "review")

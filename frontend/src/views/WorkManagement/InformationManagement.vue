@@ -1,3 +1,4 @@
+<!-- 信息管理 -->
 <template>
   <div class="information-management">
     <el-alert
@@ -26,26 +27,31 @@
               <el-input v-model="row.name" :maxlength="group.maxLength" :disabled="group.saving" />
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="190" align="center">
+          <el-table-column label="操作" :width="group.kind === 'work-categories' ? 260 : 190" align="center">
             <template #default="{ row }">
               <el-button link type="primary" :disabled="group.saving || row.name.trim() === row.originalName" @click="saveEntry(group, row)">保存</el-button>
               <el-button link :disabled="group.saving || row.name === row.originalName" @click="row.name = row.originalName">还原</el-button>
               <el-button link type="danger" :disabled="group.loading || group.saving" @click="deleteEntry(group, row)">删除</el-button>
+              <el-button v-if="group.kind === 'work-categories'" link type="primary" :disabled="group.saving" @click="templateCategory = row; templateVisible = true">管理模板</el-button>
             </template>
           </el-table-column>
         </el-table>
         <p class="group-note">修改后点击该行“保存”。{{ group.kind === 'departments' ? '新增科室即使尚无人员，也会出现在人员管理下拉框中。' : '改名会同步已有工作包；工作包类型不可重名。' }}</p>
       </el-card>
     </div>
+    <WorkPackageTemplateManager v-model="templateVisible" :category="templateCategory" />
   </div>
 </template>
 
 <script setup>
-import { onMounted, reactive } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import WorkPackageTemplateManager from '../../components/WorkPackageTemplateManager.vue'
 import { getInformationApi, createInformationApi, updateInformationApi, deleteInformationApi } from '../../api'
 
 const emit = defineEmits(['changed'])
+const templateVisible = ref(false)
+const templateCategory = ref(null)
 const groups = reactive([
   { kind: 'departments', title: '科室', maxLength: 255 },
   { kind: 'work-categories', title: '工作包类型', maxLength: 100 },

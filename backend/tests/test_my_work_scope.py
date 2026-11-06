@@ -1,8 +1,9 @@
 """个人工作筛选回归测试，仅使用内存数据库。"""
+import json
 import unittest
 from datetime import date, datetime, timedelta, timezone
 from unittest.mock import patch
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from fastapi import HTTPException
 from database import Base
@@ -16,6 +17,44 @@ from schemas import ConfirmCompletionIn, ConfirmClosed
 
 
 class MyWorkScopeTests(unittest.TestCase):
+    def test_project_and_package_completion_require_independent_confirmation(self):
+        project = self.db.get(models.Project, 1)
+        package = self.db.get(models.WorkPackage, 1)
+        for item in package.work_items:
+            item.complete_status = True
+        self.db.commit()
+
+        def views():
+            project_view = service.get_project_detail(1, db=self.db)['data']
+            packages = service.get_paged_project_work_packages(1, db=self.db)['data']['items']
+            return project_view, next(row for row in packages if row['id'] == 1)
+
+        project_view, package_view = views()
+        self.assertFalse(package_view['complete_status'])
+        self.assertFalse(project_view['complete_status'])
+        self.assertEqual(project_view['done_count'], 0)
+
+        service.confirm_completion(ConfirmCompletionIn(target_type='work_package', target_id=1, user_id='a', confirmed=True), self.db)
+        for other in (self.db.get(models.WorkPackage, 2), self.db.get(models.WorkPackage, 3)):
+            other.complete_status = True
+        self.db.commit()
+        project_view, package_view = views()
+        self.assertTrue(package_view['complete_status'])
+        self.assertFalse(project_view['complete_status'])
+        self.assertEqual(project_view['done_count'], 3)
+
+        service.confirm_completion(ConfirmCompletionIn(target_type='project', target_id=1, user_id='a', confirmed=True), self.db)
+        self.assertTrue(views()[0]['complete_status'])
+        service.confirm_completion(ConfirmCompletionIn(target_type='project', target_id=1, user_id='a', confirmed=False), self.db)
+        self.assertFalse(views()[0]['complete_status'])
+        service.confirm_completion(ConfirmCompletionIn(target_type='work_package', target_id=1, user_id='a', confirmed=False), self.db)
+        self.assertFalse(views()[1]['complete_status'])
+
+        # 旧数据的 NULL 状态也应显示在“未完成”筛选中。
+        self.db.execute(text('UPDATE projects SET complete_status = NULL WHERE id = 1'))
+        self.db.commit()
+        self.assertEqual(service.get_paged_projects(complete_status='false', db=self.db)['data']['total'], 1)
+
     def test_project_reopen_roles_and_target_boundaries(self):
         project = self.db.get(models.Project, 1)
         for role in ('DEPARTMENT', 'LEADER', 'ADMIN'):
@@ -40,6 +79,26 @@ class MyWorkScopeTests(unittest.TestCase):
                     service.confirm_closed(ConfirmClosed(target_type='project', target_id=1, user_id='a', confirmed=True), self.db)
             with self.assertRaises(HTTPException):
                 service.confirm_closed(ConfirmClosed(target_type='work_package', target_id=1, user_id='a', confirmed=False), self.db)
+
+    def test_closing_and_reopening_records_intervals(self):
+        def change(kind, target_id, confirmed):
+            service.confirm_closed(ConfirmClosed(target_type=kind, target_id=target_id,
+                                                 user_id='a', confirmed=confirmed), self.db)
+
+        change('work_package', 1, True)
+        change('work_package', 1, True)
+        self.assertEqual(self.db.query(models.CloseRecord).count(), 1)
+        record = self.db.query(models.CloseRecord).one()
+        self.assertEqual((record.target_type, record.target_id, record.operator_id), ('work_package', 1, 'a'))
+        self.assertIsNone(record.reopened_at)
+        change('work_package', 1, False)
+        self.assertIsNotNone(record.reopened_at)
+        change('work_package', 1, True)
+        self.assertEqual(self.db.query(models.CloseRecord).count(), 2)
+        items = [self.db.get(models.WorkItem, 1), self.db.get(models.WorkItem, 3)]
+        close_map = score_service.close_records_by_item(self.db, items)
+        self.assertEqual(len(close_map[1]), 2)
+        self.assertEqual(len(close_map[3]), 0)
 
     def test_completion_routes_use_authenticated_user(self):
         for route, method, schema in ((router.confirm_closed, 'confirm_closed', ConfirmClosed),
@@ -115,6 +174,20 @@ class MyWorkScopeTests(unittest.TestCase):
         with self.assertRaises(HTTPException):
             router.assigned_packages('missing', db=self.db, user=leader)
 
+    def test_department_can_view_assignments_and_personal_details(self):
+        department = models.User(id='d', username='Director', job_grade='P1', role='DEPARTMENT')
+        self.db.add(department)
+        self.db.commit()
+        rows = router.list_assignments(db=self.db, user=department)['data']['items']
+        self.assertIn('a', [row['user_id'] for row in rows])
+        assigned = router.assigned_packages('a', db=self.db, user=department)['data']
+        personal = service.get_my_work_packages_paged('a', db=self.db, show_completed=False, show_closed=False)['data']
+        self.assertEqual(assigned['items'], personal['items'])
+        self.assertEqual(router.get_work_items('1', view_user_id='a', db=self.db, user=department),
+                         router.get_work_items('1', only_mine=True, db=self.db, user=self.user))
+        with self.assertRaises(HTTPException):
+            router.assigned_packages('missing', db=self.db, user=department)
+
     def test_completion_and_related_filters(self):
         self.db.get(models.WorkItem, 1).complete_status = True
         self.db.commit()
@@ -135,6 +208,49 @@ class MyWorkScopeTests(unittest.TestCase):
         self.assertEqual(repo.list_package_items(self.db, 1, 'a', False, True), [])
         self.assertEqual(repo.list_my_packages_page(self.db, 'a', 1, 20, False, True)[0], 2)
         self.assertEqual(len(repo.list_package_items(self.db, 1, 'a', True, True)), 2)
+
+    def test_completed_packages_and_items_share_filter(self):
+        self.db.get(models.WorkPackage, 1).complete_status = True
+        self.db.get(models.WorkPackage, 2).complete_status = True
+        self.db.get(models.WorkItem, 1).complete_status = True
+        self.db.commit()
+
+        hidden = router.get_my_work_packages_paged('a', db=self.db, user=self.user)['data']
+        self.assertEqual(([row['id'] for row in hidden['items']], hidden['total']), ([3], 1))
+        shown = router.get_my_work_packages_paged('a', show_completed=True, db=self.db, user=self.user)['data']
+        self.assertEqual(([row['id'] for row in shown['items']], shown['total']), ([1, 2, 3], 3))
+        items = router.get_work_items('1', only_mine=True, show_completed=True, db=self.db, user=self.user)
+        self.assertEqual([row['id'] for row in items['data']['work_items']], [1])
+        # 完成和关闭是独立筛选条件。
+        self.db.get(models.WorkPackage, 2).isclosed = True
+        self.db.commit()
+        shown = router.get_my_work_packages_paged('a', show_completed=True, db=self.db, user=self.user)['data']
+        self.assertEqual([row['id'] for row in shown['items']], [1, 3])
+        shown = router.get_my_work_packages_paged('a', show_completed=True, show_closed=True, db=self.db, user=self.user)['data']
+        self.assertEqual([row['id'] for row in shown['items']], [1, 2, 3])
+
+    def test_closed_work_is_hidden_by_default_and_can_be_shown(self):
+        self.db.get(models.WorkItem, 1).isclosed = True
+        self.db.get(models.WorkPackage, 2).isclosed = True
+        self.db.commit()
+
+        hidden = router.get_my_work_packages_paged('a', db=self.db, user=self.user)['data']
+        self.assertEqual([row['id'] for row in hidden['items']], [3])
+        self.assertEqual(hidden['total'], 1)
+        self.assertEqual(router.get_my_work_packages_paged(
+            'a', show_related=True, db=self.db, user=self.user)['data']['total'], 1)
+        self.assertEqual(router.get_work_items('1', only_mine=True, db=self.db, user=self.user)['data']['work_items'], [])
+
+        shown = router.get_my_work_packages_paged('a', show_closed=True, db=self.db, user=self.user)['data']
+        self.assertEqual([row['id'] for row in shown['items']], [1, 2, 3])
+        self.assertEqual([row['id'] for row in router.get_work_items(
+            '1', only_mine=True, show_closed=True, db=self.db, user=self.user)['data']['work_items']], [1])
+
+        # A closed project hides its packages in the personal list, while project details remain available.
+        self.db.get(models.Project, 1).isclosed = True
+        self.db.commit()
+        self.assertEqual(router.get_my_work_packages_paged('a', db=self.db, user=self.user)['data']['total'], 0)
+        self.assertEqual(len(router.get_work_items('1', db=self.db, user=self.user)['data']['work_items']), 2)
 
     def test_route_uses_authenticated_identity(self):
         with self.assertRaises(HTTPException) as error:
@@ -261,6 +377,34 @@ class MyWorkScopeTests(unittest.TestCase):
             result = score_service.get_my_period_progress_deductions(
                 self.db, 'b', 'month', 2026, month=10)['data']
         self.assertEqual(result['deducted_score'], original_penalty)
+
+    def test_imported_summary_is_attributed_only_when_item_deductions_match(self):
+        item = self.db.get(models.WorkItem, 2)
+        item.deadline = datetime(2026, 9, 15, 23, 59, 59)
+        self.db.add(models.ScoreConfirmationConfig(id=1, start_month='2026-10'))
+        record = models.MonthlyScoreConfirmation(
+            user_id='b', month='2026-09', status='IMPORTED', fingerprint='test',
+            snapshot=json.dumps({'user_id': 'b', 'summary_only': True,
+                                 'deducted_score': 1.0, 'details': []}))
+        self.db.add(record)
+        self.db.commit()
+
+        with patch('services.score_confirmation_service.now_local', return_value=datetime(2026, 10, 23)):
+            result = score_service.get_my_period_progress_deductions(
+                self.db, 'b', 'year', 2026)['data']
+            self.assertEqual(result['deducted_score'], 3.0)
+            self.assertEqual(result['unattributed_score'], 0)
+            self.assertEqual([(row['month'], row['deducted_score']) for row in result['details']],
+                             [('2026-09', 1.0), ('2026-10', 2.0)])
+
+            record.snapshot = json.dumps({'user_id': 'b', 'summary_only': True,
+                                          'deducted_score': 1.5, 'details': []})
+            self.db.commit()
+            mismatch = score_service.get_my_period_progress_deductions(
+                self.db, 'b', 'year', 2026)['data']
+            self.assertEqual(mismatch['unattributed_score'], 1.5)
+            self.assertEqual([(row['month'], row['deducted_score']) for row in mismatch['details']],
+                             [('2026-10', 2.0)])
 
     def test_personal_deduction_route_uses_login(self):
         with patch.object(score_service, 'get_my_progress_deductions', return_value={}) as query:

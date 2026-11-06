@@ -1,4 +1,4 @@
-﻿
+
 import { createRouter, createWebHistory } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '../stores/user'
@@ -19,17 +19,17 @@ const routes = [
   { path: '/home', name: 'Home', component: () => import('../views/Home.vue'), meta: { layout: 'portal' } },
   { path: '/applications', name: 'Applications', redirect: { path: '/home', hash: '#application-center' } },
   { path: '/login', name: 'Login', component: Login },
-  { path: '/personal-info', name: 'PersonalInfo', component: PersonalInfo, meta: { layout: 'portal' } },
-  { path: '/announcements', name: 'Announcements', component: () => import('../views/WorkManagement/Announcement.vue'), meta: { layout: 'portal' } },
   {
     path: '/work',
     component: () => import('../layouts/WorkManagement.vue'),
     redirect: '/project-overview',
     meta: { module: 'work' },
     children: [
+    { path: '/personal-info', name: 'PersonalInfo', component: PersonalInfo },
+    { path: '/announcements', name: 'Announcements', component: () => import('../views/WorkManagement/Announcement.vue') },
     { path: '/work-time', name: 'WorkTime', component: () => import('../views/WorkManagement/WorkTime.vue') },
-    { path: '/assignments', redirect: { path: '/project-overview', query: { tab: 'employees' } }, meta: { requiresLeader: true } },
-    { path: '/assignments/:userId', component: ProjectOverview, props: route => ({ viewUserId: route.params.userId }), meta: { requiresLeader: true } },
+    { path: '/assignments', redirect: { path: '/project-overview', query: { tab: 'employees' } }, meta: { requiresAssignmentViewer: true } },
+    { path: '/assignments/:userId', component: ProjectOverview, props: route => ({ viewUserId: route.params.userId }), meta: { requiresAssignmentViewer: true } },
     { path: '/project-overview', name: 'ProjectOverview', component: ProjectOverview },
     { path: '/review', name: 'ReviewLogs', component: Review },
     { path: '/complete-review', redirect: '/review' },
@@ -93,8 +93,8 @@ router.beforeEach(async (to, from, next) => {
     return next(to.path === '/login' ? undefined : '/login')
   }
 
-  if (to.meta.requiresLeader && !userStore.isLEADER) {
-    ElMessage.error("仅部门领导可以查看员工工作内容")
+  if (to.meta.requiresAssignmentViewer && !userStore.isLEADER && !userStore.isDEPARTMENT) {
+    ElMessage.error("仅部门和科室主任可以查看员工工作内容")
     return next("/home")
   }
 

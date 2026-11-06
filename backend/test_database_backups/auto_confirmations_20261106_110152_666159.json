@@ -1,0 +1,75 @@
+{
+  "target": "127.0.0.1:3307/zbapp",
+  "backed_up_at": "2026-11-06T11:01:52.739056",
+  "config": {
+    "id": 1,
+    "start_month": "2026-10",
+    "closed_through": "2026-10"
+  },
+  "confirmations": [
+    {
+      "id": 12,
+      "user_id": "0001",
+      "month": "2026-10",
+      "status": "AUTO",
+      "snapshot": "{\"calculate_score\":0,\"carrier_inspection_score\":0,\"converted_score\":0.0,\"daily_manage\":0,\"deduct_score\":0,\"deducted_score\":0,\"details\":[],\"final_calculated\":0.0,\"grade\":\"D\",\"knowledge_score\":0,\"month_score\":0,\"patent_score\":0,\"period_1\":0.0,\"period_2\":0,\"period_3\":0,\"period_4\":0,\"period_scores\":[0.0],\"quality_event_score\":0,\"role\":\"DEPARTMENT\",\"tech_growth_score\":0,\"tech_improve\":0,\"total_calculated\":0,\"total_score\":0,\"train_score\":0,\"user_id\":\"0001\",\"username\":\"科室1\"}",
+      "fingerprint": "67574b71017cfcb28b6b58c3af187340301713d10fe702a008e6eb48b12b2240",
+      "confirmed_at": "2026-11-04 00:00:00"
+    },
+    {
+      "id": 13,
+      "user_id": "0004",
+      "month": "2026-10",
+      "status": "AUTO",
+      "snapshot": "{\"calculate_score\":0,\"carrier_inspection_score\":0,\"converted_score\":0.0,\"daily_manage\":0,\"deduct_score\":0,\"deducted_score\":0,\"details\":[],\"final_calculated\":0.0,\"grade\":\"D\",\"knowledge_score\":0,\"month_score\":0,\"patent_score\":0,\"period_1\":0.0,\"period_2\":0,\"period_3\":0,\"period_4\":0,\"period_scores\":[0.0],\"quality_event_score\":0,\"role\":\"EMPLOYEE\",\"tech_growth_score\":0,\"tech_improve\":0,\"total_calculated\":0,\"total_score\":0,\"train_score\":0,\"user_id\":\"0004\",\"username\":\"员工2\"}",
+      "fingerprint": "58297aacf574f9c85eaacfacf0352486abbb5ce37d396484c005f3e91fe49dfc",
+      "confirmed_at": "2026-11-04 00:00:00"
+    },
+    {
+      "id": 14,
+      "user_id": "0005",
+      "month": "2026-10",
+      "status": "AUTO",
+      "snapshot": "{\"calculate_score\":0,\"carrier_inspection_score\":0,\"converted_score\":0.0,\"daily_manage\":0,\"deduct_score\":0,\"deducted_score\":0,\"details\":[],\"final_calculated\":0.0,\"grade\":\"D\",\"knowledge_score\":0,\"month_score\":0,\"patent_score\":0,\"period_1\":0.0,\"period_2\":0,\"period_3\":0,\"period_4\":0,\"period_scores\":[0.0],\"quality_event_score\":0,\"role\":\"EMPLOYEE\",\"tech_growth_score\":0,\"tech_improve\":0,\"total_calculated\":0,\"total_score\":0,\"train_score\":0,\"user_id\":\"0005\",\"username\":\"员工3\"}",
+      "fingerprint": "78d9d7bfa18e3cfebadc44217296e9b9daad454f1bd2df1df752f6a7137e858f",
+      "confirmed_at": "2026-11-04 00:00:00"
+    },
+    {
+      "id": 15,
+      "user_id": "0006",
+      "month": "2026-10",
+      "status": "AUTO",
+      "snapshot": "{\"calculate_score\":0,\"carrier_inspection_score\":0,\"converted_score\":0.0,\"daily_manage\":0,\"deduct_score\":0,\"deducted_score\":0,\"details\":[],\"final_calculated\":0.0,\"grade\":\"D\",\"knowledge_score\":0,\"month_score\":0,\"patent_score\":0,\"period_1\":0.0,\"period_2\":0,\"period_3\":0,\"period_4\":0,\"period_scores\":[0.0],\"quality_event_score\":0,\"role\":\"EMPLOYEE\",\"tech_growth_score\":0,\"tech_improve\":0,\"total_calculated\":0,\"total_score\":0,\"train_score\":0,\"user_id\":\"0006\",\"username\":\"员工4\"}",
+      "fingerprint": "2da88a1a156cc38355216ab41fc30fb6c20bdd8e1836100a5355126107709adf",
+      "confirmed_at": "2026-11-04 00:00:00"
+    },
+    {
+      "id": 16,
+      "user_id": "0007",
+      "month": "2026-10",
+      "status": "AUTO",
+      "snapshot": "{\"calculate_score\":0,\"carrier_inspection_score\":0,\"converted_score\":0.0,\"daily_manage\":0,\"deduct_score\":0,\"deducted_score\":0,\"details\":[],\"final_calculated\":0.0,\"grade\":\"D\",\"knowledge_score\":0,\"month_score\":0,\"patent_score\":0,\"period_1\":0.0,\"period_2\":0,\"period_3\":0,\"period_4\":0,\"period_scores\":[0.0],\"quality_event_score\":0,\"role\":\"DEPARTMENT\",\"tech_growth_score\":0,\"tech_improve\":0,\"total_calculated\":0,\"total_score\":0,\"train_score\":0,\"user_id\":\"0007\",\"username\":\"科室2\"}",
+      "fingerprint": "fe2412e314669ac81cd5a7e2bca42339f8269ad8a967123242947ed5da374899",
+      "confirmed_at": "2026-11-04 00:00:00"
+    },
+    {
+      "id": 17,
+      "user_id": "0003",
+      "month": "2026-10",
+      "status": "AUTO",
+      "snapshot": "{\"calculate_score\":0.24,\"carrier_inspection_score\":0,\"converted_score\":0.24,\"daily_manage\":0,\"deduct_score\":0,\"deducted_score\":0,\"details\":[{\"calculate_score\":-2.24,\"deducted_score\":0.0,\"month\":\"2026-10\",\"project_code\":\"项目3的编号\",\"project_id\":6,\"project_name\":\"3\",\"quality_score\":-2.24,\"score\":20.0,\"work_item_deadline\":\"2026-09-15\",\"work_item_difficulty\":\"5\",\"work_item_id\":90,\"work_item_importance\":\"3\",\"work_item_innovation\":\"7\",\"work_item_name\":\"3-1-2\",\"work_item_standard\":\"\",\"work_package_category\":\"类型1\",\"work_package_code\":\"项目3的1号工作包\",\"work_package_id\":16},{\"calculate_score\":2.48,\"deducted_score\":0.0,\"month\":\"2026-10\",\"project_code\":\"项目3的编号\",\"project_id\":6,\"project_name\":\"3\",\"quality_score\":2.48,\"score\":0.0,\"work_item_deadline\":\"2026-11-06\",\"work_item_difficulty\":\"5\",\"work_item_id\":89,\"work_item_importance\":\"7\",\"work_item_innovation\":\"7\",\"work_item_name\":\"3-1-1\",\"work_item_standard\":\"\",\"work_package_category\":\"类型1\",\"work_package_code\":\"项目3的1号工作包\",\"work_package_id\":16}],\"final_calculated\":0.24,\"grade\":\"D\",\"knowledge_score\":0,\"month_score\":20.0,\"patent_score\":0,\"period_1\":0.24,\"period_2\":0,\"period_3\":0,\"period_4\":0,\"period_scores\":[0.24],\"quality_event_score\":0,\"role\":\"EMPLOYEE\",\"tech_growth_score\":-19.76,\"tech_improve\":0,\"total_calculated\":0.24,\"total_score\":0.24,\"train_score\":0,\"user_id\":\"0003\",\"username\":\"员工1\"}",
+      "fingerprint": "a4679bcab708a46f16a6d487f0466bcf1c9af7deff4e2a313f2adf259a8741de",
+      "confirmed_at": "2026-11-04 00:00:00"
+    }
+  ],
+  "self_evaluations": [
+    {
+      "id": 1,
+      "confirmation_id": 17,
+      "content": "不高不该",
+      "submitted_at": "2026-11-04 15:33:12"
+    }
+  ],
+  "conversions": [],
+  "settlements": []
+}

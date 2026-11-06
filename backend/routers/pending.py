@@ -14,9 +14,19 @@ from sqlalchemy.orm import Session
 
 import models
 from database import get_db
+from dependencies import get_current_user
+from services.work_reminder_service import list_work_reminders
+from services.approval_reminder_service import list_approval_reminders
 from utils import pending_status_for
 
 router = APIRouter(prefix="/api/v1/pending", tags=["Pending"])
+
+# 获取当前登录用户工作待办列表
+@router.get("/work-reminders")
+def get_work_reminders(db: Session = Depends(get_db), viewer=Depends(get_current_user)):
+    """Return the signed-in person's work and actionable approval reminders."""
+    rows = list_approval_reminders(db, viewer) + list_work_reminders(db, viewer.id)
+    return {"code": 200, "data": {"total": len(rows), "items": rows}}
 
 
 def _review_pending(db: Session, viewer, role: str) -> int:
@@ -59,7 +69,7 @@ def _transfer_pending(db: Session, user_id: str) -> int:
 
 
 def _package_changes_pending(db: Session, role: str) -> int:
-    """只有领导能审核工作包变更，因此仅给领导计入待办。"""
+    """只有部门能审核工作包变更，因此仅给部门计入待办。"""
     if role != 'LEADER':
         return 0
     return db.query(models.WorkPackageChangeRequest).filter_by(status='PENDING').count()

@@ -1,4 +1,5 @@
 """使用内存数据库验证审批流程，不连接或修改业务数据库。"""
+import json
 import unittest
 from datetime import datetime
 from sqlalchemy import create_engine, event, text
@@ -52,6 +53,21 @@ class PackageChangeTests(unittest.TestCase):
         service.review(self.db, self.leader, req_id, 'APPROVE', '')
         with self.assertRaises(HTTPException): service.review(self.db, self.leader, req_id, 'APPROVE', '')
         self.assertEqual(self.db.query(models.WorkPackage).count(), 1)
+
+    def test_objective_length_checked_on_submission_and_review(self):
+        with self.assertRaises(HTTPException) as too_long:
+            service.submit(self.db, self.admin, self.body(objective='目' * 101))
+        self.assertIn('100字', too_long.exception.detail)
+        request_id = service.submit(self.db, self.admin, self.body(objective='目' * 100))['data']['request_id']
+        request = self.db.get(models.WorkPackageChangeRequest, request_id)
+        data = json.loads(request.after_data)
+        data['objective'] = '目' * 101  # 模拟旧版系统已提交的超长申请。
+        request.after_data = json.dumps(data, ensure_ascii=False)
+        self.db.commit()
+        with self.assertRaises(HTTPException):
+            service.review(self.db, self.leader, request_id, 'APPROVE', '')
+        self.assertEqual(self.db.get(models.WorkPackageChangeRequest, request_id).status, 'PENDING')
+        self.assertEqual(self.db.query(models.WorkPackage).count(), 0)
 
     def test_update_reject_conflict_and_approve(self):
         pkg = self.create()

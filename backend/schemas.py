@@ -84,10 +84,10 @@ class MonthScoreIn(BaseModel):
 
 
 class MonthlyExtraScoreIn(BaseModel):
-    """领导按月为人员设置 技术提升/日常管理 附加分。"""
+    """部门按月为人员设置 技术提升/日常管理 附加分。"""
     user_id: str = Field(..., description="人员 ID")
     month: str = Field(..., description="月份 YYYY-MM")
-    updated_by_id: str = Field(..., description="填写人（领导）ID")
+    updated_by_id: str = Field(..., description="填写人（部门）ID")
     patent_score: Optional[float] = Field(0.0, description="专利分（技术提升）")
     knowledge_score: Optional[float] = Field(0.0, description="知识库得分（技术提升）")
     train_score: Optional[float] = Field(0.0, description="培训得分（技术提升）")
@@ -131,18 +131,18 @@ class SplitRequestCreate(BaseModel):
 class SplitRequestReview(BaseModel):
     """审核拆分申请。"""
     reviewer_id: str = Field(..., description="审核人 ID")
-    action: str = "APPROVE"  #  # APPROVE=同意 / REJECT=驳回 / SUBMIT=提交给领导
+    action: str = "APPROVE"  #  # APPROVE=同意 / REJECT=驳回 / SUBMIT=提交给部门
     comment: str = Field("", description="审核意见 / 驳回原因（驳回必填）")
 
 class SplitRequestEdit(BaseModel):
     """编辑拆分申请内容。"""
-    editor_id: str = Field(..., description="操作人 ID（员工本人 / 领导 / 管理员）")
+    editor_id: str = Field(..., description="操作人 ID（员工本人 / 部门 / 管理员）")
     reason: Optional[str] = Field(None, description="修改后的拆分原因")
     split_items: list[SplitItemIn] = Field(..., description="修改后的工作项列表")
 
 class RemoveSplitItem(BaseModel):
     """从拆分申请中删除一个工作项。"""
-    editor_id: str = Field(..., description="操作人 ID（员工本人 / 领导 / 管理员）")
+    editor_id: str = Field(..., description="操作人 ID（员工本人 / 部门 / 管理员）")
     client_id: Optional[str] = Field(None, description="申请内唯一标识，前端生成，删除时使用")
 
 class TransferCreate(BaseModel):
@@ -187,6 +187,10 @@ class CompleteRequestReview(BaseModel):
     quality_percent: Optional[float] = Field(None, ge=0, allow_inf_nan=False, description="通过审批必填质量百分比，100表示100%，允许超过100")
     action: str = "APPROVE"  #  # APPROVE=同意 / REJECT=驳回
     comment: str = Field("", description="审核意见 / 驳回原因（驳回必填）")
+    completed_at: Optional[datetime] = Field(
+        None, 
+        description="技术负责人确认的实际完成时间"
+    )
 
 class CompleteRequestCreate(BaseModel):
     """提交完成申请。"""

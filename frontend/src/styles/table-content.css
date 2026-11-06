@@ -1,5 +1,5 @@
-/* Text cells use two lines; interactive controls and expanded rows keep their layout. */
-body .el-table .el-table__cell > .cell:not(:has(button, input, textarea, select, [role="button"], .el-table, .el-table__expand-icon, .el-checkbox, .el-radio, .el-select, .el-input, .el-input-number, .el-progress, .el-dropdown, .el-table__column-filter-trigger, .caret-wrapper)) {
+/* 所有表格的数据文本默认显示两行；编辑控件、操作按钮与展开内容保留原布局。 */
+body .el-table td.el-table__cell > .cell.table-text-cell {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;

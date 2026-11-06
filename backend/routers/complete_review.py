@@ -1,3 +1,4 @@
+# 工作项完成申请
 from decimal import Decimal, ROUND_HALF_UP
 import math
 import json
@@ -13,9 +14,17 @@ from database import get_db
 from dependencies import get_current_user
 from schemas import CompleteRequestReview, CompleteRequestCreate
 from services.score_board_service import apply_completion_quality
+from services.approval_termination_service import terminate_request
 from utils import ensure_open, effective_complete, item_progress
 
 router = APIRouter(prefix="/api/v1/complete_review", tags=["Complete Review"])
+
+
+@router.post("/complete-requests/{request_id}/terminate")
+def terminate_complete_request(request_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    # 完成申请流程终止。
+    return terminate_request(db, models.WorkItemCompletionReview, request_id, user.id,
+                             models.WorkItemCompletionReview.applicant_id, ("PENDING", "REJECTED"))
 
 def _complete_request_view(req):
     """把完成申请展开为前端需要的结构。"""
@@ -42,7 +51,8 @@ def _complete_request_view(req):
         "reason": req.reason or "",
         "reviewer_id": req.reviewer_id or "",
         "review_comment": req.review_comment or "",
-        "created_at": req.created_at.strftime("%Y-%m-%d %H:%M") if req.created_at else "-",
+        "created_at": (req.created_at.strftime("%Y-%m-%d %H:%M:%S") 
+                       if req.created_at else "-"),
         "reviewed_at": req.reviewed_at.strftime("%Y-%m-%d %H:%M") if req.reviewed_at else "-",
         # 工作项摘要（不要直接把 ORM 对象交给前端）
         "complete_item": {
@@ -67,7 +77,7 @@ def _complete_request_view(req):
 @router.get("/complete-requests")
 def get_complete_requests(user_id: str = Query(...), db: Session = Depends(get_db)):
     """查询完成申请。普通员工：只看自己的申请。
-    科室主任 / 领导 / 管理员：查看全部申请（各自审核对应状态的申请）"""
+    科室主任 / 部门 / 管理员：查看全部申请（各自审核对应状态的申请）"""
     viewer = db.query(models.User).filter(models.User.id == user_id).first()
     if not viewer:
         raise HTTPException(status_code=404, detail="用户不存在")
@@ -131,7 +141,7 @@ def review_complete_request(request_id: int, body: CompleteRequestReview, db: Se
 
     try:
         req.reviewer_id = reviewer.id
-        req.reviewed_at = datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)
+        req.reviewed_at = datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None) # 实际审批时间
 
         if action == "REJECT":
             comment = (body.comment or "").strip()
@@ -150,6 +160,9 @@ def review_complete_request(request_id: int, body: CompleteRequestReview, db: Se
                 raise HTTPException(400, "通过完成审批时必须填写质量系数（百分比）")
             if item.complete_status:
                 raise HTTPException(409, "该工作项已完成，不能重复审批打分")
+            if body.completed_at is None:
+                raise HTTPException(400, "通过完成审批时必须填写实际完成时间")
+            
             base_score = Decimal(str(item.score or 0))
             percent = Decimal(str(body.quality_percent))
             calculated = base_score * (percent / Decimal("100") - 1)
@@ -159,9 +172,16 @@ def review_complete_request(request_id: int, body: CompleteRequestReview, db: Se
             month = apply_completion_quality(db, item, quality_score, req.reviewed_at)
             req.status = "APPROVED"
             req.review_comment = ((body.comment or "").strip() or "审核通过") + f"；基础总分：{base_score}；质量系数：{body.quality_percent}%；{month}质量分：{quality_score}"
-            # 完成时间 = 审核通过时间；扣分以其是否超出 deadline+7 天 判定
+            # 完成时间 = 申请提交时间；扣分以其是否超出 deadline+7 天 判定
+            if req.created_at is None:
+                raise HTTPException(400, "该申请缺少提交时间，无法确定工作项完成时间")
+
+            # 审批通过后才标记完成
             item.complete_status = True
-            item.completed_at = req.reviewed_at
+            # 完成时间记录本次申请的提交时间
+            item.completed_at = body.completed_at
+            # 进度扣分截至审批通过的时间
+            item.completion_approved_at = req.reviewed_at
 
         db.commit()
     except HTTPException:

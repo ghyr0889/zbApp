@@ -6,8 +6,8 @@ from datetime import datetime
 # 各角色在「审批查阅」里需要处理的拆分申请状态
 PENDING_STATUS_BY_ROLE = {
     "DEPARTMENT": "PENDING",    # 科室主任：待科室审核
-    "LEADER": "SUBMITTED",      # 领导：待领导审核
-    "ADMIN": "SUBMITTED",       # 管理员：等同领导
+    "LEADER": "SUBMITTED",      # 部门：待部门审核
+    "ADMIN": "SUBMITTED",       # 管理员：等同部门
     "EMPLOYEE": "REJECTED",     # 员工：自己被驳回、待修改重提的申请
 }
 
@@ -111,25 +111,9 @@ def item_progress(item):
     return calc_progress(filled, total)
 
 def package_effective_complete(pkg):
-    """工作包有效完成 = 手动确认完成 或 其下所有工作项都已审核通过。
-    空工作包（无工作项）不自动完成，需手动确认。
-    要求调用前已预加载 pkg.work_items -> monthly_scores，避免 N+1 查询。
-    """
-    if bool(pkg.complete_status):
-        return True
-    items = list(pkg.work_items or [])
-    if not items:
-        return False
-    return all(is_completed(it) for it in items)
+    """工作包仅以自身手动确认的完成状态为准。"""
+    return bool(pkg.complete_status)
 
 def project_effective_complete(project):
-    """A project is complete only when manually confirmed or every package is complete.
-    An empty project or an unfinished empty package does not complete automatically.
-    Package relationships must be loaded by the caller.
-    """
-    if bool(project.complete_status):
-        return True
-    wps = list(project.work_packages or [])
-    if not wps:
-        return False
-    return all(package_effective_complete(wp) for wp in wps)
+    """项目仅以自身手动确认的完成状态为准。"""
+    return bool(project.complete_status)

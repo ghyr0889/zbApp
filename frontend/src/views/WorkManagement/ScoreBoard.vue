@@ -83,6 +83,7 @@
             </div>
 
             <p class="muted-text">进度扣分随所选周期显示：已入账月份采用确认时保存的结果，未入账月份显示实时预览；季、年可查看周期内各月扣分，正式总分仍以入账结果为准。已完成工作项的扣分计算至完成日期。</p>
+            <p v-if="personalProgress?.unattributed_score > 0" class="muted-text">有 {{ personalProgress.unattributed_score }} 分历史补录扣分缺少可核对的工作项明细，顶部保留已入账总数，下表不将其归入某个工作项。</p>
             <!-- 个人积分详情：嵌套展开表格 -->
             <el-table
               :data="groupedMyDetails"
@@ -162,7 +163,6 @@
         <el-tab-pane label="所有人员积分" name="all">
           <HistoricalScoreEntry v-if="String(currentUser?.role).toUpperCase() === 'ADMIN'" />
 
-          <el-button type="primary" plain @click="openMyConfirmations">积分与自评提醒</el-button>
           <div class="tab-content">
             <p class="score-formula-tip">月度未入账时显示实时分数，仅供核对；入账后显示冻结结果。季度、年度仅汇总正式入账及历史数据。月度折算分在确认时锁定。</p>
             <p class="score-formula-tip">
@@ -185,17 +185,10 @@
               :header-cell-style="{ background: '#f8fafc', color: '#334155' }"
             >
               <el-table-column prop="username" label="人员" width="100" align="center" fixed="left" />
-              <el-table-column label="入账状态" width="140">
+              <el-table-column label="状态" width="140" align="center">
                 <template #default="{ row }">
+                  <span>{{ scoreStatusLabel(row.confirmation_status) }}</span>
                   <el-button v-if="isOwnScore(row) && row.confirmation_status === 'PENDING'" link type="primary" @click="runScoreAction('confirm')">确认积分</el-button>
-                  <span v-else>{{ ({ IMPORTED: '历史补录已入账', PENDING: '待确认（未入账）', CONFIRMED: '本人已确认', AUTO: '逾期自动入账', PARTIAL: '部分月份未确认', SETTLED: '已入账', HISTORY: '历史积分', UNCONFIRMED: '暂存（未入账）' })[row.confirmation_status] || '历史积分' }}</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="月度自评" width="160" align="center">
-                <template #default="{ row }">
-                  <el-button v-if="isOwnScore(row) && ['REQUIRED', 'SUBMITTED'].includes(row.self_evaluation?.status)" link type="primary" @click="runScoreAction('evaluate')">{{ row.self_evaluation.status === 'SUBMITTED' ? '查看／修改自评' : '填写自评' }}</el-button>
-                  <el-button v-else-if="row.self_evaluation?.status === 'SUBMITTED'" link type="primary" @click="evaluationDetail = row; evaluationVisible = true">查看自评</el-button>
-                  <span v-else>{{ ({ REQUIRED: '待填写', WAITING: '待全员入账', NOT_REQUIRED: '无需填写' })[row.self_evaluation?.status] || '—' }}</span>
                 </template>
               </el-table-column>
               <!-- 工作项基础分 -->
@@ -252,24 +245,39 @@
               <!-- 汇总计算项 -->
               <el-table-column prop="tech_growth_score" label="技术成长分" min-width="80" align="center" />
               <el-table-column prop="total_calculated" label="计算总分" min-width="80" align="center"/>
-              <el-table-column prop="converted_score" label="折算总分" min-width="80" align="center" />
+              <el-table-column prop="converted_score" label="折算总分" min-width="80" align="center">
+                <template #default="{ row }">{{ row.settlement_status === 'WAITING' ? '待生成' : (row.converted_score ?? '—') }}</template>
+              </el-table-column>
               <!-- 最终等级 -->
               <el-table-column prop="grade" label="等级" width="90" align="center" fixed="right">
                 <template #default="{ row }">
-                  <el-tag :type="getGradeTagType(row.grade)" effect="dark" size="small">
+                  <span v-if="row.settlement_status === 'WAITING'">待生成</span>
+                  <el-tag v-else :type="getGradeTagType(row.grade)" effect="dark" size="small">
                     {{ row.grade || '-' }}
                   </el-tag>
                 </template>
               </el-table-column>
-              <!-- 操作：管理员/领导/科室可编辑 技术提升/日常管理 附加分 -->
-              <el-table-column label="操作" width="80" align="center" fixed="right" v-if="isEdit">
+              <!-- 本人可填写或修改自评；部门和管理员可查看已提交的自评。 -->
+              <el-table-column label="操作" width="170" align="center" fixed="right" v-if="isEdit || canEditOwnEvaluation">
                 <template #default="{ row }">
-                  <template v-if="!row.isEditing">
-                    <el-button v-if="!row.month_locked" type="primary" link size="small" @click="startEdit(row)">编辑</el-button><span v-else>已锁定</span>
-                  </template>
-                  <template v-else>
-                    <el-button type="success" link size="small" :loading="savingRow" @click="saveRow(row)">保存</el-button>
-                    <el-button type="info" link size="small" @click="cancelEdit(row)">取消</el-button>
+                  <el-button v-if="isOwnScore(row) && canEditOwnEvaluation" type="primary" link size="small" @click="runScoreAction('evaluate')">
+                    {{ myEvaluationStatus === 'SUBMITTED' ? '修改自评' : '填写自评' }}
+                  </el-button>
+                  <el-button 
+                    v-if="canViewSelfEvaluation && row.self_evaluation?.status === 'SUBMITTED' && !(isOwnScore(row) && canEditOwnEvaluation)" 
+                    type="primary" 
+                    link size="small" 
+                    @click="evaluationDetail = row; evaluationVisible = true">
+                    查看自评
+                  </el-button>
+                  <template v-if="isEdit">
+                    <template v-if="!row.isEditing">
+                      <el-button v-if="!row.month_locked" type="primary" link size="small" @click="startEdit(row)">编辑</el-button><span v-else>已锁定</span>
+                    </template>
+                    <template v-else>
+                      <el-button type="success" link size="small" :loading="savingRow" @click="saveRow(row)">保存</el-button>
+                      <el-button type="info" link size="small" @click="cancelEdit(row)">取消</el-button>
+                    </template>
                   </template>
                 </template>
               </el-table-column>
@@ -288,8 +296,8 @@
               :header-cell-style="{ background: '#f8fafc', color: '#334155' }"
             >
               <el-table-column prop="username" label="人员" width="100" align="center" fixed="left" />
-              <el-table-column label="入账状态" width="130">
-                <template #default="{ row }">{{ ({ IMPORTED: '历史补录已入账', PENDING: '待确认（未入账）', CONFIRMED: '本人已确认', AUTO: '逾期自动入账', PARTIAL: '部分月份未确认', SETTLED: '已入账', HISTORY: '历史积分', UNCONFIRMED: '暂存（未入账）' })[row.confirmation_status] || '历史积分' }}</template>
+              <el-table-column label="状态" width="130" align="center">
+                <template #default="{ row }">{{ scoreStatusLabel(row.confirmation_status) }}</template>
               </el-table-column>
               
               <!-- 动态生成的子周期列：季度显示3个月，年度可根据后端返回显示12个月或4个季度 -->
@@ -355,16 +363,25 @@ import HistoricalScoreEntry from '../../components/HistoricalScoreEntry.vue'
 import { useRoute } from 'vue-router'
 import { ArrowLeft, ArrowRight, ArrowDown, Refresh, Download } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { getPublicScoreBoardApi, getMyPeriodProgressDeductionsApi, updateMonthlyExtraScoreApi } from '../../api'
+import { getPublicScoreBoardApi, getMyPeriodProgressDeductionsApi, getMyScoreConfirmationsApi, updateMonthlyExtraScoreApi } from '../../api'
 import { useUserStore } from '../../stores/user'
 import { createScoreSnapshot, downloadScoreExcel } from '../../utils/scoreExport'
 
 const route = useRoute()
 const evaluationVisible = ref(false), evaluationDetail = ref(null)
-const openMyConfirmations = () => window.dispatchEvent(new Event('open-score-confirmations'))
 const userStore = useUserStore()
 const currentUser = computed(() => userStore.userInfo)
 const isOwnScore = row => currentUser.value?.id != null && String(row.user_id) === String(currentUser.value.id)
+const canViewSelfEvaluation = computed(() => ['LEADER', 'ADMIN'].includes(String(currentUser.value?.role || '').toUpperCase()))
+const myEvaluationStatus = ref('')
+const canEditOwnEvaluation = computed(() => ['REQUIRED', 'SUBMITTED'].includes(myEvaluationStatus.value))
+// 将后端的月度状态和季度/年度汇总状态统一显示为四种页面文案。
+const scoreStatusLabel = status => ({
+  CONFIRMED: '确认', SETTLED: '确认',
+  PENDING: '未确认', PARTIAL: '未确认', UNCONFIRMED: '未确认',
+  AUTO: '自动确认',
+  IMPORTED: '历史录入', HISTORY: '历史录入'
+})[status] || '未确认'
 function runScoreAction(action) {
   window.dispatchEvent(new CustomEvent('score-row-action', { detail: { action, month: selectedMonth.value } }))
 }
@@ -507,10 +524,6 @@ const currentPeriodPersonalData = computed(() => {
 // 计算个人的分组详情数据（外层项目/工作包，内层具体工作项+扣分）
 const groupedMyDetails = computed(() => {
   const scoreDetails = currentPeriodPersonalData.value?.details || []
-  // 旧版历史季度/年度直接按工作项去重；启用确认后的季度/年度则汇总各月快照。
-  const legacyAggregate = queryMode.value !== 'month' &&
-    currentPeriodPersonalData.value && !('confirmation_status' in currentPeriodPersonalData.value)
-  const legacyDeductedItems = new Set()
   const map = {}
   const itemRows = {}   // work_item_id -> 行对象（跨月合并用）
 
@@ -532,7 +545,7 @@ const groupedMyDetails = computed(() => {
       }
     }
 
-    // 同一工作项跨月只显示一行；得分与各月已入账进度扣分分别累加。
+    // 同一工作项跨月只显示一行，扣分按各月新增值累加。
     const iid = item.work_item_id ?? `missing-${index}`
     if (!itemRows[iid]) {
       const row = {
@@ -553,10 +566,7 @@ const groupedMyDetails = computed(() => {
     const row = itemRows[iid]
     row.score += Number(item.score || 0)
     row.calculate_score += Number(item.calculate_score || 0)
-    if (!legacyAggregate || !legacyDeductedItems.has(iid)) {
-      row.deducted_score += Number(item.deducted_score || 0)
-      legacyDeductedItems.add(iid)
-    }
+    row.deducted_score += Number(item.deducted_score || 0)
     // 质量分：同一工作项不同月可能不同，保留该工作项最近一条的值
     row.quality_score = item.quality_score ?? row.quality_score
     row.difficulty = item.work_item_difficulty
@@ -564,22 +574,10 @@ const groupedMyDetails = computed(() => {
     row.innovation = item.work_item_innovation
   })
 
-  const groups = Object.values(map).map(group => ({
+  return Object.values(map).map(group => ({
     ...group,
     deducted_score: group.items.reduce((sum, item) => sum + Number(item.deducted_score || 0), 0)
   }))
-  const periodDeduction = Number(currentPeriodPersonalData.value?.deducted_score || 0)
-  const detailedDeduction = groups.reduce((sum, group) => sum + group.deducted_score, 0)
-  const summaryOnlyDeduction = Number((periodDeduction - detailedDeduction).toFixed(2))
-  if (summaryOnlyDeduction > 0) {
-    groups.push({
-      project_name: '周期汇总数据', project_code: '-', work_package_id: 'summary-only',
-      work_package_code: '-', work_package_category: '-', deducted_score: summaryOnlyDeduction,
-      items: [{ work_item_name: '仅有汇总数据，无工作项明细', work_item_standard: '-', deadline: '-',
-        score: 0, quality_score: 0, calculate_score: 0, deducted_score: summaryOnlyDeduction }]
-    })
-  }
-  return groups
 })
 
 // 周期（年/季/月）变化时重新查询积分数据
@@ -594,6 +592,7 @@ const fetchPublicScoreBoard = async () => {
   const requestId = ++scoreRequestId
   peopleList.value = []
   personalProgress.value = null
+  myEvaluationStatus.value = ''
   loading.value = true
   try {
     let year = '', month = '', quarter = ''
@@ -606,9 +605,10 @@ const fetchPublicScoreBoard = async () => {
     } else if (queryMode.value === 'year') {
       year = selectedYear.value
     }
-    const [boardResult, progressResult] = await Promise.allSettled([
+    const [boardResult, progressResult, evaluationResult] = await Promise.allSettled([
       getPublicScoreBoardApi(queryMode.value, year, month, quarter),
-      getMyPeriodProgressDeductionsApi(queryMode.value, year, month, quarter)
+      getMyPeriodProgressDeductionsApi(queryMode.value, year, month, quarter),
+      queryMode.value === 'month' ? getMyScoreConfirmationsApi() : Promise.resolve(null)
     ])
     if (requestId !== scoreRequestId) return
     if (boardResult.status === 'rejected') throw boardResult.reason
@@ -620,6 +620,11 @@ const fetchPublicScoreBoard = async () => {
       personalProgress.value = progressResult.value.data.data
     } else {
       ElMessage.warning('个人进度扣分加载失败，请刷新重试')
+    }
+    // 本人自评状态从专用接口获取；公开积分表对非部门/管理员不返回自评内容。
+    if (evaluationResult.status === 'fulfilled') {
+      const record = evaluationResult.value?.data?.data?.records?.find(r => r.month === selectedMonth.value)
+      myEvaluationStatus.value = record?.self_evaluation?.status || ''
     }
   } catch (err) {
     if (requestId !== scoreRequestId) return

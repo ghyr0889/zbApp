@@ -86,6 +86,8 @@ def delete_information(kind: Kind, entry_id: int, db: Session = Depends(get_db),
             used = db.query(models.WorkPackage.id).filter(models.WorkPackage.category_name == row.name).with_for_update().first()
             if used:
                 raise HTTPException(409, "该类型仍被工作包使用，请先调整工作包类型后再删除")
+            if db.query(models.WorkPackageTemplate.id).filter(models.WorkPackageTemplate.category_id == entry_id).first():
+                raise HTTPException(409, "该类型仍有工作包模板，请先移除模板")
         # 直接删除字典行，避免 ORM 尝试把关联工作包的类型置空。
         db.query(Model).filter(Model.id == entry_id).delete(synchronize_session=False)
         db.commit()
@@ -146,6 +148,8 @@ def rename_information(kind: Kind, entry_id: int, body: NameInput, db: Session =
                 db.flush()
                 affected = db.query(models.WorkPackage).filter(models.WorkPackage.category_name == old_name).update(
                     {models.WorkPackage.category_name: name}, synchronize_session=False)
+                db.query(models.WorkPackageTemplate).filter(models.WorkPackageTemplate.category_id == entry_id).update(
+                    {models.WorkPackageTemplate.category_id: replacement.id}, synchronize_session=False)
                 db.query(Model).filter(Model.id == entry_id).delete(synchronize_session=False)
                 row = replacement
         db.flush()

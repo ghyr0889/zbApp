@@ -8,9 +8,10 @@
         提交<el-badge v-if="stagedCount" :value="stagedCount" class="batch-badge" />
       </el-button>
       <el-button v-if="canManage" type="success" plain size="small" :disabled="pkgLocked" @click="handleAddWorkItem">新增工作项</el-button>
+      <el-button v-if="canManage" type="primary" plain size="small" :disabled="pkgLocked" @click="openTemplateImport">导入模板</el-button>
     </div>
 
-    <!-- 填写/查看月份：每月前2天可切换到上月补填 -->
+    <!-- 填写/查看月份：每月前5天可切换到上月补填 -->
     <div v-if="(readOnly || hasManage) && monthOptions.length > 1" class="month-switch">
       <span class="month-label">填写/查看月份：</span>
       <el-select v-model="fillMonth" size="small" style="width: 150px">
@@ -19,6 +20,7 @@
     </div>
 
     <el-table
+      ref="workItemTableRef"
       :data="workItems"
       v-loading="loading"
       style="width: 100%"
@@ -277,6 +279,24 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="templateImportVisible" title="导入工作项模板" width="760px" draggable append-to-body>
+      <p>当前工作包类型：{{ workPackage?.category_name || '-' }}。导入内容会追加为可编辑草稿，请核对截止时间后保存并提交审核。</p>
+      <el-select v-model="selectedTemplateId" placeholder="选择模板" style="width: 100%" :loading="templateLoading">
+        <el-option v-for="template in availableTemplates" :key="template.id" :label="`${template.name}（${template.items.length} 项）`" :value="template.id" />
+      </el-select>
+      <el-empty v-if="!templateLoading && !availableTemplates.length" description="当前类型暂无启用的模板" />
+      <el-table v-if="selectedTemplate" :data="selectedTemplate.items" border size="small" max-height="340px" style="margin-top: 16px">
+        <el-table-column prop="name" label="工作项名称" min-width="150"><template #default="{ row }">{{ row.name || '导入后填写' }}</template></el-table-column>
+        <el-table-column prop="standard" label="完成标准" min-width="210" />
+        <el-table-column prop="deadline" label="截止时间" width="120"><template #default="{ row }">{{ row.deadline || '导入后填写' }}</template></el-table-column>
+        <el-table-column prop="difficulty" label="难度" width="75" />
+        <el-table-column prop="importance" label="重要度" width="85" />
+        <el-table-column prop="innovation" label="创新度" width="85" />
+        <el-table-column prop="score" label="建议分值" width="90" />
+      </el-table>
+      <template #footer><el-button @click="templateImportVisible = false">取消</el-button><el-button type="primary" :disabled="!selectedTemplate" @click="importTemplate">导入为草稿</el-button></template>
+    </el-dialog>
+
     <!-- 工作项转办弹窗：选择接收人 + 转出分数（不能超过剩余分值） -->
     <el-dialog v-model="transferDialogVisible" title="工作项转办" width="480px" draggable append-to-body>
       <el-form label-width="90px">
@@ -333,7 +353,7 @@
 
 <script setup>
 import WorkItemTimer from './WorkItemTimer.vue'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   createSplitRequestApi,
@@ -344,7 +364,8 @@ import {
   saveMonthScoreApi,
   confirmCompletionApi,
   confirmClosedApi,
-  getSplitRequestsApi
+  getSplitRequestsApi,
+  getWorkPackageTemplatesForPackageApi
 } from '../api'
 import { useUserStore } from '../stores/user'
 import { useLevelDefs } from '../comosables/useLevelDefs'
@@ -360,9 +381,11 @@ const props = defineProps({
   readOnly: { type: Boolean, default: false },
   viewUserId: { type: String, default: "" },
   showCompleted: { type: Boolean, default: false },
+  showClosed: { type: Boolean, default: false },
   showRelated: { type: Boolean, default: false },
   // 父级「刷新」时递增该值，强制工作项表格拉取最新数据
-  refreshKey: { type: Number, default: 0 }
+  refreshKey: { type: Number, default: 0 },
+  focusWorkItemId: { type: [String, Number], default: '' }
 })
 const emit = defineEmits(['changed'])
 
@@ -371,6 +394,12 @@ const userStore = useUserStore()
 const userOptions = ref([])   // 负责人下拉选项
 const workPackage = ref(null)
 const workItems = ref([])
+const workItemTableRef = ref(null)
+const templateImportVisible = ref(false)
+const templateLoading = ref(false)
+const availableTemplates = ref([])
+const selectedTemplateId = ref(null)
+const selectedTemplate = computed(() => availableTemplates.value.find(item => item.id === selectedTemplateId.value))
 const loading = ref(false)
 const saving = ref(false)
 const savingMonth = ref(false)
@@ -394,7 +423,7 @@ const previousMonthStr = computed(() => {
   if (m === 1) return `${y - 1}-12`
   return `${y}-${String(m - 1).padStart(2, '0')}`
 })
-const inLastMonthWindow = computed(() => new Date().getDate() <= 2)
+const inLastMonthWindow = computed(() => new Date().getDate() <= 5)
 const fillMonth = ref(currentMonth.value)          // 当前查看/填写的月份
 const monthOptions = computed(() => {
   const opts = [{ label: `${+currentMonth.value.slice(5)}月（本月）`, value: currentMonth.value }]
@@ -413,7 +442,7 @@ const submitReason = ref('')
 // 已暂存（保存但未提交）的工作项数量
 const stagedCount = computed(() => workItems.value.filter(w => w.isStaged).length)
 
-// 管理权限：管理员 / 领导 / 该工作包负责人 可以新增、编辑、删除工作项
+// 管理权限：管理员 / 部门 / 该工作包负责人 可以新增、编辑、删除工作项
 const canManage = computed(() => {
   if (props.readOnly) return false
   if (!userStore.isLoggedIn) return false
@@ -467,9 +496,9 @@ const isItemOwner = (row) => {
   if (String(row.owner_id || '') === currentUserId.value ) return true
   if (userStore.isAdmin || userStore.isLEADER || userStore.isDEPARTMENT) return true
 }
-// 行级管理权限：包级权限（管理员/领导/科室/工作包负责人）或本人负责的工作项
+// 行级管理权限：包级权限（管理员/部门/科室/工作包负责人）或本人负责的工作项
 const canManageRow = (row) => canManage.value || isItemOwner(row)
-// 填写分值权限：领导/管理员/工作项负责人本人
+// 填写分值权限：部门/管理员/工作项负责人本人
 const canEditScore = (row) => {
   if (props.readOnly || row.is_related) return false
   if (!userStore.isLoggedIn) return false
@@ -478,7 +507,7 @@ const canEditScore = (row) => {
 }
 // 是否展示「操作」列：包级可管理，或存在本人负责的工作项
 const hasManage = computed(() => !props.readOnly && (canManage.value || workItems.value.some(isItemOwner)))
-// 关闭权限：只有领导/管理员可以确认/取消关闭
+// 关闭权限：只有部门/管理员可以确认/取消关闭
 const canManageClosed = () => {
   if (props.readOnly) return false
   if (!userStore.isLoggedIn) return false
@@ -547,11 +576,19 @@ const confirmTransfer = async () => {
 
 // 行样式：待审核/已关闭/已完成使用不同的提示
 const rowClassName = ({ row }) => {
+  if (props.focusWorkItemId && String(row.id) === String(props.focusWorkItemId)) return 'reminder-target-item'
   if (row.isPending) return 'pending-row'         // 拆分申请待审核 - 淡黄提示（只读）
   if (row.closed_status) return 'closed-row'      // 已关闭 - 更深灰显
   if (row.complete_status) return 'completed-row' // 已完成（审核通过）- 较浅灰显
   if (row.pending_complete_review) return 'pending-row'  // 完成申请待审核
   return ''
+}
+const focusTargetItem = async () => {
+  if (!props.focusWorkItemId) return
+  const index = workItems.value.findIndex(item => String(item.id) === String(props.focusWorkItemId))
+  if (index < 0) return
+  await nextTick()
+  workItemTableRef.value?.setScrollTop?.(Math.max(0, index * 48 - 50))
 }
 const statusConfig = {
   '进行中': {
@@ -629,6 +666,30 @@ const syncCache = () => {
   }
 }
 
+// 按截止日期排序
+const sortItemsByDeadline = items => {
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => {
+      const dateA = String(a.item.deadline || '').slice(0, 10)
+      const dateB = String(b.item.deadline || '').slice(0, 10)
+
+      // 没填截止时间的放在后面
+      if (!dateA && !dateB) return a.index - b.index
+      if (!dateA) return 1
+      if (!dateB) return -1
+
+      // YYYY-MM-DD 格式可以直接比较
+      if (dateA < dateB) return -1
+      if (dateA > dateB) return 1
+
+      // 同一天保持合并前的顺序
+      return a.index - b.index
+    })
+    .map(entry => entry.item)
+}
+
+
 // 强制刷新后，把本地暂存/待审核行合并回服务器列表，避免被覆盖丢失
 const mergeLocalRows = (serverItems) => {
   const cached = loadCacheFromStorage()
@@ -636,7 +697,7 @@ const mergeLocalRows = (serverItems) => {
   const local = (cached?.workItems || []).filter(w => {
     if (!(w.isStaged || w.isPending || w.isNew)) return false
     if (!props.onlyMine) return true
-    if (w.is_related || (!props.showCompleted && w.complete_status)) return false
+    if (w.is_related || (!props.showCompleted && w.complete_status) || (!props.showClosed && w.closed_status)) return false
     // 已转办的工作项不能从缓存恢复；本人新增草稿仍可保留。
     return String(w.owner_id || '') === currentUserId.value && (!w.id || visibleIds.has(String(w.id)))
   })
@@ -682,7 +743,7 @@ const reconcilePending = async (items) => {
   if (pending.length) {
     const ids = [...new Set(pending.map(w => w.request_id))]
     try {
-      const res = await getSplitRequestsApi(userStore.userInfo?.id)  // 员工查自己的，领导/管理员查全部
+      const res = await getSplitRequestsApi(userStore.userInfo?.id)  // 员工查自己的，部门/管理员查全部
       const statusMap = {}
       ;(res.data?.data || []).forEach(r => { statusMap[r.id] = r.status })
       // APPROVED：申请已生效 → 清掉本地 pending 行（随后由 fetchData 重拉服务器最新值）
@@ -716,7 +777,7 @@ const fetchData = async (force = false, skipReconcile = false) => {
     // 始终向后端拉取该月最新数据（不再整表命中本地缓存快照）：
     // 这样新增/编辑审核通过后，重新展开或点「刷新」即可看到最新结果，
     // 无需关闭网页清缓存。
-    const res = await getWorkItemsApi(props.workPackageId, { month: fillMonth.value, only_mine: props.onlyMine, show_completed: props.showCompleted, show_related: props.showRelated, view_user_id: props.viewUserId || undefined })
+    const res = await getWorkItemsApi(props.workPackageId, { month: fillMonth.value, only_mine: props.onlyMine, show_completed: props.showCompleted, show_closed: props.showClosed, show_related: props.showRelated, view_user_id: props.viewUserId || undefined })
     if (requestId !== fetchRequestId || res.data?.code !== 200) return
 
     workPackage.value = res.data.data.work_package
@@ -750,8 +811,9 @@ const fetchData = async (force = false, skipReconcile = false) => {
       items = reconciled
     }
 
-    workItems.value = items
+    workItems.value = props.onlyMine ? sortItemsByDeadline(items): items
     syncCache()
+    await focusTargetItem()
   } catch (err) {
     if (requestId !== fetchRequestId) return
     ElMessage.error(err.response?.data?.detail || '获取工作项失败')
@@ -761,12 +823,13 @@ const fetchData = async (force = false, skipReconcile = false) => {
 }
 
 // 工作项 ID 变化（展开不同工作包）时重新加载
-watch([() => props.workPackageId, () => props.onlyMine, () => props.showCompleted, () => props.showRelated, () => props.viewUserId, currentUserId], () => {
+watch([() => props.workPackageId, () => props.onlyMine, () => props.showCompleted, () => props.showClosed, () => props.showRelated, () => props.viewUserId, currentUserId], () => {
   workItems.value = []
   fetchData()
 })
 // 父级「刷新」时强制拉取最新数据
 watch(() => props.refreshKey, () => fetchData(true))
+watch(() => props.focusWorkItemId, focusTargetItem)
 // 切换填写/查看月份 → 强制从后端拉取该月数据
 watch(fillMonth, () => {
   if (workPackage.value) fetchData(true)
@@ -800,6 +863,37 @@ const handleAddWorkItem = () => {
     isEditQuality: false
   })
   syncCache()
+}
+
+const openTemplateImport = async () => {
+  if (!canManage.value || pkgLocked.value) return
+  templateImportVisible.value = true
+  selectedTemplateId.value = null
+  availableTemplates.value = []
+  templateLoading.value = true
+  try {
+    const response = await getWorkPackageTemplatesForPackageApi(props.workPackageId)
+    availableTemplates.value = response.data.data || []
+  } catch (error) { ElMessage.error(error.response?.data?.detail || '加载模板失败') }
+  finally { templateLoading.value = false }
+}
+
+const importTemplate = () => {
+  if (!canManage.value || pkgLocked.value || !selectedTemplate.value) return
+  const rows = selectedTemplate.value.items.map(item => ({
+    client_id: generateClientId(), id: null, name: item.name || '', standard: item.standard,
+    difficulty: item.difficulty, importance: item.importance, innovation: item.innovation,
+    deadline: item.deadline || '', score: item.score, notes: item.notes || '-',
+    work_package_id: props.workPackageId,
+    owner_id: workPackage.value?.owner_id || '', owner_name: workPackage.value?.owner_name || '',
+    tech_owner_id: workPackage.value?.tech_owner_id || '', tech_owner_name: workPackage.value?.tech_owner_name || '',
+    isEdit: true, isNew: true, isPending: false, isStaged: false,
+    isEditMonth: false, isEditQuality: false,
+  }))
+  workItems.value.unshift(...rows)
+  syncCache()
+  templateImportVisible.value = false
+  ElMessage.success(`已导入 ${rows.length} 条工作项草稿，请补齐名称、核对截止时间并逐项保存`)
 }
 
 const generateClientId = () => {
@@ -1085,7 +1179,7 @@ const handleCancelClosedConfirm = (row) => {
   confirmCancelClose('工作项', () => { confirmClosed(row) })
 }
 
-// 确认/取消关闭（只有领导/管理员，后端会校验）
+// 确认/取消关闭（只有部门/管理员，后端会校验）
 const confirmClosed = async (row) => {
   if (!row.id) return
   confirming.value = true
@@ -1136,6 +1230,7 @@ onMounted(() => {
 .work-item-table {
   width: 100%;
 }
+.work-item-table :deep(.reminder-target-item > td.el-table__cell) { background: #e8f3ff !important; }
 /* 已完成 - 浅灰 */
 .work-item-table :deep(.completed-row td) {
   background-color: #f6fbf7 !important;
@@ -1264,7 +1359,7 @@ onMounted(() => {
 }
 
 /* 编辑日期时保留完整输入框，不受表格文本截断和通用输入框高度影响。 */
-.work-item-table :deep(.deadline-column .cell) {
+.work-item-table :deep(.deadline-column:has(.deadline-date-picker) .cell) {
   display: block;
   overflow: visible;
   -webkit-line-clamp: unset;

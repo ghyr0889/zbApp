@@ -15,12 +15,13 @@
       </template>
 
       <el-tabs v-model="activeTab">
-        <el-tab-pane v-if="isLeader && !readOnlyView" label="员工工作内容" name="employees">
+        <el-tab-pane v-if="canViewAssignments && !readOnlyView" label="员工工作内容" name="employees">
           <Assignments v-if="activeTab === 'employees'" />
         </el-tab-pane>
         <el-tab-pane v-if="!isLeader || readOnlyView" :label="readOnlyView ? '人员工作详情' : '我的工作'" name="mine">
           <div style="display: flex; align-items: center; gap: 24px; margin-bottom: 12px; flex-wrap: wrap;">
-            <el-checkbox v-model="showCompleted">显示已完成工作项</el-checkbox>
+            <el-checkbox v-model="showCompleted">显示已完成工作</el-checkbox>
+            <el-checkbox v-model="showClosed">显示已关闭工作</el-checkbox>
             <el-checkbox v-model="showRelated">显示关联工作项（只读）</el-checkbox>
             <el-button type="primary" plain size="default" style="margin-left: auto;" @click="refreshAll">
               <i class="el-icon-refresh"></i> 刷新
@@ -44,7 +45,7 @@
             <el-table-column type="expand">
               <template #default="{ row: pkg }">
                 <div class="nested-table-container">
-                  <WorkItemTable_improved :workPackageId="pkg.id" :only-mine="true" :read-only="readOnlyView" :view-user-id="props.viewUserId" :show-completed="showCompleted" :show-related="showRelated" :refresh-key="refreshKey" @changed="refreshAll" />
+                  <WorkItemTable_improved :workPackageId="pkg.id" :only-mine="true" :read-only="readOnlyView" :view-user-id="props.viewUserId" :show-completed="showCompleted" :show-closed="showClosed" :show-related="showRelated" :refresh-key="refreshKey" @changed="refreshAll" />
                 </div>
               </template>
             </el-table-column>            
@@ -62,7 +63,10 @@
             </el-table-column>
             <el-table-column prop="objective" label="目标" min-width="120" align="center">
               <template #default="{ row: pkg }">
-                <el-input v-if="pkg.isPackageEditing" v-model="pkg.objective" type="textarea" autosize />
+                <template v-if="pkg.isPackageEditing">
+                  <el-input v-model="pkg.objective" type="textarea" autosize @input="warnObjectiveLength" />
+                  <div :style="{ color: objectiveLength(pkg.objective) > WORK_PACKAGE_OBJECTIVE_MAX_LENGTH ? '#d93025' : '#909399', fontSize: '12px' }">{{ objectiveLength(pkg.objective) }} / {{ WORK_PACKAGE_OBJECTIVE_MAX_LENGTH }} 字</div>
+                </template>
                 <span v-else-if="pkg.objective">{{ pkg.objective }}</span>
                 <span v-else class="tip-text">-</span>
               </template>
@@ -128,7 +132,7 @@
                   <el-button type="primary" link :loading="packageSaving" @click="confirmPackageEdit(pkg)">确认修改</el-button>
                   <el-button link :disabled="packageSaving" @click="cancelPackageEdit(pkg)">取消</el-button>
                 </template>
-                <!-- 转办：按生效状态（已自动完成/手动完成均不可转办） -->
+                <!-- 已手动确认完成的工作包不可转办。 -->
                 <el-button v-if="!pkg.isPackageEditing && isPkgOwner(pkg) && !pkg.complete_status && !pkg.closed_status && !pkg.project_closed" 
                 type="warning" link size="small" @click="handleTransferWorkPackage(pkg)">转办
                 </el-button>
@@ -327,13 +331,13 @@
                           v-if="row.manual_complete_status && !row.closed_status" command="cancelComplete" >取消完成
                         </el-dropdown-item>
 
-                        <!-- 确认关闭：仅未关闭，领导/管理员 -->
+                        <!-- 确认关闭：仅未关闭，部门/管理员 -->
                         <el-dropdown-item
                           v-if="canClosed && !row.closed_status" command="confirmClosed" divided >
                           <span class="danger-menu-item">确认关闭</span>
                         </el-dropdown-item>
 
-                        <!-- 项目取消关闭：科室、管理员、领导均可操作 -->
+                        <!-- 项目取消关闭：科室、管理员、部门均可操作 -->
                         <el-dropdown-item
                           v-if="row.closed_status && canReopenProject" command="cancelClosed" > 取消关闭
                         </el-dropdown-item>
@@ -386,6 +390,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { WORK_PACKAGE_OBJECTIVE_MAX_LENGTH, objectiveLength, warnObjectiveLength } from '../../utils/workPackageObjective'
 import {
   createWorkPackageApi,
   getWorkCategoriesApi,
@@ -416,10 +421,11 @@ const route = useRoute()
 const isAdmin = computed(() => userStore.isAdmin)
 const isLeader = computed(() => userStore.isLEADER)
 const isDepartment = computed(() => userStore.isDEPARTMENT)
+const canViewAssignments = computed(() => isLeader.value || isDepartment.value)
 const currentUserId = computed(() => String(userStore.userInfo?.id || ''))
 const initialTab = () => {
   if (readOnlyView.value) return 'mine'
-  if (isLeader.value && route.query.tab === 'employees') return 'employees'
+  if (canViewAssignments.value && route.query.tab === 'employees') return 'employees'
   if (route.query.tab === 'all' || isLeader.value) return 'all'
   return 'mine'
 }
@@ -449,7 +455,7 @@ const tableRowClassName = ({ row }) => {
 //是否有权新增项目
 const canAddProject = computed(() => isAdmin.value || isLeader.value || isDepartment.value)
 
-// 是否有权管理某个项目：系统管理员 / 领导 / 该项目负责人
+// 是否有权管理某个项目：系统管理员 / 部门 / 该项目负责人
 const canManageProject = (projectRow) => {
   if (isAdmin.value || isLeader.value || isDepartment.value) return true
   return String(projectRow?.owner_id || '') === currentUserId.value
@@ -481,13 +487,14 @@ function cancelPackageEdit(pkg) {
 }
 async function confirmPackageEdit(pkg) {
   if (packageSaving.value) return
+  if (objectiveLength(pkg.objective) > WORK_PACKAGE_OBJECTIVE_MAX_LENGTH) return warnObjectiveLength(pkg.objective)
   const data = packageValues(pkg)
   if (!data.work_package_code) return ElMessage.warning('请填写工作包编号')
   if (!data.category_name) return ElMessage.warning('请选择工作类型')
   if (JSON.stringify(data) === JSON.stringify(packageValues(pkg._packageOriginal))) return ElMessage.warning('请先修改工作包内容')
   packageSaving.value = true
   try {
-    const { value } = await ElMessageBox.prompt('请说明本次修改的内容和原因，提交后由领导审核', '填写修改说明', {
+    const { value } = await ElMessageBox.prompt('请说明本次修改的内容和原因，提交后由部门审核', '填写修改说明', {
       draggable: true,
       inputType: 'textarea', confirmButtonText: '提交修改申请', cancelButtonText: '取消',
       inputValidator: value => !!value?.trim() && value.trim().length <= 2000 || '请填写修改说明，且不能超过2000字'
@@ -495,7 +502,7 @@ async function confirmPackageEdit(pkg) {
     const res = await createWorkPackageApi({ ...data, id: pkg.id, project_id: pkg.project_id, reason: value.trim() })
     if (res.data?.code !== 200) throw new Error(res.data?.message || '提交失败')
     cancelPackageEdit(pkg)
-    ElMessage.success('修改申请已提交，等待领导审核')
+    ElMessage.success('修改申请已提交，等待部门审核')
     refreshAll()
     userStore.refreshPendingCount()
   } catch (error) {
@@ -520,6 +527,7 @@ const pagedPageSize = ref(20)
 const myWorkPackages = ref([])
 const myTotal = ref(0)
 const showCompleted = ref(false)
+const showClosed = ref(false)
 const showRelated = ref(false)
 const expandedMyPackageIds = ref([])
 watch(() => props.viewUserId, () => {
@@ -530,7 +538,7 @@ watch(() => props.viewUserId, () => {
   fetchMyWorkPackages(1)
   if (!readOnlyView.value) fetchProjects(1)
 })
-watch([showCompleted, showRelated], () => fetchMyWorkPackages(1))
+watch([showCompleted, showClosed, showRelated], () => fetchMyWorkPackages(1))
 const myPage = ref(1)
 const myPageSize = ref(20)
 
@@ -608,7 +616,7 @@ const fetchMyWorkPackages = async (page = 1) => {
   const requestId = ++myWorkRequestId
   myPage.value = page
   try {
-    const res = await (readOnlyView.value ? getAssignedPackagesApi : getMyWorkPackagesPagedApi)(props.viewUserId || currentUserId.value, { page, page_size: myPageSize.value, show_completed: showCompleted.value, show_related: showRelated.value })
+    const res = await (readOnlyView.value ? getAssignedPackagesApi : getMyWorkPackagesPagedApi)(props.viewUserId || currentUserId.value, { page, page_size: myPageSize.value, show_completed: showCompleted.value, show_closed: showClosed.value, show_related: showRelated.value })
     if (requestId !== myWorkRequestId) return
     if (res.data?.code === 200) {
       const data = res.data.data || {}
@@ -732,7 +740,7 @@ const handleMoreCommand = async (command, row) => {
   }
 }
 
-// —— 确认完成（项目/工作包，负责人或领导/管理员）——
+// —— 确认完成（项目/工作包，负责人或部门/管理员）——
 const confirming = ref(false)
 // 是否为工作包负责人本人（可发起工作包转办）
 const isPkgOwner = (pkg) => String(pkg.package_owner_id || '') === currentUserId.value
@@ -772,7 +780,7 @@ const handleCancelClosedConfirm = (row) => {
   confirmCancelClose('项目', () => { confirmClosed(row) })
 }
 
-// —— 确认/取消关闭（工作包/项目，只有领导/管理员，后端会校验）——
+// —— 确认/取消关闭（工作包/项目，只有部门/管理员，后端会校验）——
 const canClosed = computed(() => isAdmin.value || isLeader.value)
 const canReopenProject = computed(() => isDepartment.value || isAdmin.value || isLeader.value)
 const confirmClosed = async (row) => {
@@ -900,7 +908,7 @@ const cancelProjectEdit = (row, index) => {
 const handleTransferWorkPackage = async(pkg) => {
   transferPkg.value = pkg
   transferTargetId.value = ''
-  // 拉用户列表（排除自己）——注意不能依赖 fetchAdminOptions，那个只给管理员/领导拉
+  // 拉用户列表（排除自己）——注意不能依赖 fetchAdminOptions，那个只给管理员/部门拉
   try {
     const res = await getAllUsersApi()
     transferTargets.value = (res.data?.data || []).filter(u => String(u.id) !== currentUserId.value)

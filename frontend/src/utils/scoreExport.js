@@ -21,7 +21,7 @@ export function createScoreSnapshot(people, mode, period, quarter = 1) {
   // 立即复制单元格值，避免等待加载导出库时切换周期或编辑影响本次文件。
   const rows = people.map(person => columns.map(([key, label, type]) => {
     const value = key === 'settlement_label'
-      ? (person.is_provisional ? '实时预览（未入账）' : ({IMPORTED:'历史补录已入账',CONFIRMED:'本人已确认',AUTO:'自动入账',PARTIAL:'部分月份未入账',HISTORY:'历史积分'}[person.confirmation_status] || '统计结果'))
+      ? (person.is_provisional ? '实时预览（未入账）' : person.settlement_status === 'WAITING' ? '已确认，待统一折算' : ({IMPORTED:'历史补录已入账',CONFIRMED:'本人已确认',AUTO:'自动入账',PARTIAL:'部分月份未入账',HISTORY:'历史积分'}[person.confirmation_status] || '统计结果'))
       : person[key]
     if (value === null || value === undefined || value === '') return null
     if (type === 'text') return String(value) // 工号保留 0004 等前导零，文本不会作为公式执行。

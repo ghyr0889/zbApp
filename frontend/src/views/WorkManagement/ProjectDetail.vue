@@ -43,9 +43,12 @@
 
       <!-- 工作包表格 -->
       <el-table
+        ref="workPackageTableRef"
         :data="workPackages"
         v-loading="loading"
         row-key="id"
+        :expand-row-keys="expandedPackageIds"
+        @expand-change="(_, rows) => { expandedPackageIds = rows.map(row => row.id) }"
         style="width: 100%"
         height="calc(100vh - 360px)"
         empty-text="该项目下暂无工作包"
@@ -54,7 +57,7 @@
         <el-table-column type="expand">
           <template #default="{ row: pkg }">
             <div class="nested-table-container">
-              <WorkItemTable_improved :workPackageId="pkg.id" :refresh-key="refreshKey" @changed="refreshAll" />
+              <WorkItemTable_improved :workPackageId="pkg.id" :focus-work-item-id="route.query.work_item_id" :refresh-key="refreshKey" @changed="refreshAll" />
             </div>
           </template>
         </el-table-column>
@@ -86,7 +89,10 @@
 
         <el-table-column prop="objective" label="目标" min-width="160">
           <template #default="{ row: pkg }">
-            <el-input v-if="pkg.isEdit" type="textarea" autosize v-model="pkg.objective" size="small" placeholder="设定工作目标" />
+            <template v-if="pkg.isEdit">
+              <el-input type="textarea" autosize v-model="pkg.objective" size="small" placeholder="设定工作目标" @input="warnObjectiveLength" />
+              <div :style="{ color: objectiveLength(pkg.objective) > WORK_PACKAGE_OBJECTIVE_MAX_LENGTH ? '#d93025' : '#909399', fontSize: '12px' }">{{ objectiveLength(pkg.objective) }} / {{ WORK_PACKAGE_OBJECTIVE_MAX_LENGTH }} 字</div>
+            </template>
             <span v-else-if="!pkg.objective" class="muted-text">暂无设定</span>
             <span v-else>{{ pkg.objective }}</span>
           </template>
@@ -215,9 +221,10 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { WORK_PACKAGE_OBJECTIVE_MAX_LENGTH, objectiveLength, warnObjectiveLength } from '../../utils/workPackageObjective'
 import {
   getProjectDetailApi,
   getPagedProjectWorkPackagesApi,
@@ -240,6 +247,8 @@ const projectId = Number(route.params.id)
 
 const projectInfo = ref(null)
 const workPackages = ref([])
+const workPackageTableRef = ref(null)
+const expandedPackageIds = ref([])
 const loading = ref(false)
 const refreshKey = ref(0) // 传给工作项表格：点「刷新」时强制拉取最新数据
 const saving = ref(false)
@@ -254,7 +263,7 @@ const isLeader = computed(() => userStore.isLEADER)
 const isDepartment = computed(() => userStore.isDEPARTMENT)
 const currentUserId = computed(() => String(userStore.userInfo?.id || ''))
 
-// 管理权限：管理员 / 领导 / 科室主任 / 项目负责人
+// 管理权限：管理员 / 部门 / 科室主任 / 项目负责人
 const canRequestPackageChange = computed(() => isAdmin.value || isDepartment.value)
 const canManage = computed(() => {
   if (isAdmin.value || isLeader.value || isDepartment.value) return true
@@ -265,7 +274,12 @@ const canManage = computed(() => {
 const projClosed = computed(() => !!projectInfo.value?.closed_status)
 const isLocked = (row) => projClosed.value || !!row.closed_status
 // 已完成/已关闭行灰显
-const rowClassName = ({ row }) => (row.complete_status || row.closed_status ? 'completed-row' : '')
+const rowClassName = ({ row }) => {
+  const classes = []
+  if (row.complete_status || row.closed_status) classes.push('completed-row')
+  if (String(row.id) === String(route.query.work_package_id || '')) classes.push('reminder-target-row')
+  return classes.join(' ')
+}
 
 const statusConfig = {
   '进行中': {
@@ -306,7 +320,7 @@ const handleMoreCommand = async (command, row) => {
     case 'delete':
       try {
         await ElMessageBox.confirm(
-          '确定申请删除该工作包？提交原因后，由领导审核通过才会删除。',
+          '确定申请删除该工作包？提交原因后，由部门审核通过才会删除。',
           '工作包删除申请',
           {
             confirmButtonText: '继续填写原因',
@@ -340,7 +354,7 @@ const handleMoreCommand = async (command, row) => {
   }
 }
 
-// —— 确认完成（工作包/项目，负责人或领导/管理员）——
+// —— 确认完成（工作包/项目，负责人或部门/管理员）——
 const confirming = ref(false)
 const canConfirmPkg = (pkg) => {
   if (isAdmin.value || isLeader.value || isDepartment.value) return true
@@ -380,7 +394,7 @@ const handleCancelClosedConfirm = (row) => {
 }
 
 
-// —— 确认/取消关闭（只有领导/管理员，后端会校验）——
+// —— 确认/取消关闭（只有部门/管理员，后端会校验）——
 const canConfirmClosed = () => isAdmin.value || isLeader.value
 const confirmClosed = async (pkg) => {
   confirming.value = true
@@ -435,6 +449,13 @@ const fetchWorkPackages = async (p = 1) => {
         _original: null
       }))
       workPackages.value.forEach(w => { w._original = JSON.parse(JSON.stringify(w)) })
+      const targetId = Number(route.query.work_package_id)
+      if (targetId && workPackages.value.some(w => w.id === targetId)) {
+        expandedPackageIds.value = [targetId]
+        await nextTick()
+        const index = workPackages.value.findIndex(w => w.id === targetId)
+        workPackageTableRef.value?.setScrollTop?.(Math.max(0, index * 58 - 60))
+      }
     }
   } catch (err) {
     ElMessage.error(err.response?.data?.detail || '获取工作包失败')
@@ -457,15 +478,15 @@ const askPackageReason = (title, message = '请填写本次工作包变更的申
     },
   })
 
-// 删除只提交申请，原因与申请一同保存，领导审核后才生效。
+// 删除只提交申请，原因与申请一同保存，部门审核后才生效。
 const removeWorkPackage = async (row) => {
   if (saving.value) return
   saving.value = true
   try {
-    const { value } = await askPackageReason('申请删除工作包', '请填写删除原因。领导通过后才会删除；有工作项或历史记录时请使用关闭功能。')
+    const { value } = await askPackageReason('申请删除工作包', '请填写删除原因。部门通过后才会删除；有工作项或历史记录时请使用关闭功能。')
     const res = await deleteWorkPackageApi(row.id, value.trim())
     if (res.data?.code === 200) {
-      ElMessage.success('删除申请已提交，等待领导审核')
+      ElMessage.success('删除申请已提交，等待部门审核')
       await fetchWorkPackages(page.value)
       await userStore.refreshPendingCount()
     }
@@ -501,13 +522,14 @@ const startPackageEdit = (pkg) => {
 }
 const handleSaveWorkPackage = async (pkg) => {
   if (saving.value) return
+  if (objectiveLength(pkg.objective) > WORK_PACKAGE_OBJECTIVE_MAX_LENGTH) return warnObjectiveLength(pkg.objective)
   if (!(pkg.code || '').trim()) {
     ElMessage.error('保存失败，工作包编号不能为空')
     return          // 直接不发请求
   }
   saving.value = true
   try {
-    const { value } = await askPackageReason(pkg.isNew ? '申请新增工作包' : '填写修改说明', pkg.isNew ? '请填写新增原因' : '请说明本次修改的内容和原因，提交后由领导审核')
+    const { value } = await askPackageReason(pkg.isNew ? '申请新增工作包' : '填写修改说明', pkg.isNew ? '请填写新增原因' : '请说明本次修改的内容和原因，提交后由部门审核')
     const res = await createWorkPackageApi({
       reason: value.trim(),
       id: pkg.id,
@@ -521,7 +543,7 @@ const handleSaveWorkPackage = async (pkg) => {
       name: pkg.name ? pkg.name.trim() : ''
     })
     if (res.data?.code === 200) {
-      ElMessage.success('申请已提交，等待领导审核')
+      ElMessage.success('申请已提交，等待部门审核')
       pkg.isEdit = false
       pkg.isNew = false
       await fetchWorkPackages(page.value)
@@ -552,7 +574,8 @@ const refreshAll = () => {
 
 onMounted(async () => {
   await fetchProjectInfo()
-  await fetchWorkPackages(1)
+  if (route.query.work_package_id) pageSize.value = 20
+  await fetchWorkPackages(Math.max(1, Number(route.query.page) || 1))
   // 工作包类别下拉跟随数据库
   try {
     const res = await getWorkCategoriesApi()
@@ -569,6 +592,12 @@ onMounted(async () => {
     }
   }
 })
+watch(() => [route.query.work_package_id, route.query.page], () => {
+  if (route.path === `/project/${projectId}`) {
+    if (route.query.work_package_id) pageSize.value = 20
+    fetchWorkPackages(Math.max(1, Number(route.query.page) || 1))
+  }
+})
 
 
 </script>
@@ -577,6 +606,7 @@ onMounted(async () => {
   padding: 20px;
   animation: fadeIn 0.4s ease;
 }
+.project-detail-page :deep(.reminder-target-row > td.el-table__cell) { background: #eef5ff !important; }
 
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(10px); }

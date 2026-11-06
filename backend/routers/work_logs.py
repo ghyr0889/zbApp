@@ -9,9 +9,9 @@ from services import work_logs_service as service
 router = APIRouter(prefix='/api/v1/work-logs', tags=['Work Logs'])
 
 
-def require_leader(user):
-    if str(user.role).upper() != "LEADER":
-        raise HTTPException(status_code=403, detail="仅部门领导可以查看分配工作")
+def require_assignment_viewer(user):
+    if str(user.role).upper() not in ("LEADER", "DEPARTMENT"):
+        raise HTTPException(status_code=403, detail="仅部门和科室主任可以查看员工工作内容")
 
 
 def assignment_person(db, user_id):
@@ -25,7 +25,7 @@ def assignment_person(db, user_id):
 @router.get("/assignments")
 def list_assignments(page: int = 1, page_size: int = 20, keyword: str = "",
                      db: Session = Depends(get_db), user=Depends(get_current_user)):
-    require_leader(user)
+    require_assignment_viewer(user)
     from sqlalchemy import func, or_
     import models
     page, page_size = max(page, 1), min(max(page_size, 1), 100)
@@ -47,11 +47,11 @@ def list_assignments(page: int = 1, page_size: int = 20, keyword: str = "",
 
 @router.get("/assignments/{user_id}/packages")
 def assigned_packages(user_id: str, page: int = 1, page_size: int = 20,
-                      show_completed: bool = False, show_related: bool = False,
+                      show_completed: bool = False, show_related: bool = False, show_closed: bool = False,
                       db: Session = Depends(get_db), user=Depends(get_current_user)):
-    require_leader(user)
+    require_assignment_viewer(user)
     person = assignment_person(db, user_id)
-    result = service.get_my_work_packages_paged(user_id, page, page_size, db, show_completed, show_related)
+    result = service.get_my_work_packages_paged(user_id, page, page_size, db, show_completed, show_related, show_closed)
     result["data"]["username"] = person.username
     return result
 
@@ -110,13 +110,15 @@ def get_my_work_packages_paged(user_id: str,
                               page_size: int = 20,
                               show_completed: bool = False,
                               show_related: bool = False,
+                              show_closed: bool = False,
                               db: Session = Depends(get_db),
                               user=Depends(get_current_user)):
     """我的工作：查询本人负责的工作包及本人工作项所属工作包。"""
     if str(user_id) != str(user.id):
         raise HTTPException(status_code=403, detail="只能查看自己的工作")
     return service.get_my_work_packages_paged(user_id=user.id, page=page, page_size=page_size, db=db,
-                                               show_completed=show_completed, show_related=show_related)
+                                               show_completed=show_completed, show_related=show_related,
+                                               show_closed=show_closed)
 
 
 @router.get("/work-packages/{work_package_id}/work-items")
@@ -126,17 +128,19 @@ def get_work_items(work_package_id: str,
                    only_mine: bool = False,
                    show_completed: bool = False,
                    show_related: bool = False,
+                   show_closed: bool = False,
                    db: Session = Depends(get_db),
                    user=Depends(get_current_user)):
     """我的工作按登录用户筛选；项目详情默认保留全部工作项。"""
     if view_user_id is not None:
-        require_leader(user)
+        require_assignment_viewer(user)
         assignment_person(db, view_user_id)
         only_mine = True
     return service.get_work_items(work_package_id=work_package_id, month=month, db=db,
                                   owner_id=(view_user_id or user.id) if only_mine else None,
                                   show_completed=show_completed if only_mine else True,
-                                  show_related=show_related if only_mine else False)
+                                  show_related=show_related if only_mine else False,
+                                  show_closed=show_closed if only_mine else True)
 
 
 @router.delete("/work-items/{work_item_id}")
@@ -151,12 +155,12 @@ def confirm_completion(data: ConfirmCompletionIn, db: Session = Depends(get_db),
 
     - 工作项：改为“提交完成申请 / 撤回申请”，由技术负责人在 complete_review 里审核，
       审核通过后才置 complete_status 并写 completed_at。
-    - 工作包 / 项目：仍是负责人（或领导/管理员）直接手动确认。
+    - 工作包 / 项目：仍是负责人（或部门/管理员）直接手动确认。
     """
     return service.confirm_completion(data=data.model_copy(update={"user_id": user.id}), db=db)
 
 
 @router.put("/confirm-closed")
 def confirm_closed(data: ConfirmClosed, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    """确认关闭：或领导/管理员可操作。"""
+    """确认关闭：或部门/管理员可操作。"""
     return service.confirm_closed(data=data.model_copy(update={"user_id": user.id}), db=db)

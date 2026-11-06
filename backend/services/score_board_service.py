@@ -1,6 +1,7 @@
 """业务层：负责权限规则、状态流转、结果组装和事务；数据查询交给 repository。"""
 from repositories import score_board_repository as repo
 
+import json
 import re
 from calendar import monthrange
 from datetime import date, datetime, timedelta, timezone
@@ -79,10 +80,10 @@ def _prev_month_str(now):
 
 
 def fillable_months(now=None):
-    """当前可填写分值的月份集合：本月；若今天是当月前2天，则还包括上个月。"""
+    """当前可填写分值的月份集合：本月；若今天是当月前5天，则还包括上个月。"""
     now = now or datetime.now()
     months = {now.strftime("%Y-%m")}
-    if now.day <= 2:
+    if now.day <= 5:
         months.add(_prev_month_str(now))
     return months
 
@@ -93,11 +94,65 @@ def assert_month_fillable(month):
     if not month:
         raise HTTPException(status_code=400, detail="月份不能为空")
     if month not in fillable_months():
-        raise HTTPException(status_code=400, detail="只能填写本月分值；每月前2天可补填上月分值，窗口过后不可补填")
+        raise HTTPException(status_code=400, detail="只能填写本月分值；每月前5天可补填上月分值，窗口过后不可补填")
     return month
 
 
-def compute_deducted(item, today=None):
+def close_records_by_item(db, items):
+    """批量查询工作项、所属工作包和项目的关闭记录。"""
+    from sqlalchemy import and_, or_
+
+    items = [item for item in items if item is not None]
+    item_ids = {item.id for item in items}
+    package_ids = {item.work_package_id for item in items if item.work_package_id is not None}
+    project_ids = {item.work_package.project_id for item in items if item.work_package}
+    conditions = [and_(models.CloseRecord.target_type == kind, models.CloseRecord.target_id.in_(ids))
+                  for kind, ids in (("work_item", item_ids), ("work_package", package_ids),
+                                    ("project", project_ids)) if ids]
+    if not conditions:
+        return {}
+    grouped = {}
+    for record in db.query(models.CloseRecord).filter(or_(*conditions)).all():
+        grouped.setdefault((record.target_type, record.target_id), []).append(record)
+    return {item.id: (grouped.get(("work_item", item.id), [])
+                      + grouped.get(("work_package", item.work_package_id), [])
+                      + grouped.get(("project", item.work_package.project_id), [])
+                      if item.work_package else grouped.get(("work_item", item.id), []))
+            for item in items}
+
+
+def _local_date(value):
+    if isinstance(value, datetime):
+        return value.astimezone(timezone(timedelta(hours=8))).date() if value.tzinfo else value.date()
+    return value
+
+
+def paused_overdue_days(deadline, cutoff, records):
+    """关闭当天暂停、开启当天恢复；合并重叠的关闭区间。"""
+    # 时间边界计算
+    start_bound = deadline + timedelta(days=1)
+    end_bound = cutoff + timedelta(days=1)
+    intervals = [] # 处理空记录
+    for record in records or ():
+        start = max(start_bound, _local_date(record.closed_at)) # 开始时间：超期起始日 和 实际关闭日 中较晚的一个
+        # 结束时间：超期截止日 和 实际开启日 中较早的一个，没有开启日期取到截止日
+        end = min(end_bound,
+                   _local_date(record.reopened_at) if record.reopened_at else end_bound) 
+        # 有效验证
+        if start < end:
+            intervals.append((start, end))
+
+    # 合并重叠暂停区间，防止并发关闭/开启导致的重复扣分
+    merged = []
+    for start, end in sorted(intervals):
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return sum((end - start).days for start, end in merged)
+
+
+def compute_deducted(item, today=None, close_records=None):
     """按当前日期累计扣分：前30天每满7天扣0.5分，超过30天的部分每满7天扣1分。
 
     today 是可选的日期参数，供边界测试使用；业务调用默认取北京时间当天。
@@ -109,14 +164,23 @@ def compute_deducted(item, today=None):
     # 截止日期当天不扣分；只比较日期，忽略截止时间中的时分秒。
     today = today if today is not None else datetime.now(timezone(timedelta(hours=8))).date()
     if getattr(item, "complete_status", False):
-        completed_at = getattr(item, "completed_at", None)
-        if completed_at is None:
-            # 不能伪造历史完成日期，也不能继续以今天累计扣分。
-            logging.warning("Completed work item %s has no completion date; live deduction skipped", getattr(item, "id", None))
+        approved_at = getattr(item, "completion_approved_at", None)
+        if approved_at is None:
+            logging.warning(
+                getattr(item, "id", None),
+            )
             return 0.0
-        completed_date = completed_at.astimezone(timezone(timedelta(hours=8))).date() if completed_at.tzinfo else completed_at.date()
-        today = min(today, completed_date)
+
+        approved_date = (
+            approved_at.astimezone(timezone(timedelta(hours=8))).date()
+            if approved_at.tzinfo
+            else approved_at.date()
+        )
+
+        today = min(today, approved_date)
+    today = _local_date(today)
     overdue_days = (today - item.deadline.date()).days
+    overdue_days -= paused_overdue_days(item.deadline.date(), today, close_records)
     if overdue_days <= 0:
         return 0.0
 
@@ -163,8 +227,10 @@ def get_my_progress_deductions(db, user_id):
     """当前负责工作项截至今天的累计扣分，只用于个人积分展示。"""
     today = datetime.now(timezone(timedelta(hours=8))).date() # 获取该时区当前的日期和时间
     details = []
-    for item in repo.list_owned_items(db, user_id):
-        deducted = compute_deducted(item, today=today)
+    items = repo.list_owned_items(db, user_id)
+    close_map = close_records_by_item(db, items)
+    for item in items:
+        deducted = compute_deducted(item, today=today, close_records=close_map.get(item.id))
         if deducted <= 0:
             continue
         wp = item.work_package
@@ -192,19 +258,48 @@ def get_my_progress_deductions(db, user_id):
 
 
 def get_my_period_progress_deductions(db, user_id, period, year, month=None, quarter=None):
-    """个人页按周期显示扣分；已入账取快照，未入账的当前月份取实时预览。"""
+    """个人页按工作项汇总周期扣分，保持历史补录的正式总数不变。"""
     from services.score_confirmation_service import now_local, official_board
 
     official = official_board(db, period, year, month, quarter)["data"]
     person = next((p for p in official["people"] if p["user_id"] == user_id), None)
     details = [d for d in (person or {}).get("details", []) if (d.get("deducted_score") or 0) > 0]
     total = float((person or {}).get("deducted_score") or 0)
+    selected_months = months_of_period(period, year, month, quarter)
+
+    # 历史补录只有汇总值。仅当按现有工作项资料重算出的该月扣分与
+    # 已入账值完全一致时，才把它展示在具体工作项下；不改写历史快照。
+    imported_query = db.query(models.MonthlyScoreConfirmation).filter_by(
+        user_id=user_id, status="IMPORTED")
+    if selected_months is not None:
+        imported_query = imported_query.filter(models.MonthlyScoreConfirmation.month.in_(selected_months))
+    imported = imported_query.all()
+    owned_items = repo.list_owned_items(db, user_id) if imported else []
+    close_map = close_records_by_item(db, owned_items)
+    existing_keys = {(d.get("month"), d.get("work_item_id")) for d in details}
+    for record in imported:
+        snapshot = json.loads(record.snapshot)
+        if not snapshot.get("summary_only") or snapshot.get("details"):
+            continue
+        restored = []
+        for item in owned_items:
+            deducted = monthly_progress_deduction(item, record.month, close_records=close_map.get(item.id))
+            if deducted > 0:
+                restored.append(_work_item_score_detail(item, record.month,
+                                                        deducted_score=deducted))
+        imported_total = round(float(snapshot.get("deducted_score") or 0), 2)
+        restored_total = round(sum(d["deducted_score"] for d in restored), 2)
+        if restored_total == imported_total:
+            for detail in restored:
+                key = (detail["month"], detail["work_item_id"])
+                if key not in existing_keys:
+                    details.append(detail)
+                    existing_keys.add(key)
 
     if period != "month":
         now = now_local()
         current_month = now.strftime("%Y-%m")
         cfg = db.get(models.ScoreConfirmationConfig, 1)
-        selected_months = months_of_period(period, year, month, quarter)
         if selected_months is None:
             selected_months = [current_month]
         settled = {r.month for r in db.query(models.MonthlyScoreConfirmation).filter(
@@ -221,7 +316,9 @@ def get_my_period_progress_deductions(db, user_id, period, year, month=None, qua
                 details.extend(d for d in preview_person["details"] if (d.get("deducted_score") or 0) > 0)
                 total += float(preview_person.get("deducted_score") or 0)
 
-    return {"code": 200, "data": {"deducted_score": round(total, 2), "details": details}}
+    unattributed = max(0.0, round(total - sum(float(d["deducted_score"]) for d in details), 2))
+    return {"code": 200, "data": {"deducted_score": round(total, 2),
+                                    "unattributed_score": unattributed, "details": details}}
 
 
 def _work_item_score_detail(item, month, score=0.0, calculate_score=0.0,
@@ -271,12 +368,11 @@ def _deduction_date(month, as_of=None, include_grace=False):
     first_day = date(year, number, 1)
     if first_day > today:
         return None
-    if as_of is not None and include_grace:
-        return today
+    # 月度扣分只统计所属月份，次月确认窗口中的新增扣分归次月。
     return min(today, date(year, number, monthrange(year, number)[1]))
 
 
-def monthly_progress_deduction(item, month, as_of=None, include_grace=False):
+def monthly_progress_deduction(item, month, as_of=None, include_grace=False, close_records=None):
     """本月新增扣分＝本月核算日累计扣分－上月末累计扣分。"""
     cutoff = _deduction_date(month, as_of, include_grace)
     if cutoff is None:
@@ -284,8 +380,8 @@ def monthly_progress_deduction(item, month, as_of=None, include_grace=False):
     year, number = map(int, month.split("-"))
     previous_month_end = date(year, number, 1) - timedelta(days=1)
     return max(0.0, round(
-        compute_deducted(item, today=cutoff)
-        - compute_deducted(item, today=previous_month_end), 2))
+        compute_deducted(item, today=cutoff, close_records=close_records)
+        - compute_deducted(item, today=previous_month_end, close_records=close_records), 2))
 
 def compute_calc_score(month_score, item, db, owner_job_grade, quality_score=None):
     """计算得分 = 本月基础得分 × (难度系数 + 创新度系数 + 重要度系数)＋质量分。
@@ -323,11 +419,12 @@ def get_score_board(user_id: str,
     records = repo.list_user_month_scores(db, user_id)
     filtered = [r for r in records if month_in_selection(r.month, period, y, month, quarter)]
     total_score = sum(r.score or 0.0 for r in filtered)
+    close_map = close_records_by_item(db, [r.work_item for r in filtered])
     details = [monthly_score_detail(
-        r, db, deducted_score=monthly_progress_deduction(r.work_item, r.month)
+        r, db, deducted_score=monthly_progress_deduction(r.work_item, r.month, close_records=close_map.get(r.work_item.id))
         if r.work_item and r.work_item.owner_id == user_id else 0.0)
         for r in filtered]
-    deducted = sum(monthly_progress_deduction(r.work_item, r.month) for r in filtered
+    deducted = sum(monthly_progress_deduction(r.work_item, r.month, close_records=close_map.get(r.work_item.id)) for r in filtered
                    if r.work_item and r.work_item.owner_id == user_id)
     return {
         "code": 200,
@@ -371,7 +468,9 @@ def calculate_public_score_board(period: str = "all",
     users = repo.list_score_board_users(db)
     all_records = repo.list_all_month_scores(db)
     owned_items = {}
-    for item in repo.list_all_owned_items(db):
+    all_owned_items = repo.list_all_owned_items(db)
+    close_map = close_records_by_item(db, all_owned_items)
+    for item in all_owned_items:
         owned_items.setdefault(item.owner_id, []).append(item)
 
     # 周期内的月度附加分（技术提升 / 日常管理）
@@ -422,7 +521,8 @@ def calculate_public_score_board(period: str = "all",
                 item.id: (item, deducted)
                 for item in owned_items.get(user.id, [])
                 for deducted in [monthly_progress_deduction(
-                    item, mm, as_of, include_grace=period == "month")]
+                    item, mm, as_of, include_grace=period == "month",
+                    close_records=close_map.get(item.id))]
                 if deducted > 0
             }
         deduct_total = round(sum(
@@ -529,12 +629,12 @@ def save_month_score(work_item_id: int, body: MonthScoreIn, db: Session = None):
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
 
-    # 权限：工作包/工作项负责人本人，或领导/管理员
+    # 权限：工作包/工作项负责人本人，或部门/管理员
     role = str(user.role).upper()
     work_package = item.work_package
     is_item_owner = bool(item.owner_id and item.owner_id == user.id)
     if role not in ["LEADER", "ADMIN"] and not is_item_owner:
-        raise HTTPException(status_code=403, detail="只有工作项负责人本人、领导和管理员可以填写本月分值")
+        raise HTTPException(status_code=403, detail="只有工作项负责人本人、部门和管理员可以填写本月分值")
 
     month = (body.month or "").strip()
     if not month:
@@ -557,7 +657,7 @@ def save_month_score(work_item_id: int, body: MonthScoreIn, db: Session = None):
         raise HTTPException(status_code=400, detail=f"本月分值不能超过剩余分值 {remain}")
 
     # 积分归属：优先记给工作项负责人（转办拆分后接收人负责的工作项归接收人），
-    # 其次记给工作包负责人（领导/管理员代填也不改变归属）；都没有再兜底记给填写人
+    # 其次记给工作包负责人（部门/管理员代填也不改变归属）；都没有再兜底记给填写人
     if item.owner_id:
         owner_id = item.owner_id
     elif work_package and work_package.owner_id:
@@ -599,13 +699,13 @@ def save_month_score(work_item_id: int, body: MonthScoreIn, db: Session = None):
     }
 
 def put_monthly_extra_scores(data: MonthlyExtraScoreIn, db: Session = None):
-    """领导按月为人员设置 技术提升/日常管理 附加分（存在则更新，否则创建）。"""
-    # 权限：只有领导/管理员可设置
+    """部门按月为人员设置 技术提升/日常管理 附加分（存在则更新，否则创建）。"""
+    # 权限：只有部门/管理员可设置
     updater = repo.get_user(db, data.updated_by_id)
     if not updater:
         raise HTTPException(status_code=404, detail="操作人不存在")
     if str(updater.role).upper() not in ["LEADER", "ADMIN", "DEPARTMENT"]:
-        raise HTTPException(status_code=403, detail="只有领导、管理员或者科室主任可以设置月度附加分")
+        raise HTTPException(status_code=403, detail="只有部门、管理员或者科室主任可以设置月度附加分")
 
     target = repo.get_user(db, data.user_id)
     if not target:
@@ -675,7 +775,7 @@ def get_project_summary(currentUserId: str = None,
                         quarter: int = None,
                         target_type: str = "project",
                         db: Session = None):
-    """按项目汇总分值（可按 月 / 季 / 年 / 全部 统计）。仅领导、管理员可查看。
+    """按项目汇总分值（可按 月 / 季 / 年 / 全部 统计）。仅部门、管理员可查看。
     - total_score    = 项目下所有工作项满分之和（不随周期变化）
     - filled_score   = 这些工作项在周期内已填的月度基础分值之和
     - unfilled_score = total_score - filled_score
@@ -684,7 +784,7 @@ def get_project_summary(currentUserId: str = None,
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
     if str(user.role).upper() not in ["LEADER", "ADMIN"]:
-        raise HTTPException(status_code=403, detail="只有领导和管理员可以查看项目汇总")
+        raise HTTPException(status_code=403, detail="只有部门和管理员可以查看项目汇总")
 
     target_type = (target_type or "project").lower()
     if target_type not in ("project", "work_package"):

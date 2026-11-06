@@ -59,6 +59,8 @@ export const initiateTransferApi = (data) => api.post('/transfers/initiate', dat
 export const getIncomingTransfersApi = (userId) => api.get(`/transfers/my-incoming?user_id=${userId}`)
 export const processTransferApi = (transferId, action) => api.post(`/transfers/process?transfer_id=${transferId}&action=${action}`)
 export const getMyOutgoingTransfersApi = (userId) => api.get(`/transfers/my-outgoing?user_id=${userId}`)
+// 终止接口都由后端按当前登录用户校验发起人身份，前端不传可伪造的用户 ID。
+export const terminateTransferApi = (transferId) => api.post(`/transfers/${transferId}/terminate`)
 
 export const userLoginApi = (data) => api.post('/auth/user-login', data)
 export const adminLoginApi = (data) => api.post('/auth/admin-login', data)
@@ -79,6 +81,8 @@ export const getCompleteRequestsApi = (userId) =>
   api.get('/complete_review/complete-requests', { params: { user_id: userId } })
 export const reviewCompleteRequestApi = (requestId, data) =>
   api.post(`/complete_review/complete-requests/${requestId}/review`, data)
+// 仅待审核的完成申请可由发起人终止。
+export const terminateCompleteRequestApi = (requestId) => api.post(`/complete_review/complete-requests/${requestId}/terminate`)
 
 // 确认/取消关闭（负责人手动标记）
 export const confirmClosedApi = (data) => api.put('/work-logs/confirm-closed', data)
@@ -92,10 +96,12 @@ export const getMyWorkPackagesPagedApi = (userId, params) =>
   api.get(`/work-logs/my-work-packages/${userId}`, { params })
 // 保存工作项本月分值（直接生效，不经过审核）
 export const saveMonthScoreApi = (workItemId, data) => api.put(`/score-board/work-items/${workItemId}/month-score`, data)
-// 工作包拆分申请（员工申请拆解工作包 → 领导审核）
+// 工作包拆分申请（员工申请拆解工作包 → 部门审核）
 export const createSplitRequestApi = (data) => api.post('/review/split-requests', data)
 export const getSplitRequestsApi = (userId) => api.get(`/review/split-requests?user_id=${userId}`)
 export const reviewSplitRequestApi = (requestId, data) => api.post(`/review/split-requests/${requestId}/review`, data)
+// 工作项变更在待科室或待部门审核时均允许发起人终止。
+export const terminateSplitRequestApi = (requestId) => api.post(`/review/split-requests/${requestId}/terminate`)
 export const editSplitRequestApi = (requestId, body) => api.put(`/review/split-requests/${requestId}`, body)
 export const removeSplitItemApi = (requestId, body) => api.post(`/review/split-requests/${requestId}/remove-item`, body)
 
@@ -110,6 +116,7 @@ export const getLevelDefsApi = () => api.get('/admin/level-defs')
 export const putLevelDefsApi = (data) => api.put('/admin/level-defs', data)
 // 全局红点提示：待办数量汇总（菜单红点 = review + complete + transfers）
 export const getPendingSummaryApi = (userId) => api.get('/pending/summary', { params: { user_id: userId } })
+export const getWorkRemindersApi = () => api.get('/pending/work-reminders')
 
 //登录认证 拉取个人信息
 export const getUserProfileApi = (userId) => api.get(`/auth/profile/${encodeURIComponent(userId)}`)
@@ -126,6 +133,7 @@ export const getMyAnnouncementsApi = params => api.get('/announcements/mine', { 
 export const publishAnnouncementApi = id => api.post(`/announcements/${id}/publish`)
 // 撤回指定公告
 export const withdrawAnnouncementApi = announcementId => api.post(`/announcements/${announcementId}/withdraw`)
+export const deleteAnnouncementApi = announcementId => api.delete(`/announcements/${announcementId}`)
 
 export default api
 
@@ -154,6 +162,11 @@ export const getInformationApi = kind => api.get(`/admin/information/${kind}`)
 export const createInformationApi = (kind, data) => api.post(`/admin/information/${kind}`, data)
 export const updateInformationApi = (kind, id, data) => api.put(`/admin/information/${kind}/${id}`, data)
 export const deleteInformationApi = (kind, id) => api.delete(`/admin/information/${kind}/${id}`)
+export const getAdminWorkPackageTemplatesApi = categoryId => api.get('/work-package-templates/admin', { params: { category_id: categoryId } })
+export const createWorkPackageTemplateApi = data => api.post('/work-package-templates/admin', data)
+export const updateWorkPackageTemplateApi = (id, data) => api.put(`/work-package-templates/admin/${id}`, data)
+export const deleteWorkPackageTemplateApi = id => api.delete(`/work-package-templates/admin/${id}`)
+export const getWorkPackageTemplatesForPackageApi = packageId => api.get(`/work-package-templates/for-package/${packageId}`)
 
 export const getChartOptionsApi = (userId) => api.get('/analytics/options', { params: { user_id: userId }, timeout: 30000 })
 export const getCustomChartApi = (data) => api.post('/analytics/chart', data, { timeout: 30000 })
@@ -161,9 +174,11 @@ export const getCustomChartApi = (data) => api.post('/analytics/chart', data, { 
 // 新版看板同时返回工作项数量及配置分值。
 export const getDashboardOverviewApi = params => api.get('/dashboard/overview', { params })
 
-// 工作包变更申请：领导可查看全部申请，其他人员仅查看自己的申请。
+// 工作包变更申请：部门可查看全部申请，其他人员仅查看自己的申请。
 export const getWorkPackageChangesApi = () => api.get('/work-package-changes')
 export const reviewWorkPackageChangeApi = (id, data) => api.post(`/work-package-changes/${id}/review`, data)
+// 工作包变更终止后只保留申请记录，不执行原定的增删改。
+export const terminateWorkPackageChangeApi = (id) => api.post(`/work-package-changes/${id}/terminate`)
 
 export const getAssignmentsApi = params => api.get("/work-logs/assignments", { params })
 export const getAssignedPackagesApi = (id, params) => api.get(`/work-logs/assignments/${encodeURIComponent(id)}/packages`, { params })

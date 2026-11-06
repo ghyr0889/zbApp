@@ -3,6 +3,7 @@
   <div class="review-page">
     <el-card class="box-card" shadow="never">
       <el-tabs v-model="activeTab" class="custom-tabs">
+        
         <!-- 标签页：工作项变更 -->
         <el-tab-pane label="工作项变更" name="review">
          <template #label>
@@ -28,9 +29,10 @@
               class="status-filter"
             >
               <el-option label="待科室审核" value="PENDING" />
-              <el-option label="待领导审核" value="SUBMITTED" />
+              <el-option label="待部门审核" value="SUBMITTED" />
               <el-option label="已通过" value="APPROVED" />
               <el-option label="已驳回" value="REJECTED" />
+              <el-option label="已终止" value="TERMINATED" />
             </el-select>
           </div>
           <el-button class="refresh-button" type="primary" plain size="default" @click="handleRefresh">
@@ -187,6 +189,11 @@
                   </template>
                 </el-table-column>
                 <el-table-column prop="created_at" label="发起时间" width="160" align="center" />
+                <el-table-column label="操作" width="110" align="center" fixed="right">
+                  <template #default="{ row }">
+                    <el-button v-if="row.status === 'PENDING'" type="danger" link :disabled="terminatingTransferId === row.id" @click="handleTerminateTransfer(row)">终止流程</el-button>
+                  </template>
+                </el-table-column>
               </el-table>
             </div>
           </div>
@@ -195,7 +202,7 @@
 
     </el-card>
 
-    <el-dialog v-model="detailsVisible" title="工作项变更申请" width="min(1500px, 94vw)" draggable append-to-body
+    <el-dialog v-model="detailsVisible" title="工作项变更申请" width="min(1800px, 98vw)" draggable append-to-body
       class="item-change-dialog" :close-on-click-modal="false" :close-on-press-escape="!savingEdit && !removingItem && !submitting"
       :show-close="!savingEdit && !removingItem && !submitting" @closed="closeDetails">
       <template v-if="detailRow">
@@ -214,8 +221,8 @@
           </div>
           <p v-if="item.work_item_id" class="comparison-note">{{ item.before_source || '未取得修改前数据，请刷新申请列表' }}</p>
           <el-table :data="comparisonRows(item)" border class="item-comparison-table">
-            <el-table-column prop="label" label="内容" width="110" fixed="left" />
-            <el-table-column v-for="field in detailFields" :key="field.key" :label="field.label" :min-width="['standard', 'notes'].includes(field.key) ? 230 : field.type === 'person' ? 190 : 160">
+            <el-table-column prop="label" label="内容" width="80" fixed="left" />
+            <el-table-column v-for="field in detailFields" :key="field.key" :label="field.label" :min-width="field.width">
               <template #default="{ row: version }">
                 <div class="detail-field-value" :class="{ 'is-changed': version.kind === 'after' && isDetailChanged(item, field) }">
                   <span v-if="version.kind === 'after' && isDetailChanged(item, field)" class="detail-change-label">已修改</span>
@@ -249,6 +256,16 @@
             <el-button type="primary" :loading="savingEdit" :disabled="removingItem" @click="handleSaveEdit(detailRow)">保存修改</el-button>
           </template>
           <template v-else>
+            <!-- 只向发起人展示入口；后端仍会独立核验身份和申请状态。 -->
+            <el-button 
+              v-if="isApplicant(detailRow) && ['PENDING', 'SUBMITTED', 'REJECTED'].includes(detailRow.status)" 
+              type="danger" 
+              plain 
+              :loading="terminatingRequest" 
+              :disabled="submitting"
+               @click="handleTerminateRequest(detailRow)">
+               终止流程
+            </el-button>
             <el-button v-if="canEditRequest(detailRow)" type="warning" :disabled="submitting" @click="startEdit(detailRow)">修改</el-button>
             <template v-if="(detailRow.status === 'PENDING' && pendingIsEdit) || (detailRow.status === 'SUBMITTED' && submittedIsEdit)">
               <el-button type="danger" :disabled="submitting" @click="openRejectDialog(detailRow)">驳回</el-button>
@@ -287,13 +304,16 @@
 import WorkPackageChanges from '../../components/WorkPackageChanges.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { hasOwn } from '../../utils/object'
 import { useRoute } from 'vue-router'
 import { getIncomingTransfersApi, 
          getMyOutgoingTransfersApi,
          getSplitRequestsApi,
          removeSplitItemApi,
          processTransferApi, 
+         terminateTransferApi,
          reviewSplitRequestApi, 
+         terminateSplitRequestApi,
          editSplitRequestApi, 
          getLevelDefsApi, 
          getAllUsersApi 
@@ -324,6 +344,8 @@ const outgoingTransfers = ref([])
 const loadingIncoming = ref(false)
 const loadingOutgoing = ref(false)
 const submitting = ref(false)
+const terminatingRequest = ref(false)
+const terminatingTransferId = ref(null)
 const rejectDialogVisible = ref(false)
 const rejectComment = ref('')
 const currentRejectId = ref(null)
@@ -342,25 +364,25 @@ const isLeader = computed(() => role.value === 'LEADER')
 const isAdmin = computed(() => role.value === 'ADMIN')
 const canReview = computed(() => isLeader.value || isAdmin.value || isDepartment.value)
 
-// 当前用户可操作的申请状态：科室审 PENDING（同意/提交/驳回），领导/管理员审 SUBMITTED（通过/驳回）
+// 当前用户可操作的申请状态：科室审 PENDING（同意/提交/驳回），部门/管理员审 SUBMITTED（通过/驳回）
 const pendingIsEdit = computed(() => isDepartment.value)
 const submittedIsEdit = computed(() => isLeader.value || isAdmin.value)
 
-const statusLabel = (s) => ({ PENDING: '待科室审核', SUBMITTED: '待领导审核', APPROVED: '已通过', REJECTED: '已驳回' }[s] || s)
-const statusTagType = (s) => ({ PENDING: 'warning', SUBMITTED: 'primary', APPROVED: 'success', REJECTED: 'danger' }[s] || 'info')
+const statusLabel = (s) => ({ PENDING: '待科室审核', SUBMITTED: '待部门审核', APPROVED: '已通过', REJECTED: '已驳回', TERMINATED: '已终止' }[s] || s)
+const statusTagType = (s) => ({ PENDING: 'warning', SUBMITTED: 'primary', APPROVED: 'success', REJECTED: 'danger', TERMINATED: 'info' }[s] || 'info')
 
 // ============ 申请内容编辑（按角色×状态可改） ============
 const detailFields = [
-  { key: 'name', label: '工作项名称' },
-  { key: 'standard', label: '完成标准' },
-  { key: 'difficulty', label: '难度', type: 'level' },
-  { key: 'importance', label: '重要度', type: 'level' },
-  { key: 'innovation', label: '创新度', type: 'level' },
-  { key: 'tech_owner_id', label: '技术负责人（工号）', type: 'person' },
-  { key: 'owner_id', label: '负责人（工号）', type: 'person' },
-  { key: 'deadline', label: '截止时间' },
-  { key: 'score', label: '基础总分值' },
-  { key: 'notes', label: '备注' }
+  { key: 'name', label: '工作项名称', width: 145 },
+  { key: 'standard', label: '完成标准', width: 200 },
+  { key: 'difficulty', label: '难度', type: 'level', width: 65 },
+  { key: 'importance', label: '重要度', type: 'level', width: 70 },
+  { key: 'innovation', label: '创新度', type: 'level', width: 70 },
+  { key: 'tech_owner_id', label: '技术负责人（工号）', type: 'person', width: 135 },
+  { key: 'owner_id', label: '负责人（工号）', type: 'person', width: 125 },
+  { key: 'deadline', label: '截止时间', width: 115 },
+  { key: 'score', label: '基础总分值', width: 100 },
+  { key: 'notes', label: '备注', width: 160 }
 ]
 const comparisonRows = (item) => item.work_item_id
   ? [{ kind: 'before', label: '修改前' }, { kind: 'after', label: '申请内容' }]
@@ -372,7 +394,7 @@ const normalizeDetailValue = (value, key) => {
   return String(value)
 }
 const isDetailChanged = (item, field) => Boolean(item.work_item_id && item.before_data &&
-  Object.hasOwn(item.before_data, field.key) &&
+  hasOwn(item.before_data, field.key) &&
   normalizeDetailValue(item.before_data[field.key], field.key) !== normalizeDetailValue(item[field.key], field.key))
 const detailValue = (item, field) => {
   const value = item?.[field.key]
@@ -409,7 +431,24 @@ const levelDefs = ref({ difficulty: [], importance: [], innovation: [] })
 // 是否为申请人本人
 const isApplicant = (row) => String(row.applicant_id || '') === String(currentUser.value.id || '')
 
-// 当前用户能否编辑该申请：员工改被驳回的；领导/管理员改 SUBMITTED；科室改 PENDING
+const handleTerminateRequest = async (row) => {
+  // 终止是不可恢复的状态变更，先确认，再刷新申请列表与待办角标。
+  if (terminatingRequest.value || submitting.value) return
+  try {
+    await ElMessageBox.confirm('终止后该申请不再进入审批，且不能恢复。确定终止吗？', '终止流程', {
+      confirmButtonText: '确定终止', cancelButtonText: '取消', type: 'warning'
+    })
+    terminatingRequest.value = true
+    await terminateSplitRequestApi(row.id)
+    detailsVisible.value = false
+    ElMessage.success('流程已终止')
+    await fetchRequests()
+  } catch (err) {
+    if (err !== 'cancel' && err !== 'close') ElMessage.error(err.response?.data?.detail || '终止失败')
+  } finally { terminatingRequest.value = false }
+}
+
+// 当前用户能否编辑该申请：员工改被驳回的；部门/管理员改 SUBMITTED；科室改 PENDING
 const canEditRequest = (row) => {
   if (row.status === 'REJECTED' && isApplicant(row)) return true
   if (row.status === 'SUBMITTED' && (isLeader.value || isAdmin.value)) return true
@@ -549,7 +588,7 @@ const filteredRequests = computed(() => {
 
 const handleSubmit = (row) => {
   if (submitting.value) return
-  ElMessageBox.confirm('确认将该申请提交给领导审核？提交后由上级最终审批。', '提交审核', {
+  ElMessageBox.confirm('确认将该申请提交给部门审核？提交后由上级最终审批。', '提交审核', {
     confirmButtonText: '确认提交',
     cancelButtonText: '取消',
     type: 'warning'
@@ -659,7 +698,7 @@ const canRemoveItem = (row, itemRow) => {
   if (isDepartment.value && row.status === 'PENDING') {
     return true
   }
-  // 领导/管理员：只能改 SUBMITTED 状态
+  // 部门/管理员：只能改 SUBMITTED 状态
   if ((isLeader.value) && row.status === 'SUBMITTED') {
     return true
   }
@@ -724,8 +763,24 @@ const handleRemoveItem = async (row, itemRow, index) => {
 
 // ============ 工作包转办 ============
 const transferTypeLabel = (t) => (t === 'work_package' ? '工作包' : '工作项')
-const transferStatusLabel = (s) => ({ PENDING: '待接收', ACCEPTED: '已被接受', REJECTED: '已被拒绝' }[s] || s)
-const transferStatusTagType = (s) => ({ PENDING: 'warning', ACCEPTED: 'success', REJECTED: 'danger' }[s] || 'info')
+const transferStatusLabel = (s) => ({ PENDING: '待接收', ACCEPTED: '已被接受', REJECTED: '已被拒绝', TERMINATED: '已终止' }[s] || s)
+const transferStatusTagType = (s) => ({ PENDING: 'warning', ACCEPTED: 'success', REJECTED: 'danger', TERMINATED: 'info' }[s] || 'info')
+
+const handleTerminateTransfer = async (row) => {
+  // 转办终止后刷新本页的发起/收到列表；接收方下次查询时也不会再看到该待办。
+  if (terminatingTransferId.value !== null) return
+  try {
+    await ElMessageBox.confirm('终止后对方将无法接收该转办。确定终止吗？', '终止流程', {
+      confirmButtonText: '确定终止', cancelButtonText: '取消', type: 'warning'
+    })
+    terminatingTransferId.value = row.id
+    await terminateTransferApi(row.id)
+    ElMessage.success('流程已终止')
+    await Promise.all([fetchOutgoingTransfers(), fetchIncomingTransfers()])
+  } catch (err) {
+    if (err !== 'cancel' && err !== 'close') ElMessage.error(err.response?.data?.detail || '终止失败')
+  } finally { terminatingTransferId.value = null }
+}
 
 const fetchIncomingTransfers = async () => {
   loadingIncoming.value = true

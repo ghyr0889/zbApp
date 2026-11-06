@@ -1,18 +1,50 @@
 // Event delegation also covers tables mounted later and dialogs teleported to body.
 export function installTableContentPreview() {
+  const cellSelector = '.el-table td.el-table__cell > .cell'
+  const interactiveSelector = 'button, input, textarea, select, [role="button"], .el-table, .el-table__expand-icon, .el-checkbox, .el-radio, .el-select, .el-input, .el-input-number, .el-progress, .el-dropdown, .el-table__column-filter-trigger, .caret-wrapper'
+  const pendingCells = new Set()
+  let updateFrame = null
+  // 用 DOM 检查代替 :has()，兼容不支持该选择器的浏览器。
+  function queueCell(cell) {
+    if (cell && cell.matches(cellSelector)) pendingCells.add(cell)
+  }
+  function scheduleCellUpdate() {
+    if (updateFrame !== null || !pendingCells.size) return
+    updateFrame = requestAnimationFrame(() => {
+      updateFrame = null
+      pendingCells.forEach(cell => cell.classList.toggle('table-text-cell', !cell.querySelector(interactiveSelector)))
+      pendingCells.clear()
+    })
+  }
+  document.querySelectorAll(cellSelector).forEach(queueCell)
+  scheduleCellUpdate()
+  const observer = new MutationObserver(records => {
+    for (const record of records) {
+      const target = record.target.nodeType === 1 ? record.target : record.target.parentElement
+      if (target && target.closest) queueCell(target.closest(cellSelector))
+      record.addedNodes.forEach(node => {
+        if (node.nodeType !== 1) return
+        queueCell(node)
+        node.querySelectorAll(cellSelector).forEach(queueCell)
+      })
+    }
+    scheduleCellUpdate()
+  })
+  observer.observe(document.body, { childList: true, subtree: true })
   const tooltip = document.createElement('div')
   tooltip.className = 'table-full-content'
   tooltip.id = 'table-full-content-preview'
   tooltip.setAttribute('role', 'tooltip')
-  tooltip.setAttribute('popover', 'manual')
+  const supportsPopover = typeof tooltip.showPopover === 'function' && typeof tooltip.hidePopover === 'function'
+  if (supportsPopover) tooltip.setAttribute('popover', 'manual')
   tooltip.hidden = true
   document.body.appendChild(tooltip)
-  let active = null, timer
+  let active = null, timer, popoverShown = false
   function hide() {
     clearTimeout(timer)
     if (active?.getAttribute('aria-describedby') === tooltip.id) active.removeAttribute('aria-describedby')
     active = null
-    if (tooltip.matches(':popover-open')) tooltip.hidePopover()
+    if (supportsPopover && popoverShown) { tooltip.hidePopover(); popoverShown = false }
     tooltip.hidden = true
   }
   function scheduleHide() { clearTimeout(timer); timer = setTimeout(hide, 180) }
@@ -26,7 +58,7 @@ export function installTableContentPreview() {
     active = cell
     tooltip.textContent = text
     tooltip.hidden = false
-    if (tooltip.showPopover) tooltip.showPopover()
+    if (supportsPopover) { tooltip.showPopover(); popoverShown = true }
     if (!cell.hasAttribute('aria-describedby')) cell.setAttribute('aria-describedby', tooltip.id)
     const rect = cell.getBoundingClientRect()
     const width = tooltip.offsetWidth, height = tooltip.offsetHeight
@@ -53,6 +85,9 @@ export function installTableContentPreview() {
   document.addEventListener('scroll', scroll, true)
   window.addEventListener('resize', hide)
   return () => {
+    observer.disconnect()
+    if (updateFrame !== null) cancelAnimationFrame(updateFrame)
+    pendingCells.clear()
     hide(); tooltip.remove()
     document.removeEventListener('pointerover', over)
     document.removeEventListener('pointerout', out)

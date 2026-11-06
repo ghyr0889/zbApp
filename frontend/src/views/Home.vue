@@ -71,7 +71,7 @@ import { getAnnouncementsApi, getAnnouncementDetailApi } from '../api'
 
 const userStore = useUserStore()
 const user = computed(() => userStore.userInfo || {})
-const roleName = computed(() => ({ ADMIN: '管理员', LEADER: '领导', DEPARTMENT: '科室主任', EMPLOYEE: '普通员工' }[userStore.role] || '—'))
+const roleName = computed(() => ({ ADMIN: '管理员', LEADER: '部门', DEPARTMENT: '科室主任', EMPLOYEE: '普通员工' }[userStore.role] || '—'))
 const items = ref([])
 const loading = ref(false)
 const listError = ref('')

@@ -1,4 +1,4 @@
-﻿<!-- xiangmu/frontend/src/views/PersonnelManagement.vue -->
+<!-- xiangmu/frontend/src/views/PersonnelManagement.vue -->
 <template>
   <div class="personnel-management-container">
         
@@ -21,7 +21,7 @@
                   <el-select v-model="userForm.role" style="width: 100%">
                     <el-option label="普通员工 (EMPLOYEE)" value="EMPLOYEE" />
                     <el-option label="科室主任 (DEPARTMENT)" value="DEPARTMENT" />
-                    <el-option label="领导（部门主管、项目负责人） (LEADER)" value="LEADER" />
+                    <el-option label="部门 (LEADER)" value="LEADER" />
                     <el-option label="系统管理员 (ADMIN)" value="ADMIN" />
                   </el-select>
                 </el-form-item>
@@ -150,7 +150,7 @@ const currentUser = ref(JSON.parse(localStorage.getItem('user_info') || '{}'))
 const roleOptions = [
   { label: '普通员工', value: 'EMPLOYEE' },
   { label: '科室主任', value: 'DEPARTMENT' },
-  { label: '领导', value: 'LEADER' },
+  { label: '部门', value: 'LEADER' },
   { label: '系统管理员', value: 'ADMIN' }
 ]
 const savingEdit = ref(false)

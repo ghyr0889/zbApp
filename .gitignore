@@ -7,8 +7,12 @@ workstat-backend/
 部署文件/
 *.sql
 !backend/migrations/work_package_changes_nullable.sql
+!backend/migrations/work_package_templates.sql
+!backend/migrations/add_template_item_deadline.sql
+!backend/migrations/monthly_score_settlements.sql
 docs/
 .venv/
 venv/
 /backend/build/
 /backend/dist/
+/backend/migrations/

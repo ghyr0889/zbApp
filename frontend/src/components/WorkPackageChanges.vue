@@ -66,6 +66,15 @@
       <template #footer>
         <div class="detail-footer">
         <el-button :disabled="saving" @click="visible = false">关闭</el-button>
+        <!-- 申请人终止入口与部门审核入口分别判断，避免查看权限被误用为操作权限。 -->
+        <el-button 
+          v-if="selected && ['PENDING', 'REJECTED'].includes(selected.status) && String(selected.applicant_id) === String(store.userInfo?.id)" 
+          type="danger" 
+          plain 
+          :loading="saving" 
+          @click="terminate">
+          终止流程
+        </el-button>
         <template v-if="isLeader && selected?.status === 'PENDING'">
           <el-button type="danger" :disabled="saving" @click="decide('REJECT')">驳回</el-button>
           <el-button type="primary" :loading="saving" @click="decide('APPROVE')">通过</el-button>
@@ -79,13 +88,14 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getWorkPackageChangesApi, reviewWorkPackageChangeApi } from '../api'
+import { hasOwn } from '../utils/object'
+import { getWorkPackageChangesApi, reviewWorkPackageChangeApi, terminateWorkPackageChangeApi } from '../api'
 import { useUserStore } from '../stores/user'
 const store = useUserStore()
 const isLeader = computed(() => String(store.userInfo?.role).toUpperCase() === 'LEADER')
 const rows = ref([]), loading = ref(false), saving = ref(false), visible = ref(false)
 const selected = ref(null), comment = ref(''), status = ref('')
-const statuses = { PENDING: '待领导审核', APPROVED: '已通过', REJECTED: '已驳回' }
+const statuses = { PENDING: '待部门审核', APPROVED: '已通过', REJECTED: '已驳回', TERMINATED: '已终止' }
 const actions = { create: '新增', update: '修改', delete: '删除' }
 const fields = { 
   code: '工作包编号', 
@@ -96,7 +106,7 @@ const fields = {
   owner_id: '负责人（工号）',
   objective: '工作目标' }
 const filtered = computed(() => rows.value.filter(row => !status.value || row.status === status.value))
-// 对比内容只读，领导不能在审核时改写申请方案。
+// 对比内容只读，部门不能在审核时改写申请方案。
 const comparison = computed(() => {
   const entry = selected.value
   if (!entry) return []
@@ -114,7 +124,7 @@ const displayValue = (data, key) => {
 const isChanged = (key) => {
   const entry = selected.value
   if (entry?.action !== 'update' || !entry.before_data || !entry.after_data) return false
-  if (!Object.hasOwn(entry.before_data, key)) return false
+  if (!hasOwn(entry.before_data, key)) return false
   return String(entry.before_data[key] ?? '') !== String(entry.after_data[key] ?? '')
 }
 async function fetchRows() {
@@ -136,6 +146,22 @@ async function decide(decision) {
     await Promise.all([fetchRows(), store.refreshPendingCount()])
   } catch (error) {
     if (error !== 'cancel' && error !== 'close') ElMessage.error(error.response?.data?.detail || '审核失败')
+  } finally { saving.value = false }
+}
+async function terminate() {
+  // 后端提交终止状态后重新拉取列表，使部门端的待审状态及时消失。
+  if (saving.value) return
+  try {
+    await ElMessageBox.confirm('终止后该工作包变更不会生效，且不能恢复。确定终止吗？', '终止流程', {
+      confirmButtonText: '确定终止', cancelButtonText: '取消', type: 'warning'
+    })
+    saving.value = true
+    await terminateWorkPackageChangeApi(selected.value.id)
+    visible.value = false
+    ElMessage.success('流程已终止')
+    await Promise.all([fetchRows(), store.refreshPendingCount()])
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') ElMessage.error(error.response?.data?.detail || '终止失败')
   } finally { saving.value = false }
 }
 onMounted(fetchRows)

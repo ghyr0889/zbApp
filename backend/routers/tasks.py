@@ -5,10 +5,19 @@ from sqlalchemy import func
 
 import models
 from database import get_db
+from dependencies import get_current_user
 from schemas import TransferCreate
+from services.approval_termination_service import terminate_request
 from utils import ensure_open
 
 router = APIRouter(prefix="/api/v1/transfers", tags=["Task Transfers"])
+
+
+@router.post("/{transfer_id}/terminate")
+def terminate_transfer(transfer_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """转办流程终止。"""
+    return terminate_request(db, models.TaskTransfer, transfer_id, user.id,
+                             models.TaskTransfer.from_user_id, ("PENDING",))
 
 
 def user_label(user):
@@ -73,7 +82,7 @@ def initiate_transfer(payload: TransferCreate, db: Session = Depends(get_db)):
         if not pkg:
             raise HTTPException(status_code=404, detail="工作包不存在")
         if from_user.role not in ["LEADER", "DEPARTMENT", "ADMIN"] and  pkg.owner_id != payload.from_user_id:
-            raise HTTPException(status_code=403, detail="只有管理员、科室、领导和该工作包负责人可以转包")
+            raise HTTPException(status_code=403, detail="只有管理员、科室、部门和该工作包负责人可以转包")
         ensure_open(pkg, pkg.project)  # 已关闭的工作包/项目不能再转办
 
         duplicate = db.query(models.TaskTransfer).filter(
@@ -98,7 +107,7 @@ def initiate_transfer(payload: TransferCreate, db: Session = Depends(get_db)):
         if not item:
             raise HTTPException(status_code=404, detail="工作项不存在")
         if from_user.role not in ["LEADER", "DEPARTMENT", "ADMIN"] and item.owner_id != payload.from_user_id:
-            raise HTTPException(status_code=403, detail="只有管理员、科室、领导和该工作项负责人可以转包")
+            raise HTTPException(status_code=403, detail="只有管理员、科室、部门和该工作项负责人可以转包")
         ensure_open(item, item.work_package,
                     item.work_package.project if item.work_package else None)  # 已关闭不能再转办
 

@@ -63,7 +63,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="200">
+        <el-table-column label="操作" width="230">
           <template #default="{ row }">
             <el-button link type="primary" @click="openDetail(row.id)" >
               查看
@@ -90,6 +90,14 @@
               >
                 撤回
               </el-button>
+              <el-button
+                v-if="row.status === 'DRAFT' || row.status === 'WITHDRAWN'"
+                link
+                type="danger"
+                :disabled="actionId !== null"
+                :loading="actionId === row.id"
+                @click="deleteAnnouncement(row)"
+              >删除</el-button>
             </template>
           </template>
         </el-table-column>
@@ -236,6 +244,7 @@ import {
   createAnnouncementApi,
   publishAnnouncementApi,
   withdrawAnnouncementApi,
+  deleteAnnouncementApi,
 } from '../../api'
 
 const userStore = useUserStore()
@@ -249,7 +258,7 @@ const canPublish = computed(() =>
 const roleOptions = [
   { label: '员工', value: 'EMPLOYEE' },
   { label: '科室主任', value: 'DEPARTMENT' },
-  { label: '领导', value: 'LEADER' },
+  { label: '部门', value: 'LEADER' },
   { label: '管理员', value: 'ADMIN' },
 ]
 
@@ -465,6 +474,30 @@ async function changeStatus(row, action) {
     await fetchList()
   } catch (error) {
     showError(error, isPublish ? '发布失败' : '撤回失败')
+  } finally {
+    actionId.value = null
+  }
+}
+
+async function deleteAnnouncement(row) {
+  if (actionId.value !== null || activeTab.value !== 'mine') return
+  try {
+    await ElMessageBox.confirm(
+      `确定删除公告“${row.title}”吗？删除后无法恢复。`,
+      '确认删除',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch { return }
+
+  actionId.value = row.id
+  try {
+    await deleteAnnouncementApi(row.id)
+    if (detail.value?.id === row.id) detailVisible.value = false
+    if (items.value.length === 1 && page.value > 1) page.value--
+    ElMessage.success('公告已删除')
+    await fetchList()
+  } catch (error) {
+    showError(error, '删除公告失败')
   } finally {
     actionId.value = null
   }

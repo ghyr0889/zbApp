@@ -111,7 +111,7 @@ def report(date_from: date, date_to: date,
            work_package_id: Optional[int] = None, work_item_id: Optional[int] = None,
            db: Session = Depends(get_db), user=Depends(get_current_user)):
     if user.role not in ("ADMIN", "LEADER"):
-        raise HTTPException(403, "仅领导和管理员可以查看工时汇总")
+        raise HTTPException(403, "仅部门和管理员可以查看工时汇总")
     if (date_to - date_from).days > 366:
         raise HTTPException(400, "单次汇总请限制在367天以内")
     start, end = service.date_bounds(date_from, date_to)
@@ -154,8 +154,6 @@ def report(date_from: date, date_to: date,
 # 一个工作项的累计工时
 def item_summary(item_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
     item = db.query(models.WorkItem).filter_by(id=item_id).first()
-    if not item or (user.role not in ("ADMIN", "LEADER") and item.owner_id != user.id and item.tech_owner_id != user.id):
-        raise HTTPException(404, "工作项不存在或无权查看")
     now = service.utcnow()
     rows = filtered_query(db, work_item_id=item_id).all()
     return {"code": 200, "data": {"total_seconds": sum(service.session_view(r, now)["elapsed_seconds"] for r in rows),

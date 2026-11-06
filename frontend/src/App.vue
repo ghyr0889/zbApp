@@ -1,6 +1,7 @@
 <template>
   <div id="app">
     <ScoreConfirmation v-if="userInfo && $route.path !== '/login'" />
+    <WorkReminders v-if="userInfo && $route.path !== '/login'" />
     <a class="skip-link" href="#main-content">跳过导航，进入内容</a>
     <!-- 右侧：永远常显的个人信息与下拉退出 -->
     <header class="right-profile" v-if="$route.path !== '/login' && userInfo">
@@ -55,6 +56,7 @@
 
 <script setup>
 import ScoreConfirmation from './components/ScoreConfirmation.vue'
+import WorkReminders from './components/WorkReminders.vue'
 // 公共布局保留原有待办提醒和全局工时同步。
 import { ElMessage, ElNotification } from 'element-plus'
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
@@ -246,7 +248,7 @@ const roleDisplayName = computed(() => {
   if (!userInfo.value) return ''
   const role = String(userInfo.value.role).toUpperCase()
   if (role === 'ADMIN') return '管理员'
-  if (role === 'LEADER') return '领导（部门主管、项目负责人）'
+  if (role === 'LEADER') return '部门'
   if (role === 'DEPARTMENT') return '科室'
   return '普通员工'
 })

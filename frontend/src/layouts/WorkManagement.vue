@@ -42,7 +42,7 @@
           <el-icon aria-hidden="true"><Clock /></el-icon>
           <span>工时记录</span>
         </el-menu-item>
-        <!-- 数据看板只对领导/管理员开放（内部两个看板都是这个口径） -->
+        <!-- 数据看板只对部门/管理员开放（内部两个看板都是这个口径） -->
         <el-menu-item index="/data-board" v-if="isLEADER || isAdmin">
           <el-icon aria-hidden="true"><DataAnalysis /></el-icon>
           <span>数据看板</span>

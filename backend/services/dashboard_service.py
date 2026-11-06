@@ -124,7 +124,7 @@ def summarize(items, dimension):
 def overview(db, user, period, year, month, quarter, dimension, year_granularity):
     role = getattr(user.role, "value", user.role)
     if str(role).upper() not in ("ADMIN", "LEADER"):
-        raise HTTPException(status_code=403, detail="数据看板仅对领导和管理员开放")
+        raise HTTPException(status_code=403, detail="数据看板仅对部门和管理员开放")
     if period == "month" and dimension == "time":
         raise HTTPException(status_code=422, detail="月度查询不支持时间维度，请选择科室、人员或项目")
     start, end = period_bounds(period, year, month, quarter)

@@ -1,15 +1,16 @@
 """业务层：负责权限规则、状态流转、结果组装和事务；数据查询交给 repository。"""
 from repositories import work_logs_repository as repo
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 import models
 import json
 from schemas import ConfirmCompletionIn, ConfirmClosed
 from utils import project_effective_complete, package_effective_complete, deadline_str, effective_complete, calc_progress, ensure_open
-from services.score_board_service import compute_calc_score, compute_deducted, monthly_quality_score
+from services.score_board_service import compute_calc_score, compute_deducted, monthly_quality_score, close_records_by_item
 
 
 
@@ -67,7 +68,7 @@ def _public_package_view(pkg, db):
         "name": pkg.name or "-",
         "is_decomposed": is_decomposed,
         "decomposition_status": "已分解" if is_decomposed else "未分解",
-        # 生效完成状态（由调用方追加）：手动确认 或 其下全部工作项已完成
+        # 工作包完成状态只由手动确认决定，由调用方追加。
         "manual_complete_status": bool(pkg.complete_status),
         "closed_status": bool(pkg.isclosed),
         "project_closed": bool(project.isclosed if project else False)
@@ -189,13 +190,15 @@ def get_paged_project_work_packages(project_id: int,
 def get_my_work_packages_paged(user_id: str,
                               page: int = 1,
                               page_size: int = 20,
-                              db: Session = None, show_completed: bool = True, show_related: bool = False):
+                              db: Session = None, show_completed: bool = True, show_related: bool = False,
+                              show_closed: bool = True):
     """我的工作：本人负责的工作包或本人工作项所属工作包（分页 + 进度统计）。"""
     page = max(int(page or 1), 1)
     page_size = min(max(int(page_size or 20), 1), 100)
 
     # 工作包可因本人负责而显示；工作项数量与进度仍只统计本人负责的工作项。
-    total, pkgs = repo.list_my_packages_page(db, user_id, page, page_size, show_completed=show_completed, show_related=show_related)
+    total, pkgs = repo.list_my_packages_page(db, user_id, page, page_size, show_completed=show_completed,
+                                             show_related=show_related, show_closed=show_closed)
 
     items = []
     for pkg in pkgs:
@@ -258,14 +261,16 @@ def _work_item_view(item, pending_review_id=None):
 
 
 
-def get_work_items(work_package_id: str, month: str = None, db: Session = None, owner_id: str = None, show_completed: bool = True, show_related: bool = False):
+def get_work_items(work_package_id: str, month: str = None, db: Session = None, owner_id: str = None,
+                   show_completed: bool = True, show_related: bool = False, show_closed: bool = True):
     """查询某个工作包下的全部工作项（含指定月份的分值，默认当月，供工作项页面使用）。"""
     pkg = repo.get_package(db, work_package_id)
     if not pkg:
         raise HTTPException(status_code=404, detail="工作包不存在")
 
     # 预加载月度分值与负责人：_work_item_view 的进度/提交条件需要
-    items = repo.list_package_items(db, work_package_id, owner_id=owner_id, show_completed=show_completed, show_related=show_related)
+    items = repo.list_package_items(db, work_package_id, owner_id=owner_id, show_completed=show_completed,
+                                    show_related=show_related, show_closed=show_closed)
     project = pkg.project
     owner_job_grade = pkg.owner.job_grade if pkg.owner else ""
 
@@ -301,7 +306,8 @@ def get_work_items(work_package_id: str, month: str = None, db: Session = None, 
             pending_reviews[r.work_item_id] = r.id
 
     # 汇总当前查询范围内工作项的进度扣分，个人视图仅包括本人负责项。
-    deducted = sum(compute_deducted(it) for it in items)
+    close_map = close_records_by_item(db, items)
+    deducted = sum(compute_deducted(it, close_records=close_map.get(it.id)) for it in items)
 
     return {
         "code": 200,
@@ -332,7 +338,7 @@ def get_work_items(work_package_id: str, month: str = None, db: Session = None, 
                     "calc_score": calc_scores.get(it.id) if calc_scores.get(it.id) is not None else compute_calc_score(month_scores.get(it.id, 0.0), it, db, owner_job_grade, monthly_quality_score(db, it.id, cur_month)),
                     "progress": calc_progress(acc_sum.get(it.id, 0.0), it.score or 0.0),
                     "remaining_score": remaining_scores.get(it.id, 0.0),
-                    "deducted_score": compute_deducted(it),
+                    "deducted_score": compute_deducted(it, close_records=close_map.get(it.id)),
                     "month": cur_month,
                 }
                 for it in items
@@ -385,7 +391,7 @@ def confirm_completion(data: ConfirmCompletionIn, db: Session = None):
 
     - 工作项：改为“提交完成申请 / 撤回申请”，由技术负责人在 complete_review 里审核，
       审核通过后才置 complete_status 并写 completed_at。
-    - 工作包 / 项目：仍是负责人（或领导/管理员）直接手动确认。
+    - 工作包 / 项目：仍是负责人（或部门/管理员）直接手动确认。
     """
     operator = repo.get_user(db, data.user_id)
     if not operator:
@@ -421,7 +427,7 @@ def confirm_completion(data: ConfirmCompletionIn, db: Session = None):
     can_cancel_project = (data.target_type == "project" and not data.confirmed
                           and role in ("DEPARTMENT", "LEADER", "ADMIN"))
     if not can_cancel_project and role not in ("LEADER", "ADMIN") and str(owner_id or "") != str(operator.id):
-        raise HTTPException(status_code=403, detail="只有负责人、领导和管理员可以确认完成")
+        raise HTTPException(status_code=403, detail="只有负责人、部门和管理员可以确认完成")
 
     # 关闭后不能再确认/取消完成（自身或其父级任一关闭都锁定）
     chain = [target]
@@ -498,9 +504,9 @@ def confirm_completion(data: ConfirmCompletionIn, db: Session = None):
         },
     }
 
-# ---------------------------------------------------------------- 确认关闭（只有领导和管理员有权限）
+# ---------------------------------------------------------------- 确认关闭（只有部门和管理员有权限）
 def confirm_closed(data: ConfirmClosed, db: Session = None):
-    """确认关闭：或领导/管理员可操作。"""
+    """确认关闭：或部门/管理员可操作。"""
     operator = repo.get_user(db, data.user_id)
     if not operator:
         raise HTTPException(status_code=404, detail="操作人不存在")
@@ -526,14 +532,37 @@ def confirm_closed(data: ConfirmClosed, db: Session = None):
     confirmed = bool(data.confirmed)
     if confirmed:
         if role not in ("LEADER", "ADMIN"):
-            raise HTTPException(status_code=403, detail="只有领导或管理员可以确认关闭")
+            raise HTTPException(status_code=403, detail="只有部门或管理员可以确认关闭")
     elif data.target_type == "project":
         if role not in ("DEPARTMENT", "LEADER", "ADMIN"):
-            raise HTTPException(status_code=403, detail="只有科室、领导或管理员可以取消项目关闭")
+            raise HTTPException(status_code=403, detail="只有科室、部门或管理员可以取消项目关闭")
     elif role != "ADMIN":
         raise HTTPException(status_code=403, detail="只有管理员可以取消关闭")
 
-    target.isclosed = confirmed
+    # 锁定目标行，防止并发关闭或开启。
+    target = db.query(type(target)).filter(type(target).id == target.id).with_for_update().populate_existing().one()
+
+    # 仅在状态变化时记录关闭区间，并在同一事务中提交。
+    if not target.isclosed and confirmed: # 关闭
+        record = models.CloseRecord(
+            target_type=data.target_type,
+            target_id=target.id,
+            closed_at=datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None),
+            operator_id=operator.id,
+        )
+        db.add(record)
+        target.closed_at = record.closed_at
+        target.isclosed = True
+    elif target.isclosed and not confirmed: # 重新开启
+        record = (db.query(models.CloseRecord).filter(
+            models.CloseRecord.target_type == data.target_type,
+            models.CloseRecord.target_id == target.id,
+            models.CloseRecord.reopened_at.is_(None),
+        ).order_by(models.CloseRecord.closed_at.desc()).first())
+        if record:
+            record.reopened_at = datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)
+        target.closed_at = None
+        target.isclosed = False
 
     db.commit()
     return {

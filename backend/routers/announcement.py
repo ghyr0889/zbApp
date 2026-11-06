@@ -84,6 +84,19 @@ def withdraw_announcement(
     )
 
 
+@router.delete("/{announcement_id}")
+def delete_announcement(
+    announcement_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return announcement_service.delete_announcement(
+        db=db,
+        announcement_id=announcement_id,
+        current_user=current_user,
+    )
+
+
 # 查询自己创建的草稿、已发布和已撤回公告
 @router.get("/{announcement_id}")
 def get_announcement_detail(

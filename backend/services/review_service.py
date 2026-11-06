@@ -168,7 +168,7 @@ def create_split_request(req: SplitRequestCreate, db: Session = None):
     if not req.split_items or not any((it.name or "").strip() for it in req.split_items):
         raise HTTPException(status_code=400, detail="请至少填写一个拆分出的工作项")
 
-    # 权限：普通员工只能拆自己负责的工作包；领导/管理员可代拆
+    # 权限：普通员工只能拆自己负责的工作包；部门/管理员可代拆
     role = str(applicant.role).upper()
     for it in req.split_items:
         if not it.work_item_id:
@@ -201,13 +201,13 @@ def create_split_request(req: SplitRequestCreate, db: Session = None):
     repo.add(db, new_req)
     db.commit()
     db.refresh(new_req)
-    return {"code": 200, "message": "拆分申请已提交，等待领导审核", "data": {"id": new_req.id}}
+    return {"code": 200, "message": "拆分申请已提交，等待部门审核", "data": {"id": new_req.id}}
 
 
 def get_split_requests(user_id: str, db: Session = None):
     """查询拆分申请。
     - 普通员工：只看自己的申请
-    - 科室主任 / 领导 / 管理员：查看全部申请（各自审核对应状态的申请）
+    - 科室主任 / 部门 / 管理员：查看全部申请（各自审核对应状态的申请）
     """
     viewer = repo.get_user(db, user_id)
     if not viewer:
@@ -225,8 +225,8 @@ def get_split_requests(user_id: str, db: Session = None):
 
 def review_split_request(request_id: int, body: SplitRequestReview, db: Session = None):
     """两级审核：
-    - 科室主任 DEPARTMENT 审核 PENDING：同意(APPROVE)→直接生效 / 驳回(REJECT) / 提交(SUBMIT)→转领导
-    - 领导 LEADER/ADMIN 审核 SUBMITTED：通过(APPROVE)→生效 / 驳回(REJECT)
+    - 科室主任 DEPARTMENT 审核 PENDING：同意(APPROVE)→直接生效 / 驳回(REJECT) / 提交(SUBMIT)→转部门
+    - 部门 LEADER/ADMIN 审核 SUBMITTED：通过(APPROVE)→生效 / 驳回(REJECT)
     """
     req = repo.get_split_request(db, request_id)
     if not req:
@@ -247,19 +247,19 @@ def review_split_request(request_id: int, body: SplitRequestReview, db: Session 
         if req.status != "PENDING":
             raise HTTPException(status_code=400, detail="该申请当前不在科室主任待审状态，不能重复处理")
     elif reviewer_role in ["LEADER", "ADMIN"]:
-        # 领导/管理员：只审科室主任提交上来的申请，可通过或驳回，不能再提交
+        # 部门/管理员：只审科室主任提交上来的申请，可通过或驳回，不能再提交
         if req.status != "SUBMITTED":
-            raise HTTPException(status_code=400, detail="只有科室主任提交(SUBMITTED)的申请才由领导审核")
+            raise HTTPException(status_code=400, detail="只有科室主任提交(SUBMITTED)的申请才由部门审核")
         if action == "SUBMIT":
-            raise HTTPException(status_code=400, detail="领导审核时不能再次提交")
+            raise HTTPException(status_code=400, detail="部门审核时不能再次提交")
     else:
         raise HTTPException(status_code=403, detail="当前角色没有审核权限")
 
     try:
         if action == "SUBMIT":
-            # 科室主任提交 → 转给领导
+            # 科室主任提交 → 转给部门
             req.status = "SUBMITTED"
-            req.review_comment = (body.comment or "").strip() or "科室主任已提交，等待领导审核"
+            req.review_comment = (body.comment or "").strip() or "科室主任已提交，等待部门审核"
         elif action == "REJECT":
             comment = (body.comment or "").strip()
             if not comment:
@@ -323,7 +323,7 @@ def review_split_request(request_id: int, body: SplitRequestReview, db: Session 
     message = {
         "APPROVE": "申请已通过并生成工作项",
         "REJECT": "申请已驳回",
-        "SUBMIT": "已提交，等待领导审核",
+        "SUBMIT": "已提交，等待部门审核",
     }.get(action, "操作成功")
     return {"code": 200, "message": message, "data": {"id": req.id, "status": req.status}}
 
@@ -379,7 +379,7 @@ def edit_split_request(request_id: int, body: SplitRequestEdit, db:Session = Non
 
     elif old_status == "SUBMITTED":
         if editor_role not in ("LEADER", "ADMIN"):
-            raise HTTPException(status_code=403, detail="待领导审核的申请只能由领导修改")
+            raise HTTPException(status_code=403, detail="待部门审核的申请只能由部门修改")
         new_status = "SUBMITTED"
         message = "内容已更新，可继续审核"
         reset_review = False
@@ -430,9 +430,9 @@ def remove_item_from_split_request(request_id: int, body: RemoveSplitItem, db: S
         if req.status != "PENDING":
             raise HTTPException(status_code=400, detail="当前状态不允许修改")
     elif editor_role in ["LEADER"]:
-        # 领导只能改提交到领导这级的申请
+        # 部门只能改提交到部门这级的申请
         if req.status != "SUBMITTED":
-            raise HTTPException(status_code=400, detail="只有提交到领导审核的申请才能修改")
+            raise HTTPException(status_code=400, detail="只有提交到部门审核的申请才能修改")
     else:
         raise HTTPException(status_code=403, detail="当前角色没有编辑权限")
 
